@@ -360,6 +360,7 @@ def settle_positions(connect,postgres):
                 payout=quantity*100 if direction==winner else 0
                 run(cur,postgres,"UPDATE paper_positions SET status='SETTLED',winner=?,payout_cents=?,pnl_cents=?,settled_at=?,mark_cents=?,mark_epoch=? WHERE id=? AND status='OPEN'",(winner,payout,payout-cost,stamp(),payout,time.time(),ident))
                 if cur.rowcount:
+                    learning.finalize_position(cur,postgres,run,ident,payout,'SETTLEMENT_FALLBACK')
                     run(cur,postgres,'UPDATE paper_account SET cash_cents=cash_cents+? WHERE id=\'main\'',(payout,))
                     run(cur,postgres,"UPDATE paper_orders SET status='EXPIRED_UNFILLED',updated_at=?,detail=? WHERE position_id=? AND status NOT IN ('FILLED','CANCELLED')",(stamp(),'Could not sell before expiry; official settlement applied as fallback',ident))
         finally:cur.close()
@@ -416,6 +417,7 @@ async def manage_exits(client,execute,connect,postgres,live_signal=None):
             book=await fetch_book(client,market);fill=full_exit(book,direction,quantity,RISK['slippage'])
             if fill is None:problem='Insufficient exit depth for a full-position simulated sell'
         except Exception as exc:problem='Exit book unavailable: '+type(exc).__name__
+        if fill is not None:learning.observe_position_peak(execute,ident,market,cost,fill['net_cents'])
         roi=(fill['net_cents']-cost)/cost if fill and cost else None
         live_signal=live_signal or {};position=(live_signal.get('snapshot') or {}).get('paper_position') or {}
         opp=live_signal.get('profit_opportunity') or {};fresh=live_signal.get('status')=='ready' and 0<=time.time()-live_signal.get('captured_epoch',0)<=60 and position.get('position_id')==ident
@@ -433,6 +435,7 @@ async def manage_exits(client,execute,connect,postgres,live_signal=None):
                     run(cur,postgres,"UPDATE paper_orders SET status='UNFILLED',updated_at=?,detail=? WHERE position_id=? AND kind=?",(stamp(),problem or 'No executable depth',ident,kind));continue
                 run(cur,postgres,"UPDATE paper_positions SET status='CLOSED',closed_at=?,exit_reason=?,exit_net_cents=?,exit_fee_cents=?,pnl_cents=?,mark_cents=?,mark_epoch=? WHERE id=? AND status='OPEN'",(stamp(),kind,fill['net_cents'],fill['fee_cents'],fill['net_cents']-cost,fill['net_cents'],time.time(),ident))
                 if not cur.rowcount:continue
+                learning.finalize_position(cur,postgres,run,ident,fill['net_cents'],kind)
                 run(cur,postgres,"UPDATE paper_account SET cash_cents=cash_cents+? WHERE id='main'",(fill['net_cents'],))
                 run(cur,postgres,"UPDATE paper_orders SET status='FILLED',updated_at=?,detail=? WHERE position_id=? AND kind=?",(stamp(),json.dumps({'simulated_exit':fill,'book_epoch':book['book_epoch']}),ident,kind))
                 run(cur,postgres,"UPDATE paper_orders SET status='CANCELLED',updated_at=?,detail='Other protective exit filled' WHERE position_id=? AND kind<>? AND status<>'FILLED'",(stamp(),ident,kind))
