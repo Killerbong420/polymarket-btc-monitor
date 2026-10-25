@@ -234,6 +234,8 @@ async def spot_data(client):
   candles=[x for x in candles if float(x[0])+60<=time.time()]
   if len(candles)<35: raise ValueError("Coinbase insufficient completed candles")
   candles=candles[-40:]
+  chart=chart_indicators(candles,5)
+  pattern=classify_chart(candles)
   closes=[float(x[4]) for x in candles]
   vols=[float(x[5]) for x in candles]
   recent=sum(vols[-5:])
@@ -251,6 +253,8 @@ async def spot_data(client):
   candles=sorted(payload["result"][key],key=lambda x:float(x[0]))[:-1]
   if len(candles)<35: raise ValueError("Kraken insufficient candles")
   candles=candles[-40:]
+  chart=chart_indicators(candles,6)
+  pattern=classify_chart([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles])
   closes=[float(x[4]) for x in candles]
   vols=[float(x[6]) for x in candles]
   recent=sum(vols[-5:])
