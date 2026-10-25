@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal, ROUND_HALF_EVEN
 from zoneinfo import ZoneInfo
 from research import number, market_start, FEE_THETA
+import paper_learning as learning
 
 INITIAL_CENTS=100000
 RISK={'max_trade_cents':1000,'daily_loss_cents':2500,'max_open_cents':5000,
@@ -61,6 +62,7 @@ def setup(execute):
       best_exit_bid REAL, best_exit_epoch REAL, best_net_cents INTEGER,
       max_roi_pct REAL NOT NULL DEFAULT 0, resolved_epoch REAL)""")
     execute("CREATE INDEX IF NOT EXISTS missed_market_status ON paper_missed_opportunities (market,status)")
+    learning.setup(execute)
     execute('INSERT INTO paper_account (id,initial_cents,cash_cents,paused,started_at,risk_json,high_water_cents,max_drawdown_cents) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
             ('main',INITIAL_CENTS,INITIAL_CENTS,0,stamp(),json.dumps(RISK),INITIAL_CENTS,0))
 
@@ -188,6 +190,7 @@ def dip_rebound_check(snapshot, call):
 def observe_quote_opportunities(execute,quote):
     """Forward-track missed paper-entry scenarios from actual sampled US BBO quotes.
     These are top-of-book what-ifs, NOT demonstrated executable trades or earned profit."""
+    learning.observe(execute,quote)
     if quote.get('status')!='available' or 'btc-updown-15m-' not in str(quote.get('market','')):
         return
     market=quote['market'];start=market_start(market);now=time.time()
@@ -261,10 +264,12 @@ def polymarket_dip_signal(execute,signal):
     previous=[p for t,p in series[:-2]];recent=[p for t,p in series[-7:]]
     if not previous or not recent:return None
     price=number(quote.get('up_entry' if direction=='UP' else 'down_entry'))
-    if price is None or not .10<=price<=.70:return None
+    learned_policy=learning.policy(execute,direction,price) if price is not None else {'enabled':False}
+    learned=learned_policy['enabled']
+    if price is None or not .10<=price<=(.75 if learned else .70):return None
     high=max(previous);low=min(recent)
-    if high-low<max(.025,high*.05):return None
-    if not .005<=price-low<=.045 or price>high-.012:return None
+    if high-low<(max(.020,high*.04) if learned else max(.025,high*.05)):return None
+    if not .005<=price-low<=(.055 if learned else .045) or price>high-.012:return None
     if series[-1][1]<series[-2][1]:return None
     if number(quote.get('spread')) is None or quote['spread']>.06:return None
     # Use a stricter entry than the default 85% ceiling for speculative dip buys.
@@ -276,7 +281,7 @@ def polymarket_dip_signal(execute,signal):
           'max_entry_price':round(price+.008,5),'target_exit_bid':round(hypothetical_exit,5)}
     return (market+':DIP:'+str(int(captured//10)),market,datetime.fromtimestamp(captured,timezone.utc).isoformat(),
             json.dumps({**snapshot,'market_quote':quote,'dip_evidence':{'recent_high':high,'recent_low':low,'entry_ask':price,'samples':len(series),
-                           'trigger':'Polymarket 15m contract odds rebound'}}),json.dumps({'AI':call}))
+                           'trigger':'Polymarket 15m contract odds rebound','learned_policy':learned_policy}}),json.dumps({'AI':call}))
 
 async def try_entry(client,execute,connect,postgres,row):
     market,call_id,created,snapshot_json,calls_json=row
@@ -499,6 +504,7 @@ def report(execute):
            status,best_exit_bid,best_exit_epoch,best_net_cents,max_roi_pct,resolved_epoch
            FROM paper_missed_opportunities WHERE status<>'WATCHING' ORDER BY COALESCE(resolved_epoch,observed_epoch) DESC LIMIT 40""",fetch=True)
     shadow_counts=dict(shadow_counts)
+    learning_report=learning.report(execute)
     blocker_rows=execute("SELECT reason,COUNT(*) FROM paper_attempts WHERE status='SKIPPED' GROUP BY reason ORDER BY COUNT(*) DESC LIMIT 12",fetch=True)
     signal_rows=execute("SELECT COUNT(*),SUM(CASE WHEN processed=0 THEN 1 ELSE 0 END) FROM paper_live_calls",fetch=True)[0]
     latest_signal=execute('SELECT created_at,calls_json FROM paper_live_calls ORDER BY created_at DESC LIMIT 1',fetch=True)
@@ -519,6 +525,7 @@ def report(execute):
             'positions':[dict(zip(('market','direction','quantity','cost_cents','fee_cents','status','created_at','settled_at','winner','payout_cents','pnl_cents','mark_cents','mark_epoch','exit_reason','exit_fee_cents','closed_at'),x)) for x in positions],
             'attempts':[{'market':m,'created_at':t,'status':s,'reason':why,'details':json.loads(detail)} for m,t,s,why,detail in events],
             'trading_diagnostics':diagnostic,
+            'missed_profit_learning':learning_report,
             'missed_opportunity_counts':shadow_counts,
             'missed_opportunities':[dict(zip(('market','direction','observed_epoch','entry_ask','quantity','entry_cost_cents',
                 'status','best_exit_bid','best_exit_epoch','best_net_cents','max_roi_pct','resolved_epoch'),row)) for row in shadow_recent],
