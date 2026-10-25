@@ -725,6 +725,46 @@ def estimate_entry(direction:str="UP",contracts:float=Query(100,gt=0,le=1000000)
  if not state.get("market") or quote.get("market")!=state.get("market") or quote.get("status")!="available" or time.time()-quote.get("fetched_epoch",0)>30:return {"status":"unavailable","reason":"No fresh executable-side quote"}
  return {"market":state.get("market"),"direction":direction,**entry_cost(quote.get("up_entry" if direction=="UP" else "down_entry"),contracts,slippage)}
 
+@app.get("/api/trading-diagnostics")
+def trading_diagnostics():
+ """Read-only paper-trading health check. Never submits a real order."""
+ now=time.time()
+ quote=state.get("market_quote") or {}
+ ai=paper_signal_state()
+ market=state.get("market")
+ age=lambda v:round(now-float(v),1) if isinstance(v,(int,float)) and v>0 else None
+ qage=age(quote.get("fetched_epoch"))
+ aiage=age(ai.get("captured_epoch"))
+ current=market and quote.get("market")==market
+ try:
+  skips=execute("SELECT reason,COUNT(*) FROM paper_attempts WHERE status='SKIPPED' GROUP BY reason ORDER BY COUNT(*) DESC LIMIT 8",fetch=True)
+  fills=execute("SELECT COUNT(*) FROM paper_positions WHERE status='OPEN'",fetch=True)[0][0]
+  unfilled=execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0]
+  last=execute("SELECT created_at,status,reason FROM paper_attempts ORDER BY created_at DESC LIMIT 1",fetch=True)
+  database_error=None
+ except Exception as exc:
+  skips=[];fills=None;unfilled=None;last=[];database_error=type(exc).__name__+": "+str(exc)[:150]
+ blockers=[]
+ if not market:blockers.append("No verified active Polymarket US 15-minute market")
+ if quote.get("status")!="available" or not current or qage is None or qage>15:blockers.append("Polymarket quote missing, stale, or for another round")
+ if ai.get("status")!="ready" or aiage is None or aiage>60:blockers.append("No fresh AI paper-trading signal")
+ if (ai.get("snapshot") or {}).get("reference_price",{}).get("status")!="fresh":blockers.append("AI snapshot lacks fresh official reference evidence")
+ if state.get("paper_error"):blockers.append("Paper worker error: "+str(state["paper_error"])[:120])
+ if database_error:blockers.append("Paper database error")
+ return {"mode":"PAPER_ONLY","checked_epoch":now,"market":market,
+  "market_lookup_reason":state.get("market_lookup_reason"),"quote_status":quote.get("status"),
+  "quote_age_seconds":qage,"quote_matches_market":bool(current),
+  "ai_status":ai.get("status"),"ai_age_seconds":aiage,
+  "ai_direction":ai.get("verdict"),"ai_profit_action":(ai.get("profit_opportunity") or {}).get("action"),
+  "paper_worker_error":state.get("paper_error"),"quote_storage_error":state.get("quote_storage_error"),
+  "monitor_cycle_seconds":state.get("last_cycle_duration_seconds"),
+  "open_positions":fills,"unfilled_exit_orders":unfilled,
+  "top_entry_blockers":[{"reason":why,"count":count} for why,count in skips],
+  "last_attempt":{"created_at":last[0][0],"status":last[0][1],"reason":last[0][2]} if last else None,
+  "database_error":database_error,"active_blockers":blockers,
+  "diagnosis":"READY_TO_EVALUATE" if not blockers else "BLOCKED_OR_DEGRADED",
+  "note":"This endpoint checks signal and feed readiness, not predictive accuracy or guaranteed profitability."}
+
 @app.get("/api/health")
 def health():
  try:
