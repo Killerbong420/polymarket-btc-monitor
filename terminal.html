@@ -226,7 +226,24 @@ if(state.bb){const upper=[],lower=[];closes.forEach((_,i)=>{const slice=closes.s
 if(target>0&&target>=lo&&target<=hi){c.setLineDash([5,5]);c.strokeStyle='#ffd260';c.beginPath();c.moveTo(left,y(target));c.lineTo(w-right,y(target));c.stroke();c.setLineDash([])}
 const last=bars[bars.length-1];c.fillStyle='#dce7f7';c.font='bold 12px system-ui';c.fillText(`BTC/USD · ${fmt(last.c)}   O ${fmt(last.o)}  H ${fmt(last.h)}  L ${fmt(last.l)}`,left+5,15);
 }
-async function getBars(){try{const now=new Date(),start=new Date(Date.now()-70*60000);const u='https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start='+encodeURIComponent(start.toISOString())+'&end='+encodeURIComponent(now.toISOString());const r=await fetch(u,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();if(!Array.isArray(d))throw Error('Bad candles');state.bars=d.map(b=>({t:b[0]*1000,l:+b[1],h:+b[2],o:+b[3],c:+b[4],v:+b[5]})).filter(b=>Number.isFinite(b.c)).sort((a,b)=>a.t-b.t);draw()}catch(e){const c=canvas.getContext('2d');if(!state.bars.length){c.fillStyle='#e6b365';c.font='13px system-ui';c.fillText('Candle feed unavailable: '+e.message,15,55)}}}
+async function getBars(){
+ try{
+  const r=await fetch('/api/candles',{cache:'no-store'});
+  if(!r.ok)throw Error('Server HTTP '+r.status);
+  const payload=await r.json();
+  if(!Array.isArray(payload.candles)||!payload.candles.length)throw Error(payload.error||'No exchange candles');
+  state.bars=payload.candles.map(b=>({t:Number(b[0])*1000,l:Number(b[1]),h:Number(b[2]),o:Number(b[3]),c:Number(b[4]),v:Number(b[5])})).filter(b=>[b.t,b.l,b.h,b.o,b.c,b.v].every(Number.isFinite)&&b.c>0).sort((a,b)=>a.t-b.t);
+  if(!state.bars.length)throw Error('No valid candles');
+  draw();
+ }catch(e){
+  if(!state.bars.length){
+   const rect=canvas.parentElement.getBoundingClientRect(),scale=Math.min(window.devicePixelRatio||1,2);
+   canvas.width=Math.max(1,Math.floor(rect.width*scale));canvas.height=Math.max(1,Math.floor(rect.height*scale));
+   const ctx=canvas.getContext('2d');ctx.scale(scale,scale);ctx.fillStyle='#0d1320';ctx.fillRect(0,0,rect.width,rect.height);
+   ctx.fillStyle='#e6b365';ctx.font='13px system-ui';ctx.fillText('Candles unavailable: '+String(e.message).slice(0,65),12,55);
+  }
+ }
+}
 setInterval(()=>{const p=Number(($('price')?.textContent||'').replace(/[^0-9.]/g,''));if(Number.isFinite(p)&&p>0)state.live=p;draw()},1000);
 setInterval(getBars,10000);for(const id of ['chart15','chart30','chart60'])$(id).addEventListener('click',()=>setTimeout(draw,30));window.addEventListener('resize',draw);getBars();
 })();
