@@ -33,6 +33,10 @@ def setup():
  id TEXT PRIMARY KEY, market TEXT NOT NULL, phase TEXT NOT NULL,
  direction TEXT NOT NULL, flip TEXT NOT NULL, score REAL NOT NULL,
  created_at TEXT NOT NULL, result TEXT NOT NULL DEFAULT 'PENDING')""")
+ for col in ("quality TEXT NOT NULL DEFAULT 'UNRATED'","quality_reason TEXT NOT NULL DEFAULT 'Legacy prediction; quality not captured'"):
+  try: execute("ALTER TABLE signals ADD COLUMN "+col)
+  except Exception as exc:
+   if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower(): raise
 def parse_json(v):
  if isinstance(v,list): return v
  try: return json.loads(v)
@@ -429,6 +433,41 @@ def final_direction(data, primary, score):
   combined=float(data.get("last_price",0))-float(data.get("open_price",0))
  return "UP" if combined>=0 else "DOWN"
 
+def signal_quality_snapshot(d, direction, score):
+ """Snapshot evidence at call time, not after outcome is known."""
+ q=d.get("signal_quality") or {}
+ volume=float(d.get("volume_ratio") or 0)
+ fast=float(d.get("momentum_pct") or 0)
+ slow=float(d.get("long_momentum_pct") or 0)
+ aligned=fast*slow>0 and abs(fast)>=0.025 and abs(slow)>=0.045
+ freshness=float(d.get("candle_age_seconds") or 9999)
+ if q.get("status")=="INSUFFICIENT_DATA" or freshness>100 or volume<0.6:
+  return "LOW","Thin/stale candles or low volume"
+ if direction not in ("UP","DOWN"):
+  return "LOW","Forced binary call without primary confirmation"
+ if aligned and volume>=1.0 and abs(float(score))>=2:
+  return "HIGH","Aligned 5m/15m momentum, volume and score"
+ if aligned and volume>=0.6 and abs(float(score))>=1:
+  return "MEDIUM","Aligned momentum with moderate supporting evidence"
+ return "LOW","Momentum disagreement or insufficient confluence"
+
+def log_signal(slug,phase,direction,flip,score,now,d):
+ quality,reason=signal_quality_snapshot(d,direction,score)
+ execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at,quality,quality_reason) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":"+phase,slug,phase,direction,flip,score,now,quality,reason))
+
+def accuracy_report():
+ rows=execute("SELECT phase,quality,result,COUNT(*) FROM signals GROUP BY phase,quality,result",fetch=True)
+ report={}
+ for phase,quality,result,n in rows:
+  key=phase+" / "+(quality or "UNRATED")
+  item=report.setdefault(key,{"phase":phase,"quality":quality or "UNRATED","WIN":0,"LOSS":0,"PENDING":0,"NO_CALL":0})
+  if result in item: item[result]+=n
+ for item in report.values():
+  graded=item["WIN"]+item["LOSS"]
+  item["graded"]=graded
+  item["accuracy_pct"]=round(100*item["WIN"]/graded,1) if graded else None
+ return sorted(report.values(),key=lambda x:(x["phase"],x["quality"]))
+
 async def loop():
  setup()
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
@@ -449,11 +488,11 @@ async def loop():
      phase="EARLY" if remaining>=180 else "LATE" if remaining<=90 else "MID"
      state.pop("market_diagnostic",None)
      if phase in ("EARLY","LATE") and direction!="WAIT":
-      execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":"+phase,slug,phase,direction,flip,score,now))
+      log_signal(slug,phase,direction,flip,score,now,d)
      # One independent, immutable FINAL call per 5m round, at the first poll
      # reaching 2:30 remaining. Force a research prediction even when trend confirmation is weak.
      if remaining<=150 and remaining>0:
-      execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":FINAL",slug,"FINAL",final_direction(d,direction,score),flip,score,now))
+      log_signal(slug,"FINAL",final_direction(d,direction,score),flip,score,now,d)
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(remaining),market=slug,external=d,updated=now,error=None)
      await confirm(client,slug,phase,direction,flip,score,d)
     # Dedicated 15m FINAL call at 7:30 remaining, independent of 5m FINAL.
@@ -462,7 +501,7 @@ async def loop():
      left15=fifteen["end"]-time.time()
      state["final_15m"]={"market":fifteen["slug"],"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
      if 0<left15<=450:
-      execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(fifteen["slug"]+":FINAL_15M",fifteen["slug"],"FINAL_15M",final_direction(d,direction,score),flip,score,now))
+      log_signal(fifteen["slug"],"FINAL_15M",final_direction(d,direction,score),flip,score,now,d)
     else:
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
     await settle(client)
@@ -506,8 +545,8 @@ def historical_csv():
 def status():
  try:
   rows=execute("SELECT result,COUNT(*) FROM signals GROUP BY result",fetch=True)
-  recent=execute("SELECT market,phase,direction,flip,score,created_at,result FROM signals ORDER BY created_at DESC LIMIT 50",fetch=True)
-  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result"),r)) for r in recent]}
+  recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason FROM signals ORDER BY created_at DESC LIMIT 50",fetch=True)
+  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason"),r)) for r in recent]}
  except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
 @app.get("/",response_class=HTMLResponse)
 def home():
