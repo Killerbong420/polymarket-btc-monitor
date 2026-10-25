@@ -46,112 +46,6 @@ def parse_json(v):
  if isinstance(v,list): return v
  try: return json.loads(v)
  except (ValueError,TypeError): return []
-async def market_data(client):
- # Polymarket US and international Polymarket are different venues.
- # Never substitute international Gamma markets for US contracts.
- base="https://gateway.polymarket.us"
- now=datetime.now(timezone.utc)
- floor=now.replace(minute=(now.minute//5)*5,second=0,microsecond=0)
- errors=[]
- # US five-minute event slugs use UTC date and HHMMz.
- for delta in (0,5,10,-5):
-  from datetime import timedelta
-  t=floor+timedelta(minutes=delta)
-  slug="btc-updown-5m-"+t.strftime("%Y-%m-%d-%H%Mz").lower()
-  if t.timestamp()+300<=time.time(): continue
-  # Polymarket US event slug differs from its contract market slug.
-  # Resolve event first and require a real market record in its markets array.
-  try:
-   er=await client.get(base+"/v1/events/slug/"+slug,timeout=7)
-   if er.status_code==200:
-    body=er.json()
-    event=body.get("event",body) if isinstance(body,dict) else {}
-    contracts=event.get("markets",[]) if isinstance(event,dict) else []
-    if not contracts and isinstance(body,dict): contracts=body.get("markets",[])
-    if isinstance(contracts,list):
-     for contract in contracts:
-      if not isinstance(contract,dict): continue
-      market_slug=contract.get("slug") or contract.get("marketSlug")
-      if not isinstance(market_slug,str) or not market_slug: continue
-      contract=dict(contract)
-      contract["slug"]=market_slug
-      contract["_event_slug"]=slug
-      contract["_round_start"]=t.timestamp()
-      contract["_round_end"]=(t+timedelta(minutes=5)).timestamp()
-      return contract
-  except Exception as exc: errors.append("event lookup "+type(exc).__name__+": "+str(exc)[:90])
-  # A successful market lookup must correspond to this exact US round.
-  for path in ("/v1/markets/"+slug, "/v1/market/slug/"+slug):
-   try:
-    r=await client.get(base+path,timeout=7)
-    if r.status_code==404: continue
-    r.raise_for_status()
-    data=r.json()
-    market=data.get("market",data) if isinstance(data,dict) else None
-    if isinstance(market,dict) and (market.get("slug")==slug or market.get("marketSlug")==slug):
-     market["_round_start"]=t.timestamp()
-     market["_round_end"]=(t+timedelta(minutes=5)).timestamp()
-     market["slug"]=slug
-     return market
-   except Exception as exc: errors.append(type(exc).__name__+": "+str(exc)[:110])
- # Discover available US markets without guessing their response structure.
- try:
-  r=await client.get(base+"/v1/markets",params={"limit":500,"offset":0},timeout=12)
-  r.raise_for_status()
-  payload=r.json()
-  items=payload if isinstance(payload,list) else payload.get("markets",[]) if isinstance(payload,dict) else []
-  candidates=[]
-  for m in items:
-   if not isinstance(m,dict): continue
-   slug=str(m.get("slug") or m.get("marketSlug") or "")
-   if not slug.startswith("btc-updown-5m-"): continue
-   try:
-    stamp=slug[len("btc-updown-5m-"):]
-    t=datetime.strptime(stamp,"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc)
-    remaining=(t.timestamp()+300)-time.time()
-    if 0<remaining<=600:
-     m["slug"]=slug
-     m["_round_start"]=t.timestamp()
-     m["_round_end"]=t.timestamp()+300
-     candidates.append((abs(remaining-150),m))
-   except ValueError: continue
-  if candidates: return min(candidates,key=lambda x:x[0])[1]
-  # The first page is often unrelated sports markets. Search the US catalog
-  # rather than assuming 500 generic results represent all available markets.
-  search_details=[]
-  for term in ("btc-updown-5m","bitcoin"):
-   try:
-    sr=await client.get(base+"/v1/search",params={"query":term},timeout=12)
-    sr.raise_for_status()
-    body=sr.json()
-    found=[]
-    def scan(node,depth=0):
-     if depth>5: return
-     if isinstance(node,dict):
-      slug=str(node.get("slug") or node.get("marketSlug") or "")
-      if slug.startswith("btc-updown-5m-"): found.append(node)
-      for v in node.values():
-       if isinstance(v,(dict,list)): scan(v,depth+1)
-     elif isinstance(node,list):
-      for v in node[:200]: scan(v,depth+1)
-    scan(body)
-    search_details.append({"query":term,"status":sr.status_code,"btc_matches":len(found)})
-    for m in found:
-     slug=str(m.get("slug") or m.get("marketSlug"))
-     try:
-      t=datetime.strptime(slug[len("btc-updown-5m-"):],"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc)
-      remaining=t.timestamp()+300-time.time()
-      if 0<remaining<=600:
-       m["slug"]=slug
-       m["_round_start"]=t.timestamp()
-       m["_round_end"]=t.timestamp()+300
-       return m
-     except ValueError: continue
-   except Exception as exc: search_details.append({"query":term,"error":str(exc)[:160]})
-  state["market_diagnostic"]={"venue":"Polymarket US","gateway_status":r.status_code,"markets_scanned":len(items),"sample_slugs":[str(m.get("slug") or m.get("marketSlug")) for m in items[:3] if isinstance(m,dict)],"search":search_details,"lookup_errors":errors[-3:]}
- except Exception as exc:
-  state["market_diagnostic"]={"venue":"Polymarket US","error":str(exc)[:300],"lookup_errors":errors[-3:]}
- return None
 async def market_15m(client):
  # Only accept a real Polymarket US contract returned for the current 15m event.
  from datetime import timedelta
@@ -232,10 +126,10 @@ def classify_chart(bars):
  def change(n):
   return 100*(last/closes[-1-n]-1) if closes[-1-n] else 0
  move3=change(3)
- move5=change(5)
+ move_short=change(3)
  move10=change(10)
- prior5=100*(closes[-6]/closes[-11]-1) if closes[-11] else 0
- acceleration=move5-prior5
+ prior_short=100*(closes[-4]/closes[-7]-1) if closes[-7] else 0
+ acceleration=move_short-prior_short
  body=last-float(bars[-1][3])
  upper_wick=highs[-1]-max(last,float(bars[-1][3]))
  lower_wick=min(last,float(bars[-1][3]))-lows[-1]
@@ -248,29 +142,29 @@ def classify_chart(bars):
   behavior="RESISTANCE_REJECTION"
  elif pattern=="FAILED_DOWN_BREAKOUT":
   behavior="SUPPORT_REJECTION"
- elif abs(move5)<threshold and range_pct<0.10:
+ elif abs(move_short)<threshold and range_pct<0.10:
   behavior="TIGHT_CONSOLIDATION"
  elif bullish_structure and move3< -threshold:
   behavior="PULLBACK_IN_UPTREND"
  elif bearish_structure and move3>threshold:
   behavior="BOUNCE_IN_DOWNTREND"
- elif abs(move5)>threshold and move5*acceleration>0 and abs(acceleration)>threshold:
+ elif abs(move_short)>threshold and move_short*acceleration>0 and abs(acceleration)>threshold:
   behavior="MOMENTUM_ACCELERATING"
- elif abs(move5)>threshold and move5*acceleration<0 and abs(acceleration)>threshold:
+ elif abs(move_short)>threshold and move_short*acceleration<0 and abs(acceleration)>threshold:
   behavior="MOMENTUM_FADING"
- elif abs(move5)<=threshold:
+ elif abs(move_short)<=threshold:
   behavior="SIDEWAYS_CHOP"
  else:
-  behavior="TREND_CONTINUATION" if (bullish_structure and move5>0) or (bearish_structure and move5<0) else "MIXED_PRICE_ACTION"
+  behavior="TREND_CONTINUATION" if (bullish_structure and move_short>0) or (bearish_structure and move_short<0) else "MIXED_PRICE_ACTION"
  if upper_wick/width>0.55 and last<highs[-1] and behavior not in ("BREAKOUT_WITH_VOLUME","RESISTANCE_REJECTION"):
   behavior="UPPER_WICK_REJECTION"
  elif lower_wick/width>0.55 and behavior not in ("BREAKOUT_WITH_VOLUME","SUPPORT_REJECTION"):
   behavior="LOWER_WICK_REJECTION"
  return {"pattern":pattern,"bias":bias,"current_behavior":behavior,
   "structure":"HIGHER_HIGHS_HIGHER_LOWS" if bullish_structure else "LOWER_HIGHS_LOWER_LOWS" if bearish_structure else "MIXED_OR_RANGE",
-  "momentum_3m_pct":round(move3,5),"momentum_5m_pct":round(move5,5),
-  "momentum_10m_pct":round(move10,5),"prior_5m_pct":round(prior5,5),
-  "momentum_acceleration_5m_pct":round(acceleration,5),
+  "momentum_3m_pct":round(move3,5),
+  "momentum_10m_pct":round(move10,5),"prior_3m_pct":round(prior_short,5),
+  "momentum_acceleration_3m_pct":round(acceleration,5),
   "range_position_pct":round(100*location,1),
   "distance_to_support_pct":round(100*(last/recent_low-1),5) if recent_low else None,
   "distance_to_resistance_pct":round(100*(recent_high/last-1),5) if last else None,
@@ -326,7 +220,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Coinbase BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Coinbase: "+str(e)[:150])
  # Kraken OHLC uses BTC/USD minute candles; last candle is incomplete.
  try:
@@ -346,7 +240,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Kraken BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
@@ -358,7 +252,7 @@ def judge(d):
  if age>120 or volume<0.20:
   d["signal_quality"]={"status":"INSUFFICIENT_DATA","reason":"stale_or_thin_candles","confidence":"UNRATED"}
   return "WAIT","WAIT",0.0
- # Both 5-minute and 15-minute trends must agree for a directional call.
+ # Both 3-minute and 15-minute trends must agree for a directional call.
  aligned=(fast>0.045 and slow>0.075) or (fast< -0.045 and slow< -0.075)
  fast_vote=max(-1.5,min(1.5,fast*12))
  slow_vote=max(-1.0,min(1.0,slow*5))
@@ -385,7 +279,7 @@ def judge(d):
   flip="POSSIBLE UP FLIP"
  elif slow>0.09 and fast< -0.035 and volume>=0.8:
   flip="POSSIBLE DOWN FLIP"
- d["signal_quality"]={"status":"CONFIRMED_TREND" if direction!="WAIT" else "MIXED_OR_WEAK","fast_5m_pct":fast,"slow_15m_pct":slow,"volume_ratio":volume,"trend_aligned":aligned,"confidence":"UNRATED","note":"Score is not a win probability; official Polymarket outcomes required for calibration"}
+ d["signal_quality"]={"status":"CONFIRMED_TREND" if direction!="WAIT" else "MIXED_OR_WEAK","fast_3m_pct":fast,"slow_15m_pct":slow,"volume_ratio":volume,"trend_aligned":aligned,"confidence":"UNRATED","note":"Score is not a win probability; official Polymarket outcomes required for calibration"}
  return direction,flip,round(score,3)
 def winner(m):
  outcomes=parse_json(m.get("outcomes"))
@@ -432,22 +326,22 @@ async def settle(client):
  # Resolve the original event when the market-slug endpoint is unavailable.
  # Never infer official outcomes from Coinbase spot candles.
  from datetime import timedelta
- pending=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING' ORDER BY market DESC",fetch=True)
+ pending=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE '%btc-updown-15m-%' ORDER BY market DESC",fetch=True)
  diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[],"reasons":{}}
  def unresolved(reason):
   diagnostic["unresolved"]+=1
   diagnostic["reasons"][reason]=diagnostic["reasons"].get(reason,0)+1
  for (slug,) in pending[:30]:
   try:
-   # The US slug embeds the start time, e.g. cpc-btc-updown-5m-2026-10-25-0525z.
-   stamp=slug.split("btc-updown-15m-" if "btc-updown-15m-" in slug else "btc-updown-5m-",1)[-1]
+   # The verified 15-minute contract slug embeds its UTC start time.
+   stamp=slug.split("btc-updown-15m-",1)[-1]
    start=datetime.strptime(stamp,"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc)
-   if datetime.now(timezone.utc)<start+timedelta(minutes=16 if "btc-updown-15m-" in slug else 6):
+   if datetime.now(timezone.utc)<start+timedelta(minutes=16):
     unresolved("round_not_yet_settled")
     continue
    diagnostic["checked"]+=1
    gateway="https://gateway.polymarket.us"
-   event_slug=("btc-updown-15m-" if "btc-updown-15m-" in slug else "btc-updown-5m-")+stamp
+   event_slug="btc-updown-15m-"+stamp
    market=None
    # Event lookup is the same discovery path used to find the live contract.
    er=await client.get(gateway+"/v1/events/slug/"+event_slug,timeout=10)
@@ -529,7 +423,7 @@ def signal_quality_snapshot(d, direction, score):
  if direction not in ("UP","DOWN"):
   return "LOW","Forced binary call without primary confirmation"
  if aligned and volume>=1.0 and abs(float(score))>=2:
-  return "HIGH","Aligned 5m/15m momentum, volume and score"
+  return "HIGH","Aligned 3m/15m momentum, volume and score"
  if aligned and volume>=0.6 and abs(float(score))>=1:
   return "MEDIUM","Aligned momentum with moderate supporting evidence"
  return "LOW","Momentum disagreement or insufficient confluence"
@@ -552,13 +446,14 @@ def accuracy_report():
  return sorted(report.values(),key=lambda x:(x["phase"],x["quality"]))
 
 async def record_halfway(client,slug,phase,d,primary,flip,score,now,market):
+ if phase!="FINAL_15M" or "btc-updown-15m-" not in str(slug): return
  existing=execute("SELECT id FROM signals WHERE id=?",(slug+":"+phase,),fetch=True)
  if existing: return
  fallback=final_direction(d,primary,score)
  terms=market.get("assetPriceTerms") if isinstance(market,dict) else None
  ptb=(terms or {}).get("priceToBeat") if isinstance(terms,dict) else None
  target=ptb.get("value") if isinstance(ptb,dict) else None
- review=await halfway_decision(client,slug,15 if phase=="FINAL_15M" else 5,fallback,score,d,target)
+ review=await halfway_decision(client,slug,15,fallback,score,d,target)
  chosen=review.get("direction") if review.get("direction") in ("UP","DOWN") else fallback
  log_signal(slug,phase,chosen,flip,score,now,d)
  if phase=="FINAL_15M":
