@@ -294,7 +294,7 @@ async def lifespan(app):
    historical_state.update(status="running",started=datetime.now(timezone.utc).isoformat())
    await collect_15m()
    records=json.loads(Path("historical_15m_7d.json").read_text())
-   historical_state.update(status="complete",checked=len(records),targets=sum(x["price_to_beat"] is not None for x in records),winners=sum(x["winner"] is not None for x in records),verified=sum(x["status"]=="VERIFIED" for x in records),finished=datetime.now(timezone.utc).isoformat())
+   historical_state.update(status="complete",checked=len(records),targets=sum(x["price_to_beat"] is not None for x in records),winners=sum(x["winner"] is not None for x in records),verified=sum(x["status"]=="VERIFIED" for x in records),movement_complete=sum(x.get("movement_status")=="COMPLETE" for x in records),target_movement_complete=sum(x.get("movement_status")=="COMPLETE" and x.get("price_to_beat") is not None for x in records),finished=datetime.now(timezone.utc).isoformat())
   except Exception as exc: historical_state.update(status="error",error=str(exc)[:300])
  history_task=asyncio.create_task(historical_job())
  yield
