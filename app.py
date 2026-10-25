@@ -63,6 +63,35 @@ def setup():
  active INTEGER NOT NULL,created_at TEXT NOT NULL)""")
  execute("CREATE INDEX IF NOT EXISTS research_market_idx ON research_calls(market)")
  paper.setup(execute)
+ execute("""CREATE TABLE IF NOT EXISTS polymarket_quote_samples (
+   id TEXT PRIMARY KEY, market TEXT NOT NULL,sampled_epoch REAL NOT NULL,
+   up_bid REAL,up_ask REAL,down_bid REAL,down_ask REAL,spread REAL)""")
+ execute("CREATE INDEX IF NOT EXISTS pm_quote_market_epoch ON polymarket_quote_samples (market,sampled_epoch)")
+_last_quote_cleanup=0.0
+def capture_polymarket_quote(quote):
+  """Store real Polymarket 15-minute UP/DOWN book quotes, not BTC spot data."""
+  global _last_quote_cleanup
+  if quote.get("status")!="available" or "btc-updown-15m-" not in str(quote.get("market","")):return
+  now=time.time()
+  if now-float(quote.get("fetched_epoch") or 0)>15:return
+  market=quote["market"]
+  valid=lambda x:x is None or (isinstance(x,(int,float)) and 0<=x<=1)
+  up_bid,up_ask=quote.get("bid"),quote.get("ask")
+  if not valid(up_bid) or not valid(up_ask) or (up_bid is None and up_ask is None):return
+  down_bid=round(1-up_ask,6) if up_ask is not None else None
+  down_ask=round(1-up_bid,6) if up_bid is not None else None
+  key=market+":"+str(int(now//5))
+  execute("""INSERT INTO polymarket_quote_samples
+   (id,market,sampled_epoch,up_bid,up_ask,down_bid,down_ask,spread)
+   VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+   sampled_epoch=excluded.sampled_epoch,up_bid=excluded.up_bid,up_ask=excluded.up_ask,
+   down_bid=excluded.down_bid,down_ask=excluded.down_ask,spread=excluded.spread""",
+   (key,market,now,up_bid,up_ask,down_bid,down_ask,quote.get("spread")))
+  paper.observe_quote_opportunities(execute,quote)
+  if now-_last_quote_cleanup>3600:
+   execute("DELETE FROM polymarket_quote_samples WHERE sampled_epoch<?",(now-172800,))
+   _last_quote_cleanup=now
+
 def parse_json(v):
  if isinstance(v,list): return v
  try: return json.loads(v)
@@ -561,6 +590,7 @@ async def loop():
      behavior=target_behavior(d,target,slug,reference)
      d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote)
      state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote)
+     capture_polymarket_quote(quote)
      avg=reference.get("opening_average");pt=number(target)
      state["target_validation"]={"status":"match" if abs(avg-pt)<=.02 else "mismatch","difference_usd":round(avg-pt,4)} if avg is not None and pt is not None else {"status":"unavailable"}
      captured={r[0] for r in execute("SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True)}
@@ -594,7 +624,7 @@ async def paper_worker():
   while True:
    started=time.monotonic()
    try:
-    await paper.cycle(client,execute,connect,bool(DB),paper_signal_state())
+    await paper.cycle(client,execute,connect,bool(DB),{**paper_signal_state(),"live_quote":state.get("market_quote")})
     state["paper_error"]=None
     state["paper_unfilled_exits"]=execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0]
    except Exception as exc:state["paper_error"]=type(exc).__name__+": "+str(exc)[:160]
@@ -695,6 +725,26 @@ def historical_csv():
  p=Path("historical_15m_7d.csv")
  if not p.exists(): return JSONResponse({"status":historical_state},status_code=202)
  return FileResponse(str(p),media_type="text/csv",filename="polymarket_us_btc_15m_7d.csv")
+@app.get("/api/polymarket-chart")
+def polymarket_chart():
+  """Return Polymarket BBO quoted UP/DOWN asks only, not external BTC/USD prices."""
+  market=state.get("market")
+  if not market or "btc-updown-15m-" not in market:
+   return {"status":"unavailable","reason":"No current verified Polymarket US 15-minute market","points":[]}
+  start=market_start(market)
+  if start is None:return {"status":"unavailable","reason":"Unrecognized market round","points":[]}
+  rows=execute("""SELECT sampled_epoch,up_bid,up_ask,down_bid,down_ask,spread
+    FROM polymarket_quote_samples WHERE market=? AND sampled_epoch>=?
+    ORDER BY sampled_epoch ASC LIMIT 600""",(market,start),fetch=True)
+  points=[dict(zip(("epoch","up_bid","up_ask","down_bid","down_ask","spread"),row)) for row in rows]
+  quote=state.get("market_quote") or {}
+  fresh=bool(quote.get("status")=="available" and quote.get("market")==market
+             and time.time()-float(quote.get("fetched_epoch") or 0)<=20)
+  return {"status":"live" if fresh else "stale","market":market,"points":points,
+          "source":"Polymarket US verified 15-minute market BBO","round_start_epoch":start,
+          "round_end_epoch":start+900,"latest_quote":quote if fresh else None,
+          "note":"Quoted UP ask and complementary DOWN ask (1 - UP bid), NOT BTC/USD. Top-of-book indications, not guaranteed executable fills."}
+
 @app.get("/api/candles")
 async def candle_proxy():
  """Same-origin 1m BTC candles for Safari when exchange CORS is blocked."""
