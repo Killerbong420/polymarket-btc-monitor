@@ -167,6 +167,19 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
                  "ema_trend":chart.get("ema_trend"),"rsi14":chart.get("rsi14"),
                  "atr14_pct":chart.get("atr14_pct")},
         "pattern":{"type":pattern.get("pattern"),"bias":pattern.get("bias"),
+                   "current_behavior":pattern.get("current_behavior"),
+                   "structure":pattern.get("structure"),
+                   "momentum_3m_pct":pattern.get("momentum_3m_pct"),
+                   "momentum_5m_pct":pattern.get("momentum_5m_pct"),
+                   "momentum_10m_pct":pattern.get("momentum_10m_pct"),
+                   "prior_5m_pct":pattern.get("prior_5m_pct"),
+                   "momentum_acceleration_5m_pct":pattern.get("momentum_acceleration_5m_pct"),
+                   "range_position_pct":pattern.get("range_position_pct"),
+                   "distance_to_support_pct":pattern.get("distance_to_support_pct"),
+                   "distance_to_resistance_pct":pattern.get("distance_to_resistance_pct"),
+                   "last_candle_body_direction":pattern.get("last_candle_body_direction"),
+                   "last_candle_upper_wick_ratio":pattern.get("last_candle_upper_wick_ratio"),
+                   "last_candle_lower_wick_ratio":pattern.get("last_candle_lower_wick_ratio"),
                    "support":pattern.get("support"),"resistance":pattern.get("resistance"),
                    "range_pct":pattern.get("range_pct"),
                    "volume_spike":pattern.get("volume_spike"),
@@ -183,7 +196,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "You may disagree with the indicator direction when concrete evidence supports it. "
         "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. "
         "When evidence is weak or conflicting, still choose the more supported direction and set confidence LOW; explicitly explain the uncertainty. This is a research forecast, not a trade instruction. "
-        "Analyze the chronological OHLCV candle graph itself: swing highs/lows, trend structure, recent candle bodies/wicks, support/resistance, breakout/rejection, and reversal versus continuation. "
+        "Analyze the chronological OHLCV candle graph itself: swing highs/lows, trend structure, recent candle bodies/wicks, support/resistance, breakout/rejection, and reversal versus continuation. Explicitly weigh current_behavior, acceleration versus fading, pullback versus reversal, and price location inside its range; do not treat UP/DOWN bias as sufficient evidence. "
         "Consider every supplied evidence field, contradictions, proximity to the official target, "
         "freshness and missing evidence. Spot vs BRTI target is a proxy, not the settlement index. "
         "Do not claim unavailable buy/sell pressure or other missing data. "
