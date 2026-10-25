@@ -54,6 +54,13 @@ def setup(execute):
     execute('''CREATE TABLE IF NOT EXISTS paper_live_calls (
       id TEXT PRIMARY KEY,market TEXT NOT NULL,created_at TEXT NOT NULL,snapshot_json TEXT NOT NULL,
       calls_json TEXT NOT NULL,processed INTEGER NOT NULL DEFAULT 0)''')
+    execute("""CREATE TABLE IF NOT EXISTS paper_missed_opportunities (
+      id TEXT PRIMARY KEY, market TEXT NOT NULL, direction TEXT NOT NULL,
+      observed_epoch REAL NOT NULL, entry_ask REAL NOT NULL, quantity INTEGER NOT NULL,
+      entry_cost_cents INTEGER NOT NULL, status TEXT NOT NULL,
+      best_exit_bid REAL, best_exit_epoch REAL, best_net_cents INTEGER,
+      max_roi_pct REAL NOT NULL DEFAULT 0, resolved_epoch REAL)""")
+    execute("CREATE INDEX IF NOT EXISTS missed_market_status ON paper_missed_opportunities (market,status)")
     execute('INSERT INTO paper_account (id,initial_cents,cash_cents,paused,started_at,risk_json,high_water_cents,max_drawdown_cents) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
             ('main',INITIAL_CENTS,INITIAL_CENTS,0,stamp(),json.dumps(RISK),INITIAL_CENTS,0))
 
@@ -178,18 +185,108 @@ def dip_rebound_check(snapshot, call):
     except (TypeError,ValueError,IndexError,ZeroDivisionError):
         return False,'Dip watch: malformed candle evidence'
 
+def observe_quote_opportunities(execute,quote):
+    """Forward-track missed paper-entry scenarios from actual sampled US BBO quotes.
+    These are top-of-book what-ifs, NOT demonstrated executable trades or earned profit."""
+    if quote.get('status')!='available' or 'btc-updown-15m-' not in str(quote.get('market','')):
+        return
+    market=quote['market'];start=market_start(market);now=time.time()
+    if start is None or now-start>900:return
+    if now-float(quote.get('fetched_epoch') or 0)>15:return
+    spread=number(quote.get('spread'))
+    if spread is None or spread>RISK['max_spread']:return
+    exit_deadline=start+900-RISK['exit_before_expiry_seconds']
+    for ident,direction,observed,ask,qty,cost,old_peak in execute(
+        "SELECT id,direction,observed_epoch,entry_ask,quantity,entry_cost_cents,max_roi_pct "
+        "FROM paper_missed_opportunities WHERE market=? AND status='WATCHING' LIMIT 150",(market,),fetch=True):
+        bid=number(quote.get('bid' if direction=='UP' else 'ask'))
+        bid=(1-bid) if direction=='DOWN' and bid is not None else bid
+        if bid is not None and 0<bid<1 and now>observed:
+            net,_=exit_mark({'bids':[(bid,qty)],'offers':[]},'UP',qty,RISK['slippage'])
+            roi=round(100*(net-cost)/cost,2)
+            if roi>old_peak:
+                execute("UPDATE paper_missed_opportunities SET best_exit_bid=?,best_exit_epoch=?,best_net_cents=?,max_roi_pct=? WHERE id=?",
+                        (bid,now,net,roi,ident))
+            if roi>=100*RISK['take_profit_pct']:
+                traded=execute("SELECT 1 FROM paper_positions WHERE market=? AND direction=? AND created_at>=? AND created_at<=? LIMIT 1",
+                               (market,direction,datetime.fromtimestamp(observed,timezone.utc).isoformat(),stamp()),fetch=True)
+                execute("UPDATE paper_missed_opportunities SET status=?,resolved_epoch=? WHERE id=?",
+                        ('MATCHED_PAPER_TRADE' if traded else 'MISSED_QUOTED_PROFIT',now,ident))
+                continue
+        if now>=min(observed+RISK['max_hold_seconds'],exit_deadline):
+            execute("UPDATE paper_missed_opportunities SET status='EXPIRED_NO_TARGET',resolved_epoch=? WHERE id=?",(now,ident))
+    if now>=exit_deadline-30:return
+    for direction in ('UP','DOWN'):
+        ask=number(quote.get('up_entry' if direction=='UP' else 'down_entry'))
+        if ask is None or ask<RISK['min_price'] or ask+RISK['slippage']>=RISK['max_price']:continue
+        qty=10
+        cost,_=cost_lots([(ask+RISK['slippage'],qty)])
+        if cost/(100*qty)>=RISK['max_all_in_price']:continue
+        # Limit hypothetical candidates to one per direction per 20 seconds.
+        existing=execute("SELECT 1 FROM paper_missed_opportunities WHERE market=? AND direction=? AND observed_epoch>? LIMIT 1",
+                         (market,direction,now-20),fetch=True)
+        if existing:continue
+        held=execute("SELECT 1 FROM paper_positions WHERE market=? LIMIT 1",(market,),fetch=True)
+        if held:continue
+        ident=str(uuid.uuid4())
+        execute("INSERT INTO paper_missed_opportunities "
+                "(id,market,direction,observed_epoch,entry_ask,quantity,entry_cost_cents,status) VALUES (?,?,?,?,?,?,?,?)",
+                (ident,market,direction,now,ask,qty,cost,'WATCHING'))
+
+
+def polymarket_dip_signal(execute,signal):
+    """Extra paper-only dip/rebound entry: fresh AI directional forecast + observed
+    US contract odds. The AI has NOT approved the rule-based entry itself."""
+    if signal.get('status')!='ready':return None
+    age=time.time()-float(signal.get('captured_epoch') or 0)
+    if not 0<=age<=60:return None
+    market=signal.get('market');direction=signal.get('verdict')
+    if direction not in ('UP','DOWN') or 'btc-updown-15m-' not in str(market):return None
+    opp=signal.get('profit_opportunity') or {}
+    if opp.get('action') in ('ENTER_UP','ENTER_DOWN'):return None
+    quote=signal.get('live_quote') or {}
+    if quote.get('status')!='available' or quote.get('market')!=market or time.time()-float(quote.get('fetched_epoch') or 0)>12:return None
+    snapshot=signal.get('snapshot') or {}
+    if (snapshot.get('reference_price') or {}).get('status')!='fresh' or number(snapshot.get('official_target')) is None:return None
+    if market_start(market) is None or market_start(market)+900-time.time()<RISK['exit_before_expiry_seconds']+30:return None
+    confidence=signal.get('confidence')
+    if confidence not in ('LOW','MEDIUM','HIGH'):return None
+    if confidence=='LOW' and number(quote.get('up_entry' if direction=='UP' else 'down_entry')) is not None and quote.get('up_entry' if direction=='UP' else 'down_entry')>0.4:return None
+    rows=execute("SELECT sampled_epoch,up_ask,down_ask FROM polymarket_quote_samples "
+                 "WHERE market=? AND sampled_epoch>=? ORDER BY sampled_epoch DESC LIMIT 25",
+                 (market,time.time()-150),fetch=True)
+    series=[(t,number(up if direction=='UP' else down)) for t,up,down in reversed(rows)]
+    series=[(t,p) for t,p in series if p is not None and 0<p<1]
+    if len(series)<5 or series[-1][0]-series[0][0]<20:return None
+    previous=[p for t,p in series[:-2]];recent=[p for t,p in series[-7:]]
+    if not previous or not recent:return None
+    price=number(quote.get('up_entry' if direction=='UP' else 'down_entry'))
+    if price is None or not .10<=price<=.70:return None
+    high=max(previous);low=min(recent)
+    if high-low<max(.025,high*.05):return None
+    if not .005<=price-low<=.045 or price>high-.012:return None
+    if series[-1][1]<series[-2][1]:return None
+    if number(quote.get('spread')) is None or quote['spread']>.06:return None
+    # Use a stricter entry than the default 85% ceiling for speculative dip buys.
+    hypothetical_exit=min(.97,price+max(.06,price*.15))
+    captured=time.time()
+    call={'direction':direction,'source':'AI_DIRECTION_DIP_RULE','source_mode':'DIP_WATCH',
+          'profit_action':'RULE_BASED_DIP_REBOUND','confidence':confidence,
+          'reason':'AI '+direction+' direction with observed Polymarket odds dip and early rebound; hypothetical exit, not an AI trade recommendation',
+          'max_entry_price':round(price+.008,5),'target_exit_bid':round(hypothetical_exit,5)}
+    return (market+':DIP:'+str(int(captured//10)),market,datetime.fromtimestamp(captured,timezone.utc).isoformat(),
+            json.dumps({**snapshot,'market_quote':quote,'dip_evidence':{'recent_high':high,'recent_low':low,'entry_ask':price,'samples':len(series),
+                           'trigger':'Polymarket 15m contract odds rebound'}}),json.dumps({'AI':call}))
+
 async def try_entry(client,execute,connect,postgres,row):
     market,call_id,created,snapshot_json,calls_json=row
     snapshot=json.loads(snapshot_json);call=(json.loads(calls_json).get('AI') or {})
     direction=call.get('direction');reason=None;book=None
     age=time.time()-datetime.fromisoformat(created).timestamp()
-    if call.get('source')!='AI_REVIEW':reason='No actual AI directional review'
+    if call.get('source') not in ('AI_REVIEW','AI_DIRECTION_DIP_RULE'):reason='No AI directional review or authorized paper-only market trigger'
     elif call.get('source_mode')=='LIVE' and call.get('profit_action') not in ('ENTER_UP','ENTER_DOWN'):reason='Live AI sees no near-term profit opportunity'
     elif direction not in ('UP','DOWN'):reason='No actionable directional call'
     elif call.get('confidence') not in ('MEDIUM','HIGH') and not (call.get('source_mode')=='LIVE' and call.get('confidence')=='LOW'):reason='AI confidence below paper-test minimum'
-    elif call.get('source_mode')=='LIVE' and direction=='UP':
-        dip_ok,dip_reason=dip_rebound_check(snapshot,call)
-        if not dip_ok:reason=dip_reason
     if reason is None and not 0<=age<=60:reason='Saved call is too old for a new paper entry'
     if reason is None and (snapshot.get('reference_price') or {}).get('status')!='fresh':reason='No fresh reference-price evidence at decision time'
     if reason is None and number(snapshot.get('official_target')) is None:reason='Official target unavailable'
@@ -200,9 +297,12 @@ async def try_entry(client,execute,connect,postgres,row):
     with connect() as c:
         cur,account=locked_account(c,postgres)
         try:
-            run(cur,postgres,'SELECT status,detail_json FROM paper_attempts WHERE market=?',(market,))
+            run(cur,postgres,'SELECT status,created_at,detail_json FROM paper_attempts WHERE market=?',(market,))
             prior=cur.fetchone()
-            if prior and (prior[0]=='FILLED' or json.loads(prior[1]).get('call_id')==call_id):return
+            if prior and prior[0]=='FILLED':return
+            if prior and json.loads(prior[2]).get('call_id')==call_id:
+                last_try=time.time()-datetime.fromisoformat(prior[1]).timestamp()
+                if last_try<4:return
             def attempt(status,why,detail):record_attempt(cur,postgres,market,status,why,{'call_id':call_id,**detail})
             initial,cash,paused,started,risk_json,high,drawdown=account;risk=risk_settings(json.loads(risk_json))
             if paused or os.getenv('PAPER_TRADING_ENABLED','true').lower() not in ('true','1','yes'):
@@ -219,7 +319,7 @@ async def try_entry(client,execute,connect,postgres,row):
             fill=entry_fill(book,direction,budget,risk)
             if fill and fill['cost_cents']/(100*fill['quantity'])>=risk['max_all_in_price']:
                 fill=None;reason='Entry odds or all-in cost reaches the strict 85 percent cap'
-            if fill and call.get('source_mode')=='LIVE':
+            if fill and call.get('source_mode') in ('LIVE','DIP_WATCH'):
                 max_entry=number(call.get('max_entry_price'));target_bid=number(call.get('target_exit_bid'))
                 target_book={'bids':[(target_bid,fill['quantity'])] if target_bid is not None else [],'offers':[(1-target_bid,fill['quantity'])] if target_bid is not None else []}
                 projected=full_exit(target_book,'UP',fill['quantity'],risk['slippage']) if target_bid is not None and 0<target_bid<1 else None
@@ -358,7 +458,10 @@ async def cycle(client,execute,connect,postgres,live_signal=None):
               'max_entry_price':opp.get('max_entry_price'),'target_exit_bid':opp.get('target_exit_bid')}
         execute('INSERT INTO paper_live_calls (id,market,created_at,snapshot_json,calls_json) VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING',(key,market,created,json.dumps(snapshot),json.dumps({'AI':call})))
     started=execute("SELECT started_at FROM paper_account WHERE id='main'",fetch=True)[0][0]
-    rows=execute('SELECT market,id,created_at,snapshot_json,calls_json FROM paper_live_calls WHERE processed=0 AND created_at>=? ORDER BY created_at DESC LIMIT 5',(started,),fetch=True)
+    dip=polymarket_dip_signal(execute,signal)
+    if dip:execute('INSERT INTO paper_live_calls (id,market,created_at,snapshot_json,calls_json) VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING',dip)
+    cutoff=max(started,datetime.fromtimestamp(time.time()-60,timezone.utc).isoformat())
+    rows=execute('SELECT market,id,created_at,snapshot_json,calls_json FROM paper_live_calls WHERE created_at>=? ORDER BY created_at DESC LIMIT 6',(cutoff,),fetch=True)
     for row in rows:
         await try_entry(client,execute,connect,postgres,row)
         execute('UPDATE paper_live_calls SET processed=1 WHERE id=?',(row[1],))
@@ -383,6 +486,11 @@ def report(execute):
     winloss=execute("SELECT SUM(CASE WHEN pnl_cents>0 THEN 1 ELSE 0 END),SUM(CASE WHEN pnl_cents<=0 THEN 1 ELSE 0 END),COALESCE(SUM(CASE WHEN pnl_cents>0 THEN pnl_cents ELSE 0 END),0),COALESCE(SUM(CASE WHEN pnl_cents<0 THEN -pnl_cents ELSE 0 END),0) FROM paper_positions WHERE status IN ('CLOSED','SETTLED')",fetch=True)[0]
     wins,losses,gain,loss=winloss;wins=wins or 0;losses=losses or 0;n=wins+losses
     events=execute('SELECT market,created_at,status,reason,detail_json FROM paper_attempts ORDER BY created_at DESC LIMIT 25',fetch=True)
+    shadow_counts=execute("SELECT status,COUNT(*) FROM paper_missed_opportunities GROUP BY status",fetch=True)
+    shadow_recent=execute("""SELECT market,direction,observed_epoch,entry_ask,quantity,entry_cost_cents,
+           status,best_exit_bid,best_exit_epoch,best_net_cents,max_roi_pct,resolved_epoch
+           FROM paper_missed_opportunities WHERE status<>'WATCHING' ORDER BY COALESCE(resolved_epoch,observed_epoch) DESC LIMIT 40""",fetch=True)
+    shadow_counts=dict(shadow_counts)
     blocker_rows=execute("SELECT reason,COUNT(*) FROM paper_attempts WHERE status='SKIPPED' GROUP BY reason ORDER BY COUNT(*) DESC LIMIT 12",fetch=True)
     signal_rows=execute("SELECT COUNT(*),SUM(CASE WHEN processed=0 THEN 1 ELSE 0 END) FROM paper_live_calls",fetch=True)[0]
     latest_signal=execute('SELECT created_at,calls_json FROM paper_live_calls ORDER BY created_at DESC LIMIT 1',fetch=True)
@@ -403,6 +511,10 @@ def report(execute):
             'positions':[dict(zip(('market','direction','quantity','cost_cents','fee_cents','status','created_at','settled_at','winner','payout_cents','pnl_cents','mark_cents','mark_epoch','exit_reason','exit_fee_cents','closed_at'),x)) for x in positions],
             'attempts':[{'market':m,'created_at':t,'status':s,'reason':why,'details':json.loads(detail)} for m,t,s,why,detail in events],
             'trading_diagnostics':diagnostic,
+            'missed_opportunity_counts':shadow_counts,
+            'missed_opportunities':[dict(zip(('market','direction','observed_epoch','entry_ask','quantity','entry_cost_cents',
+                'status','best_exit_bid','best_exit_epoch','best_net_cents','max_roi_pct','resolved_epoch'),row)) for row in shadow_recent],
+            'missed_opportunity_note':'Forward observed Polymarket BBO top-of-book hypothetical trades (10 contracts, taker-fee and adverse slippage model), sampled approximately every 20s per direction. MISSED_QUOTED_PROFIT means a later quote hypothetically beat the net 5% target within 180s without a matching paper position. Not a guaranteed fill or realized profit; depth, latency and slippage can differ.',
             'entry_mode':'LIVE_ANYTIME',
             'latest_live_signal':[{'market':m,'captured_at':t,'call':json.loads(c).get('AI')} for m,t,c in execute('SELECT market,created_at,calls_json FROM paper_live_calls ORDER BY created_at DESC LIMIT 1',fetch=True)],
             'orders':[dict(zip(('market','kind','status','threshold','updated_at','detail'),x)) for x in execute('SELECT market,kind,status,threshold,updated_at,detail FROM paper_orders ORDER BY updated_at DESC LIMIT 60',fetch=True)],
