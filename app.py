@@ -323,27 +323,24 @@ def settlement_price(data):
  return None
 
 def verified_winner(m, settlement):
- # Use official market-side metadata and the official YES settlement payout.
- # Never guess UP/DOWN from Coinbase or an arbitrary array position.
+ # For official Polymarket US asset-price UP_DOWN contracts, YES pays on UP.
+ # Reject any other market type or ambiguous settlement.
  if not isinstance(m,dict): return None
+ terms=m.get("assetPriceTerms")
+ if not isinstance(terms,dict) or terms.get("marketType")!="ASSET_PRICE_MARKET_TYPE_UP_DOWN": return None
+ asset=terms.get("asset") or {}
+ if not isinstance(asset,dict) or str(asset.get("symbol") or "").lower()!="btc": return None
+ sides=m.get("marketSides") or []
+ if not isinstance(sides,list) or len(sides)!=2: return None
+ yes=[s for s in sides if isinstance(s,dict) and s.get("long") is True]
+ no=[s for s in sides if isinstance(s,dict) and s.get("long") is False]
+ if len(yes)!=1 or len(no)!=1: return None
+ if str(yes[0].get("description") or "").strip().lower()!="yes": return None
+ if str(no[0].get("description") or "").strip().lower()!="no": return None
  p=settlement_price(settlement)
- if p not in (0.0,1.0): return None
- sides=m.get("marketSides") or m.get("market_sides") or []
- if not isinstance(sides,list): return None
- import re
- identified=[]
- for side in sides:
-  if not isinstance(side,dict): continue
-  is_long=side.get("long") is True or str(side.get("side") or side.get("position") or "").upper() in ("LONG","YES","MARKET_SIDE_LONG")
-  if not is_long: continue
-  labels=[str(side.get(k) or "") for k in ("description","outcome","name","label","identifier")]
-  matches=set()
-  for label in labels:
-   matches.update(re.findall(r"\b(?:UP|DOWN)\b",label.upper()))
-  if len(matches)==1: identified.append(next(iter(matches)))
- if len(identified)!=1: return None
- yes=identified[0]
- return yes if p==1.0 else ("DOWN" if yes=="UP" else "UP")
+ if p==1.0: return "UP"
+ if p==0.0: return "DOWN"
+ return None
 
 async def settle(client):
  # Resolve the original event when the market-slug endpoint is unavailable.
