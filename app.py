@@ -332,6 +332,18 @@ async def settle(client):
   except Exception as exc:
    diagnostic["errors"].append(type(exc).__name__+": "+str(exc)[:100])
  state["settlement_diagnostic"]=diagnostic
+def final_direction(data, primary, score):
+ # Research-only forced binary prediction, including weak/mixed conditions.
+ # The decision is not a confidence estimate or guaranteed trading edge.
+ if primary in ("UP","DOWN"): return primary
+ fast=float(data.get("momentum_pct",0))
+ slow=float(data.get("long_momentum_pct",0))
+ combined=fast*0.7+slow*0.3
+ if combined==0: combined=float(score)
+ if combined==0:
+  combined=float(data.get("last_price",0))-float(data.get("open_price",0))
+ return "UP" if combined>=0 else "DOWN"
+
 async def loop():
  setup()
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
@@ -354,9 +366,9 @@ async def loop():
      if phase in ("EARLY","LATE") and direction!="WAIT":
       execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":"+phase,slug,phase,direction,flip,score,now))
      # One independent, immutable FINAL call per 5m round, at the first poll
-     # reaching 2:30 remaining. WAIT is saved if evidence is insufficient.
+     # reaching 2:30 remaining. Force a research prediction even when trend confirmation is weak.
      if remaining<=150 and remaining>0:
-      execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":FINAL",slug,"FINAL",direction,flip,score,now))
+      execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":FINAL",slug,"FINAL",final_direction(d,direction,score),flip,score,now))
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(remaining),market=slug,external=d,updated=now,error=None)
      await confirm(client,slug,phase,direction,flip,score,d)
     # Dedicated 15m FINAL call at 7:30 remaining, independent of 5m FINAL.
@@ -365,7 +377,7 @@ async def loop():
      left15=fifteen["end"]-time.time()
      state["final_15m"]={"market":fifteen["slug"],"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
      if 0<left15<=450:
-      execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(fifteen["slug"]+":FINAL_15M",fifteen["slug"],"FINAL_15M",direction,flip,score,now))
+      execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(fifteen["slug"]+":FINAL_15M",fifteen["slug"],"FINAL_15M",final_direction(d,direction,score),flip,score,now))
     else:
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
     await settle(client)
