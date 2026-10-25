@@ -42,10 +42,12 @@ async def market_data(client):
  floor=now.replace(minute=(now.minute//5)*5,second=0,microsecond=0)
  errors=[]
  # US five-minute event slugs use UTC date and HHMMz.
- for delta in (0,5,-5,10):
+ for delta in (0,5,10,-5):
   from datetime import timedelta
   t=floor+timedelta(minutes=delta)
   slug="btc-updown-5m-"+t.strftime("%Y-%m-%d-%H%Mz").lower()
+  if t.timestamp()+300<=time.time(): continue
+  # A successful market lookup must correspond to this exact US round.
   for path in ("/v1/markets/"+slug, "/v1/market/slug/"+slug):
    try:
     r=await client.get(base+path,timeout=7)
