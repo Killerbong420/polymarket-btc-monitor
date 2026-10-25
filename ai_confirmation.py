@@ -72,18 +72,20 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "candle_age_seconds": external.get("candle_age_seconds"),
     }
     schema = {"type": "object", "properties": {
-        "verdict": {"type": "string", "enum": ["CONFIRM", "CAUTION", "WAIT"]},
+        "verdict": {"type": "string", "enum": ["UP", "DOWN"]},
         "reason": {"type": "string"},
-        "flip_risk": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "UNKNOWN"]}
-    }, "required": ["verdict", "reason", "flip_risk"], "additionalProperties": False}
+        "flip_risk": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "UNKNOWN"]},
+        "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]}
+    }, "required": ["verdict", "reason", "flip_risk", "confidence"], "additionalProperties": False}
     payload = {
         "model": MODEL, "store": False,
         "instructions": (
-            "You are a cautious BTC indicator cross-checker, not a price oracle. "
-            "Review only supplied market observations. CONFIRM means indicators are internally "
-            "consistent, NOT that a trade will win. CAUTION means conflicting evidence or reversal risk. "
-            "WAIT means stale, inadequate or ambiguous data. Never invent order flow, settlement prices, "
-            "probabilities, market odds or historical accuracy. Keep reason under 180 characters."
+            "Make a binary BTC direction research forecast: UP or DOWN. Never output WAIT. "
+            "Use only supplied observations, emphasizing fresh price momentum and trend. "
+            "When indicators disagree or data is incomplete, select the better-supported direction "
+            "and set confidence LOW. Do not invent observations or claim certainty. "
+            "Mention stale data when applicable. This is not a trade instruction. "
+            "Keep reason under 180 characters."
         ),
         "input": json.dumps(snapshot, separators=(",", ":")),
         "text": {"format": {"type": "json_schema", "name": "btc_confirmation",
@@ -102,11 +104,12 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         if not text_parts:
             raise ValueError("Model returned no usable text")
         parsed = json.loads("".join(text_parts))
-        if parsed.get("verdict") not in ("CONFIRM", "CAUTION", "WAIT"):
+        if parsed.get("verdict") not in ("UP", "DOWN"):
             raise ValueError("Invalid model verdict")
         _cache = {"status": "ready", "verdict": parsed["verdict"],
             "reason": str(parsed.get("reason", ""))[:240],
             "flip_risk": parsed.get("flip_risk", "UNKNOWN"),
+            "confidence": parsed.get("confidence", "LOW"),
             "signal": signal, "market": market, "phase": phase,
             "model": MODEL, "updated_epoch": time.time()}
     except httpx.HTTPStatusError as exc:
