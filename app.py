@@ -407,7 +407,12 @@ async def settle(client):
       "side_samples":[{k:(str(v)[:90] if isinstance(v,(str,int,float,bool)) else type(v).__name__) for k,v in side.items() if k in ("long","side","position","description","outcome","name","label","identifier","id","status")} for side in sides[:3] if isinstance(side,dict)] if isinstance(sides,list) else [],
       "settlement_type":type(sr.json()).__name__,
       "settlement_keys":list(sr.json().keys())[:20] if isinstance(sr.json(),dict) else [],
-      "settlement_value":settlement_price(sr.json())})
+      "settlement_value":settlement_price(sr.json()),
+      "question":str(market.get("question") or "")[:240],
+      "title":str(market.get("title") or "")[:160],
+      "subtitle":str(market.get("subtitle") or "")[:160],
+      "outcomes":str(market.get("outcomes") or "")[:160],
+      "asset_price_terms":str(market.get("assetPriceTerms") or "")[:350]}})
     unresolved("official_winner_mapping_unverified")
     continue
    execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
