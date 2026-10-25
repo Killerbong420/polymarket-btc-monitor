@@ -655,7 +655,7 @@ async def paper_worker():
 async def lifespan(app):
  task=asyncio.create_task(loop())
  context_task=asyncio.create_task(intelligence_loop())
- paper_task=asyncio.create_task(paper_worker())
+ # Paper-trading worker disabled: prediction-only mode.
  async def historical_job():
   try:
    historical_state.update(status="running",started=datetime.now(timezone.utc).isoformat())
@@ -668,8 +668,7 @@ async def lifespan(app):
  task.cancel()
  history_task.cancel()
  context_task.cancel()
- paper_task.cancel()
- for running in (task,history_task,context_task,paper_task):
+ for running in (task,history_task,context_task):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
