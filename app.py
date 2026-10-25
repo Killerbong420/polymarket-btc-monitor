@@ -33,7 +33,7 @@ def setup():
  id TEXT PRIMARY KEY, market TEXT NOT NULL, phase TEXT NOT NULL,
  direction TEXT NOT NULL, flip TEXT NOT NULL, score REAL NOT NULL,
  created_at TEXT NOT NULL, result TEXT NOT NULL DEFAULT 'PENDING')""")
- for col in ("quality TEXT NOT NULL DEFAULT 'UNRATED'","quality_reason TEXT NOT NULL DEFAULT 'Legacy prediction; quality not captured'"):
+ for col in ("quality TEXT NOT NULL DEFAULT 'UNRATED'","quality_reason TEXT NOT NULL DEFAULT 'Legacy prediction; quality not captured'","decision_source TEXT NOT NULL DEFAULT 'LEGACY'","decision_reason TEXT NOT NULL DEFAULT ''","ai_confidence TEXT NOT NULL DEFAULT 'UNRATED'"):
   try: execute("ALTER TABLE signals ADD COLUMN "+col)
   except Exception as exc:
    if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower(): raise
@@ -555,6 +555,8 @@ async def record_halfway(client,slug,phase,d,primary,flip,score,now,market):
  review=await halfway_decision(client,slug,15 if phase=="FINAL_15M" else 5,fallback,score,d,target)
  chosen=review.get("direction") if review.get("direction") in ("UP","DOWN") else fallback
  log_signal(slug,phase,chosen,flip,score,now,d)
+ execute("UPDATE signals SET decision_source=?,decision_reason=?,ai_confidence=? WHERE id=?",
+  (review.get("source","UNKNOWN"),str(review.get("reason",""))[:300],review.get("ai_confidence","UNRATED"),slug+":"+phase))
  state["last_halfway_ai"]={"market":slug,"phase":phase,"direction":chosen,
   "indicator_direction":fallback,"source":review.get("source"),
   "reason":review.get("reason"),"ai_confidence":review.get("ai_confidence"),
@@ -642,8 +644,8 @@ def historical_csv():
 def status():
  try:
   rows=execute("SELECT result,COUNT(*) FROM signals GROUP BY result",fetch=True)
-  recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason FROM signals ORDER BY created_at DESC LIMIT 50",fetch=True)
-  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason"),r)) for r in recent]}
+  recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason,decision_source,decision_reason,ai_confidence FROM signals ORDER BY created_at DESC LIMIT 50",fetch=True)
+  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
  except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
 @app.get("/",response_class=HTMLResponse)
 def home():
