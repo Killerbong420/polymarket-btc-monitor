@@ -8,7 +8,8 @@ import httpx
 from market_intelligence import intelligence_loop, public_intelligence
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start
 from monitor_health import checks as health_checks, persist_alerts, alert_history
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
+import paper_trader as paper
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 try:
  import psycopg
@@ -61,6 +62,7 @@ def setup():
  id TEXT PRIMARY KEY,code TEXT NOT NULL,severity TEXT NOT NULL,message TEXT NOT NULL,
  active INTEGER NOT NULL,created_at TEXT NOT NULL)""")
  execute("CREATE INDEX IF NOT EXISTS research_market_idx ON research_calls(market)")
+ paper.setup(execute)
 def parse_json(v):
  if isinstance(v,list): return v
  try: return json.loads(v)
@@ -575,6 +577,11 @@ async def loop():
      await confirm(client,None,None,"WAIT","WAIT",0,d)
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     await settle(client)
+    try:
+     await paper.cycle(client,execute,connect,bool(DB))
+     state["paper_error"]=None
+     state["paper_unfilled_exits"]=execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0]
+    except Exception as paper_exc:state["paper_error"]=type(paper_exc).__name__+": "+str(paper_exc)[:160]
     state["alerts"]=health_checks(state,public_state(),DB)
     persist_alerts(execute,state["alerts"])
    except Exception as e:
@@ -609,6 +616,27 @@ app=FastAPI(lifespan=lifespan)
 @app.get("/research-dashboard.js")
 def dashboard_script():
  return FileResponse(str(Path(__file__).with_name("research_dashboard.js")),media_type="application/javascript")
+
+@app.get("/api/paper")
+def paper_status():
+ try:return {**paper.report(execute),"monitor_error":state.get("paper_error")}
+ except Exception:return JSONResponse({"mode":"PAPER_ONLY","error":"Paper ledger unavailable"},status_code=503)
+
+@app.post("/api/paper/control")
+async def paper_control(request:Request):
+ from urllib.parse import urlparse
+ origin=urlparse(request.headers.get("origin",""))
+ if origin.scheme not in ("http","https") or origin.netloc!=request.headers.get("host") or request.headers.get("x-paper-control")!="1":
+  return JSONResponse({"error":"Same-origin paper controls required"},status_code=403)
+ try:
+  body=await request.json()
+  action=body.get("action") if isinstance(body,dict) else None
+  if action not in ("pause","resume","stop"):return JSONResponse({"error":"Only paper pause, resume or stop are supported"},status_code=400)
+  if action=="resume" and os.getenv("PAPER_TRADING_ENABLED","true").lower() not in ("true","1","yes"):
+   return JSONResponse({"error":"Paper trading is disabled by the server setting"},status_code=409)
+  paper.control(connect,bool(DB),action)
+  return {"mode":"PAPER_ONLY","action":action,"real_orders_enabled":False}
+ except Exception:return JSONResponse({"error":"Paper control unavailable"},status_code=503)
 
 @app.get("/api/research")
 def get_research():

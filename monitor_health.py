@@ -15,6 +15,8 @@ def checks(state,ai,db,db_error=None,now=None):
     def add(code,active,severity,text):
         if active:results.append({'code':code,'severity':severity,'message':text})
     add('LOOP_STALE',age>45,'critical','Monitor has not completed a data cycle in over 45 seconds.')
+    add('PAPER_EXIT_UNFILLED',state.get('paper_unfilled_exits',0)>0,'warning','A protective fake-money sell could not fully fill; the engine is retrying. No completed sale is assumed.')
+    add('PAPER_ENGINE',bool(state.get('paper_error')),'warning','Paper-trading engine reported an error; no simulated entry should be assumed.')
     add('MONITOR_ERROR',bool(state.get('error')),'critical','Monitoring cycle reported an error; inspect feed and database alerts.')
     add('DATABASE',bool(db_error),'critical','Prediction database is unavailable; saved decisions may be missing.')
     add('PERSISTENCE',not db,'warning','SQLite storage is local; persistent DATABASE_URL is not configured.')
