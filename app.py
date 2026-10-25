@@ -1,4 +1,5 @@
 import asyncio, json, os, sqlite3, time
+from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import httpx
@@ -240,5 +241,4 @@ def status():
  except Exception as e: return {**state,"database_error":str(e),"history":[]}
 @app.get("/",response_class=HTMLResponse)
 def home():
- return """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>BTC Monitor</title><style>body{background:#101723;color:#e7edf8;font:16px system-ui;margin:24px;max-width:850px}section{background:#202c3c;padding:18px;border-radius:14px;margin:12px 0}strong{font-size:28px}table{width:100%;font-size:12px}td,th{padding:8px;text-align:left;border-bottom:1px solid #465366}small{color:#b3c1d5}</style></head><body><h1>BTC 5-minute monitor</h1><small>Research only · No automatic orders · Uncalibrated signals</small><section><div id="status">Loading…</div><h2 id="market"></h2><strong id="signal">WAIT</strong><p id="phase"></p><h3 id="flip"></h3></section><section><h3>External BTC data</h3><pre id="external" style="white-space:pre-wrap"></pre></section><section><h3>Results</h3><p id="counts"></p><div style="overflow:auto"><table><thead><tr><th>Time UTC</th><th>Round</th><th>Phase</th><th>Call</th><th>Flip</th><th>Result</th></tr></thead><tbody id="history"></tbody></table></div></section><script>
-async function refresh(){try{const r=await fetch('/api/status',{cache:'no-store'});const d=await r.json();for(const k of ['status','market','signal','flip'])document.getElementById(k).textContent=d[k]||'WAIT';document.getElementById('phase').textContent=(d.phase||'')+' '+(d.seconds_left??'')+' seconds remaining';document.getElementById('external').textContent=JSON.stringify(d.external||{},null,2);document.getElementById('counts').textContent=JSON.stringify(d.counts||{});document.getElementById('history').replaceChildren(...(d.history||[]).map(x=>{const tr=document.createElement('tr');for(const k of ['created_at','market','phase','direction','flip','result']){const td=document.createElement('td');td.textContent=x[k];tr.append(td)}return tr}));if(d.error)document.getElementById('status').textContent=d.status+': '+d.error}catch(e){document.getElementById('status').textContent='Connection error: '+e.message}}refresh();setInterval(refresh,15000)</script></body></html>"""
+ return Path(__file__).with_name("terminal.html").read_text(encoding="utf-8")
