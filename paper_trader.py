@@ -283,6 +283,13 @@ async def try_entry(client,execute,connect,postgres,row):
     snapshot=json.loads(snapshot_json);call=(json.loads(calls_json).get('AI') or {})
     direction=call.get('direction');reason=None;book=None
     age=time.time()-datetime.fromisoformat(created).timestamp()
+    # Cheap preflight prevents repeated market-book requests after a fill or during
+    # a skipped-entry cooldown; leave the locked check below as the final guard.
+    existing=execute('SELECT status,created_at,detail_json FROM paper_attempts WHERE market=?',(market,),fetch=True)
+    if existing:
+        p_status,p_at,p_detail=existing[0]
+        if p_status=='FILLED':return
+        if json.loads(p_detail).get('call_id')==call_id and time.time()-datetime.fromisoformat(p_at).timestamp()<4:return
     if call.get('source') not in ('AI_REVIEW','AI_DIRECTION_DIP_RULE'):reason='No AI directional review or authorized paper-only market trigger'
     elif call.get('source_mode')=='LIVE' and call.get('profit_action') not in ('ENTER_UP','ENTER_DOWN'):reason='Live AI sees no near-term profit opportunity'
     elif direction not in ('UP','DOWN'):reason='No actionable directional call'
@@ -461,7 +468,8 @@ async def cycle(client,execute,connect,postgres,live_signal=None):
     dip=polymarket_dip_signal(execute,signal)
     if dip:execute('INSERT INTO paper_live_calls (id,market,created_at,snapshot_json,calls_json) VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING',dip)
     cutoff=max(started,datetime.fromtimestamp(time.time()-60,timezone.utc).isoformat())
-    rows=execute('SELECT market,id,created_at,snapshot_json,calls_json FROM paper_live_calls WHERE created_at>=? ORDER BY created_at DESC LIMIT 6',(cutoff,),fetch=True)
+    rows=execute('SELECT market,id,created_at,snapshot_json,calls_json FROM paper_live_calls WHERE market=? AND created_at>=? ORDER BY created_at DESC LIMIT 3',
+                 (signal.get('market') or '',cutoff),fetch=True)
     for row in rows:
         await try_entry(client,execute,connect,postgres,row)
         execute('UPDATE paper_live_calls SET processed=1 WHERE id=?',(row[1],))
