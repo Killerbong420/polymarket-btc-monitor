@@ -35,17 +35,56 @@ def parse_json(v):
  try: return json.loads(v)
  except (ValueError,TypeError): return []
 async def market_data(client):
- r = await client.get("https://gamma-api.polymarket.com/markets",params={"active":"true","closed":"false","limit":100},timeout=12)
- r.raise_for_status()
- now = time.time()
- matches=[]
- for m in r.json():
-  slug=str(m.get("slug",""))
-  if not slug.startswith(os.getenv("MARKET_SLUG_PREFIX","btc-updown-5m")): continue
-  try: end=datetime.fromisoformat(m["endDate"].replace("Z","+00:00")).timestamp()
-  except (KeyError,ValueError,TypeError): continue
-  if end>now and end-now<=600: matches.append((end,m))
- return min(matches,key=lambda x:x[0])[1] if matches else None
+ # Polymarket US and international Polymarket are different venues.
+ # Never substitute international Gamma markets for US contracts.
+ base="https://gateway.polymarket.us"
+ now=datetime.now(timezone.utc)
+ floor=now.replace(minute=(now.minute//5)*5,second=0,microsecond=0)
+ errors=[]
+ # US five-minute event slugs use UTC date and HHMMz.
+ for delta in (0,5,-5,10):
+  from datetime import timedelta
+  t=floor+timedelta(minutes=delta)
+  slug="btc-updown-5m-"+t.strftime("%Y-%m-%d-%H%Mz").lower()
+  for path in ("/v1/markets/"+slug, "/v1/market/slug/"+slug):
+   try:
+    r=await client.get(base+path,timeout=7)
+    if r.status_code==404: continue
+    r.raise_for_status()
+    data=r.json()
+    market=data.get("market",data) if isinstance(data,dict) else None
+    if isinstance(market,dict) and (market.get("slug")==slug or market.get("marketSlug")==slug):
+     market["_round_start"]=t.timestamp()
+     market["_round_end"]=(t+timedelta(minutes=5)).timestamp()
+     market["slug"]=slug
+     return market
+   except Exception as exc: errors.append(type(exc).__name__+": "+str(exc)[:110])
+ # Discover available US markets without guessing their response structure.
+ try:
+  r=await client.get(base+"/v1/markets",params={"limit":500,"offset":0},timeout=12)
+  r.raise_for_status()
+  payload=r.json()
+  items=payload if isinstance(payload,list) else payload.get("markets",[]) if isinstance(payload,dict) else []
+  candidates=[]
+  for m in items:
+   if not isinstance(m,dict): continue
+   slug=str(m.get("slug") or m.get("marketSlug") or "")
+   if not slug.startswith("btc-updown-5m-"): continue
+   try:
+    stamp=slug[len("btc-updown-5m-"):]
+    t=datetime.strptime(stamp,"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc)
+    remaining=(t.timestamp()+300)-time.time()
+    if 0<remaining<=600:
+     m["slug"]=slug
+     m["_round_start"]=t.timestamp()
+     m["_round_end"]=t.timestamp()+300
+     candidates.append((abs(remaining-150),m))
+   except ValueError: continue
+  if candidates: return min(candidates,key=lambda x:x[0])[1]
+  state["market_diagnostic"]={"venue":"Polymarket US","gateway_status":r.status_code,"markets_scanned":len(items),"sample_slugs":[str(m.get("slug") or m.get("marketSlug")) for m in items[:3] if isinstance(m,dict)],"lookup_errors":errors[-3:]}
+ except Exception as exc:
+  state["market_diagnostic"]={"venue":"Polymarket US","error":str(exc)[:300],"lookup_errors":errors[-3:]}
+ return None
 async def spot_data(client):
  errors=[]
  for host in ("https://api.binance.us","https://api.binance.com"):
@@ -81,6 +120,9 @@ def winner(m):
  w=str(outcomes[p.index(1.0)]).upper()
  return w if w in ("UP","DOWN") else None
 async def settle(client):
+ # US settlement must be verified against the official US settlement endpoint.
+ # Do not grade US markets using international Gamma outcome prices.
+ return
  rows=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING'",fetch=True)
  for (slug,) in rows[:30]:
   try:
@@ -102,10 +144,10 @@ async def loop():
     direction,flip,score=judge(d)
     now=datetime.now(timezone.utc).isoformat()
     if not m:
-     state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No compatible active 5-minute market in Gamma results")
+     state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No compatible Polymarket US 5-minute market found; see market_diagnostic")
     else:
      slug=m["slug"]
-     end=datetime.fromisoformat(m["endDate"].replace("Z","+00:00")).timestamp()
+     end=m["_round_end"]
      remaining=end-time.time()
      phase="EARLY" if remaining>=180 else "LATE" if remaining<=90 else "MID"
      if phase in ("EARLY","LATE") and direction!="WAIT":
