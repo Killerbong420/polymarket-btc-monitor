@@ -9,11 +9,12 @@ import paper_learning as learning
 INITIAL_CENTS=100000
 RISK={'max_trade_cents':1000,'daily_loss_cents':2500,'max_open_cents':5000,
       'min_price':.10,'max_price':.85,'max_all_in_price':.85,'max_spread':.08,'slippage':.005,
-      'take_profit_pct':.08,'stop_loss_pct':.08,'max_hold_seconds':180,'exit_before_expiry_seconds':180,
+      'take_profit_pct':.08,'stretch_profit_pct':.15,'profit_trail_pct':.025,'stop_loss_pct':.08,'max_hold_seconds':180,'exit_before_expiry_seconds':180,
       'min_confidence':'LOW','low_confidence_max_trade_cents':500,'checkpoint':'LIVE_ANYTIME','daily_timezone':'America/Chicago'}
 _last_mark=0.0
 _last_entry_scan=0.0
 _last_settlement_scan=0.0
+_profit_peaks={}  # Observed executable net ROI, not contract midpoint.
 
 def risk_settings(stored):
     risk={**RISK,**stored}
@@ -408,8 +409,7 @@ def position_context(execute,market):
             'mark_age_seconds':round(time.time()-epoch,1) if epoch else None,'opened_at':created}
 
 async def manage_exits(client,execute,connect,postgres,live_signal=None):
-    # Existing positions may have a saved 5% order from the old strategy.
-    # Raise only the paper take-profit trigger, preserving stops and time exits.
+    # Keep the minimum 8% net target on existing paper positions.
     execute("UPDATE paper_orders SET threshold=? WHERE kind='TAKE_PROFIT' AND position_id IN (SELECT id FROM paper_positions WHERE status='OPEN') AND threshold<?",
             (RISK['take_profit_pct'],RISK['take_profit_pct']))
     rows=execute("SELECT id,market,direction,quantity,cost_cents FROM paper_positions WHERE status='OPEN'",fetch=True)
@@ -425,11 +425,23 @@ async def manage_exits(client,execute,connect,postgres,live_signal=None):
         except Exception as exc:problem='Exit book unavailable: '+type(exc).__name__
         if fill is not None:learning.observe_position_peak(execute,ident,market,cost,fill['net_cents'])
         roi=(fill['net_cents']-cost)/cost if fill and cost else None
+        if roi is not None:_profit_peaks[ident]=max(_profit_peaks.get(ident,roi),roi)
+        peak=_profit_peaks.get(ident,0)
+        # Aim for 15% only while an 8%-plus winning position continues improving.
+        # Protect profits by selling after a 2.5 percentage-point retracement.
+        # All comparisons use full-exit proceeds net of modeled fees and slippage.
+        stretch_hit=roi is not None and roi>=RISK['stretch_profit_pct']
+        trailing_exit=(roi is not None and peak>=RISK['take_profit_pct'] and
+                       roi<=peak-RISK['profit_trail_pct'])
+        # A quick gain without ongoing momentum is still banked at the 8% floor.
+        short_time_exit=(roi is not None and roi>=RISK['take_profit_pct'] and
+                         time.time()>=market_start(market)+900-RISK['exit_before_expiry_seconds']-30)
+
         live_signal=live_signal or {};position=(live_signal.get('snapshot') or {}).get('paper_position') or {}
         opp=live_signal.get('profit_opportunity') or {};fresh=live_signal.get('status')=='ready' and 0<=time.time()-live_signal.get('captured_epoch',0)<=60 and position.get('position_id')==ident
         ai_profit=fresh and opp.get('position_action')=='TAKE_PROFIT' and roi is not None and roi>0
         ai_risk=fresh and opp.get('position_action')=='EXIT_RISK'
-        kind='TIME_EXIT' if forced else 'STOP_LOSS' if ai_risk or stop_working or (roi is not None and roi<=-terms.get('STOP_LOSS',(RISK['stop_loss_pct'],''))[0]) else 'TAKE_PROFIT' if ai_profit or (roi is not None and roi>=terms.get('TAKE_PROFIT',(RISK['take_profit_pct'],''))[0]) else None
+        kind='TIME_EXIT' if forced else 'STOP_LOSS' if ai_risk or stop_working or (roi is not None and roi<=-terms.get('STOP_LOSS',(RISK['stop_loss_pct'],''))[0]) else 'TAKE_PROFIT' if ai_profit or stretch_hit or trailing_exit or short_time_exit else None
         if kind is None:continue
         with connect() as c:
             cur,account=locked_account(c,postgres)
@@ -439,6 +451,7 @@ async def manage_exits(client,execute,connect,postgres,live_signal=None):
                 if book is not None and time.time()-book['book_epoch']>30:fill=None;problem='Exit book became stale'
                 if fill is None:
                     run(cur,postgres,"UPDATE paper_orders SET status='UNFILLED',updated_at=?,detail=? WHERE position_id=? AND kind=?",(stamp(),problem or 'No executable depth',ident,kind));continue
+                _profit_peaks.pop(ident,None)
                 run(cur,postgres,"UPDATE paper_positions SET status='CLOSED',closed_at=?,exit_reason=?,exit_net_cents=?,exit_fee_cents=?,pnl_cents=?,mark_cents=?,mark_epoch=? WHERE id=? AND status='OPEN'",(stamp(),kind,fill['net_cents'],fill['fee_cents'],fill['net_cents']-cost,fill['net_cents'],time.time(),ident))
                 if not cur.rowcount:continue
                 learning.finalize_position(cur,postgres,run,ident,fill['net_cents'],kind)
