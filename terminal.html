@@ -469,10 +469,10 @@ async function refresh(){
   const d=await r.json();latest=d;
   const p=(d.points||[]).at(-1);
   const age=p?Date.now()/1000-p.epoch:Infinity,fresh=d.status==='live'&&age<=20;
-  $('pmQuoteStatus').textContent=fresh?'LIVE QUOTES':d.status==='stale'?'QUOTES STALE':'AWAITING QUOTES';
+  $('pmQuoteStatus').textContent=fresh?'LIVE QUOTES':d.status==='stale'?'QUOTES STALE':d.status==='live'?'WAITING FOR FRESH QUOTES':'NO LIVE MARKET QUOTES';
   $('pmUpQuote').textContent=fresh?fmt(p.up_ask):'—';
   $('pmDownQuote').textContent=fresh?fmt(p.down_ask):'—';
-  if(!p)$('pmChartInfo').textContent=d.reason||'Waiting for Polymarket 15-minute quote samples.';
+  $('pmChartInfo').textContent=p?'Last quote '+Math.round(age)+'s ago · '+(fresh?'live':'not fresh'):(d.reason||'No verified Polymarket 15-minute quotes available.');
   // Contract price cards update without rendering an odds graph.
  }catch(e){
   $('pmQuoteStatus').textContent='FEED UNAVAILABLE';
@@ -597,11 +597,12 @@ refresh();setInterval(refresh,8000);
  const odds=document.getElementById('pmChartCard');
  const ai=document.getElementById('aiConfirmationPanel');
  const brti=document.getElementById('brtiHero');
- if(!chart||!reference)return;
+ if(!chart)return;
  document.body.insertBefore(chart,document.body.firstElementChild);
  const cards=document.createElement('div');cards.id='terminalQuickCards';
  chart.insertAdjacentElement('afterend',cards);
- cards.append(reference);
+ // The reference panel has no live updater; do not show a permanent CONNECTING placeholder.
+ if(reference)reference.remove();
  if(ai)cards.append(ai);
  if(odds)cards.append(odds);
  if(brti)cards.insertAdjacentElement('afterend',brti);
