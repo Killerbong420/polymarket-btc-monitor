@@ -128,6 +128,28 @@ def public_state():
         return {"status": "not_configured", "verdict": "WAIT", "reason": "Set OPENAI_API_KEY securely in Render to activate AI confirmation.", "model": MODEL}
     return dict(_cache)
 
+def news_assessment(parsed,external):
+    supplied={h.get('id'):h for h in ((external.get('external_intelligence') or {}).get('news') or {}).get('headlines',[]) if h.get('id')}
+    raw=parsed.get('news_ids') or []
+    ids=list(dict.fromkeys(x for x in raw if isinstance(x,str) and x in supplied))[:3] if isinstance(raw,list) else []
+    effect=parsed.get('news_effect','UNKNOWN')
+    if effect not in ('UP','DOWN','MIXED','NONE','UNKNOWN'):effect='UNKNOWN'
+    return {'effect':effect,'headline_ids':ids,'headlines':[supplied[i] for i in ids],
+            'note':'Model-reported influence, not verified causality. No headline selected means no stated news attribution.'}
+
+ANALYSIS_INSTRUCTIONS = (
+    "Use target_behavior for observed lead size, time above/below target, crossing count, "
+    "coverage and whether the lead is growing or shrinking. Prefer a fresh reference_price "
+    "over exchange spot for target-side reasoning. BTC settlement compares the final-minute "
+    "mean of 60 one-second reference observations against the opening target, not just the last tick. "
+    "The final_minute_average_so_far is partial; never treat it as the final outcome. "
+    "Explain uncertainty when using a spot proxy or incomplete coverage. "
+    "For news attribution, return only supplied headline IDs that materially influenced your call, "
+    "and a news_effect UP/DOWN/MIXED/NONE/UNKNOWN. Commentary is not a confirmed event, "
+    "recent publication does not establish a new event, and old URL dates may indicate republishing. "
+    "Do not copy observed confidence-group win rates into a current-round win probability. "
+)
+
 async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score, external, price_to_beat=None, seconds_left=None):
     global _last_request, _cache, _auth_cache
     key = os.getenv("OPENAI_API_KEY")
@@ -148,6 +170,8 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         return _cache
     _last_request = now
     snapshot = {
+        "target_behavior": external.get("target_behavior"), "reference_price": external.get("reference_price"),
+        "market_quote": external.get("market_quote"),
         "external_intelligence": external.get("external_intelligence", {"status":"unavailable"}),
         "historical_context": historical_context(external, price_to_beat, market),
         "market": str(market), "duration_minutes": 15, "seconds_left": seconds_left,
@@ -170,12 +194,14 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "verdict": {"type": "string", "enum": ["UP", "DOWN"]},
         "reason": {"type": "string"},
         "flip_risk": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "UNKNOWN"]},
-        "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]}
-    }, "required": ["verdict", "reason", "flip_risk", "confidence"], "additionalProperties": False}
+        "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
+        "news_ids": {"type":"array","items":{"type":"string"}},
+        "news_effect": {"type":"string","enum":["UP","DOWN","MIXED","NONE","UNKNOWN"]}
+    }, "required": ["verdict", "reason", "flip_risk", "confidence", "news_ids", "news_effect"], "additionalProperties": False}
     payload = {
         "model": MODEL, "store": False,
         "instructions": (
-            EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
+            ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
             "in graph_evidence (oldest to newest), not just the precomputed indicator signal. "
             "Assess higher highs/lows, candle bodies and wicks, breakout or rejection near support/resistance, "
             "momentum acceleration/fading, EMA alignment, RSI and volume where provided. "
@@ -189,7 +215,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "input": json.dumps(snapshot, separators=(",", ":")),
         "text": {"format": {"type": "json_schema", "name": "btc_confirmation",
             "strict": True, "schema": schema}},
-        "max_output_tokens": 240,
+        "max_output_tokens": 360,
     }
     try:
         r = await client.post("https://api.openai.com/v1/responses",
@@ -210,6 +236,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "reason": str(parsed.get("reason", ""))[:240],
             "flip_risk": parsed.get("flip_risk", "UNKNOWN"),
             "confidence": parsed.get("confidence", "LOW"),
+            "news_assessment":news_assessment(parsed,external),"analysis_context_version":"forward-15m-v1",
             "signal": signal, "market": market, "phase": phase,
             "model": MODEL, "external_context_included": bool(external.get("external_intelligence")),
             "external_context_status": {k:v.get("status") for k,v in (external.get("external_intelligence") or {}).items() if isinstance(v,dict)},
@@ -233,7 +260,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "model": MODEL}
     return _cache
 
-async def halfway_decision(client, market, duration, indicator_direction, score, external, price_to_beat=None):
+async def halfway_decision(client, market, duration, indicator_direction, score, external, price_to_beat=None, seconds_left=450, checkpoint="HALFWAY"):
     """One bounded AI review at the halfway FINAL checkpoint; never invent missing observations."""
     fallback={"direction":indicator_direction,"source":"INDICATORS_FALLBACK","reason":"AI unavailable; indicator decision retained"}
     if duration != 15 or "btc-updown-15m-" not in str(market):
@@ -261,9 +288,11 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     if external.get("volume_ratio") is None: missing.append("volume_ratio")
     if external.get("candle_age_seconds") is None: missing.append("candle_freshness")
     snapshot={
+        "target_behavior":external.get("target_behavior"), "reference_price":external.get("reference_price"),
+        "market_quote":external.get("market_quote"),
         "external_intelligence":external.get("external_intelligence", {"status":"unavailable"}),
         "historical_context":historical_context(external, target, market),
-        "market":market,"duration_minutes":duration,
+        "market":market,"duration_minutes":duration,"seconds_left":seconds_left,"checkpoint":checkpoint,
         "indicator_direction":indicator_direction,"indicator_score":score,
         "official_polymarket_price_to_beat":target,
         "official_settlement_index":"BRTI (not Coinbase/Kraken spot)",
@@ -298,10 +327,12 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "candle_age_seconds":external.get("candle_age_seconds"),
         "missing_evidence":missing}
     schema={"type":"object","properties":{"direction":{"type":"string","enum":["UP","DOWN"]},
-        "reason":{"type":"string"},"confidence":{"type":"string","enum":["LOW","MEDIUM","HIGH"]}},
-        "required":["direction","reason","confidence"],"additionalProperties":False}
+        "reason":{"type":"string"},"confidence":{"type":"string","enum":["LOW","MEDIUM","HIGH"]},
+        "news_ids":{"type":"array","items":{"type":"string"}},
+        "news_effect":{"type":"string","enum":["UP","DOWN","MIXED","NONE","UNKNOWN"]}},
+        "required":["direction","reason","confidence","news_ids","news_effect"],"additionalProperties":False}
     payload={"model":MODEL,"store":False,"instructions":(
-        EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "At the halfway checkpoint, review the provided BTC market observations and make exactly one binary research forecast: UP or DOWN. Never output WAIT.  "
+        ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "At the supplied current-round checkpoint (early, halfway or late), review the provided BTC market observations and make exactly one binary research forecast: UP or DOWN. Never output WAIT.  "
         "You may disagree with the indicator direction when concrete evidence supports it. "
         "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. "
         "When evidence is weak or conflicting, still choose the more supported direction and set confidence LOW; explicitly explain the uncertainty. This is a research forecast, not a trade instruction. "
@@ -313,7 +344,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "Keep the reason under 160 characters."),
         "input":json.dumps(snapshot,default=str,separators=(",",":")),
         "text":{"format":{"type":"json_schema","name":"btc_halfway_final","strict":True,"schema":schema}},
-        "max_output_tokens":200}
+        "max_output_tokens":360}
     try:
         res=await client.post("https://api.openai.com/v1/responses",
             headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},
@@ -327,7 +358,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         return {"direction":decision["direction"],"source":"AI_REVIEW",
             "reason":str(decision.get("reason",""))[:160],
             "ai_direction":decision["direction"],"ai_confidence":decision.get("confidence","LOW"),
-            "evidence":snapshot}
+            "evidence":snapshot,"model":MODEL,"news_assessment":news_assessment(decision,external)}
     except Exception as exc:
         return {**fallback,"reason":"AI request unavailable ("+type(exc).__name__+")",
                 "evidence":snapshot}

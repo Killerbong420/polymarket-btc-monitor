@@ -2,12 +2,14 @@ import asyncio, json, os, sqlite3, time
 from pathlib import Path
 from historical_15m import main as collect_15m, START as HISTORY_START, END as HISTORY_END
 from ai_confirmation import confirm, public_state, check_auth, auth_state, halfway_decision
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 import httpx
 from market_intelligence import intelligence_loop, public_intelligence
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start
+from monitor_health import checks as health_checks, persist_alerts, alert_history
+from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 try:
  import psycopg
 except ImportError:
@@ -16,10 +18,16 @@ except ImportError:
 POLL = max(5, int(os.getenv("POLL_SECONDS", "5")))
 DB = os.getenv("DATABASE_URL", "")
 state = {"status":"starting","signal":"WAIT","flip":"WAIT","market":None,"updated":None,"error":None}
+@contextmanager
 def connect():
- if DB:
-  return psycopg.connect(DB)
- return sqlite3.connect("monitor.db")
+ c=psycopg.connect(DB) if DB else sqlite3.connect("monitor.db",timeout=10)
+ try:
+  yield c
+  c.commit()
+ except BaseException:
+  c.rollback()
+  raise
+ finally:c.close()
 def execute(sql, params=(), fetch=False):
  with connect() as c:
   if DB: sql = sql.replace("?", "%s")
@@ -43,6 +51,16 @@ def setup():
   try: execute("ALTER TABLE signals ADD COLUMN "+col)
   except Exception as exc:
    if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower(): raise
+ execute("""CREATE TABLE IF NOT EXISTS research_calls (
+ id TEXT PRIMARY KEY,market TEXT NOT NULL,checkpoint TEXT NOT NULL,created_at TEXT NOT NULL,
+ snapshot_json TEXT NOT NULL,calls_json TEXT NOT NULL,winner TEXT,settled_at TEXT)""")
+ execute("""CREATE TABLE IF NOT EXISTS monitor_alerts (
+ code TEXT PRIMARY KEY,severity TEXT NOT NULL,message TEXT NOT NULL,active INTEGER NOT NULL,
+ first_seen TEXT NOT NULL,last_changed TEXT NOT NULL)""")
+ execute("""CREATE TABLE IF NOT EXISTS monitor_events (
+ id TEXT PRIMARY KEY,code TEXT NOT NULL,severity TEXT NOT NULL,message TEXT NOT NULL,
+ active INTEGER NOT NULL,created_at TEXT NOT NULL)""")
+ execute("CREATE INDEX IF NOT EXISTS research_market_idx ON research_calls(market)")
 def parse_json(v):
  if isinstance(v,list): return v
  try: return json.loads(v)
@@ -327,7 +345,7 @@ async def settle(client):
  # Resolve the original event when the market-slug endpoint is unavailable.
  # Never infer official outcomes from Coinbase spot candles.
  from datetime import timedelta
- pending=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE ? ORDER BY market DESC",("%btc-updown-15m-%",),fetch=True)
+ pending=execute("SELECT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE ? UNION SELECT market FROM research_calls WHERE winner IS NULL ORDER BY market DESC",("%btc-updown-15m-%",),fetch=True)
  diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[],"reasons":{}}
  def unresolved(reason):
   diagnostic["unresolved"]+=1
@@ -368,7 +386,7 @@ async def settle(client):
     unresolved("official_market_unavailable_event_"+str(er.status_code))
     continue
    status=str(market.get("status") or market.get("marketStatus") or "").upper()
-   if "RESOLVED" not in status:
+   if "RESOLVED" not in status or "UNRESOLVED" in status:
     unresolved("official_market_not_resolved_"+(status or "unknown")[:30])
     continue
    sr=await client.get(gateway+"/v1/markets/"+slug+"/settlement",timeout=10)
@@ -395,9 +413,11 @@ async def settle(client):
     continue
    execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    execute("UPDATE ai_decisions SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
+   execute("UPDATE research_calls SET winner=?,settled_at=? WHERE market=? AND winner IS NULL",(win,datetime.now(timezone.utc).isoformat(),slug))
    diagnostic["verified"]+=1
   except Exception as exc:
    diagnostic["errors"].append(type(exc).__name__+": "+str(exc)[:100])
+ diagnostic["overdue_markets"]=sum(1 for (slug,) in pending if market_start(slug) is not None and time.time()>market_start(slug)+2700)
  state["settlement_diagnostic"]=diagnostic
 def final_direction(data, primary, score):
  # Research-only forced binary prediction, including weak/mixed conditions.
@@ -446,27 +466,61 @@ def accuracy_report():
   item["accuracy_pct"]=round(100*item["WIN"]/graded,1) if graded else None
  return sorted(report.values(),key=lambda x:(x["phase"],x["quality"]))
 
-async def record_halfway(client,slug,phase,d,primary,flip,score,now,market):
- if phase!="FINAL_15M" or "btc-updown-15m-" not in str(slug): return
- existing=execute("SELECT id FROM signals WHERE id=?",(slug+":"+phase,),fetch=True)
- if existing: return
- fallback=final_direction(d,primary,score)
- terms=market.get("assetPriceTerms") if isinstance(market,dict) else None
- ptb=(terms or {}).get("priceToBeat") if isinstance(terms,dict) else None
- target=ptb.get("value") if isinstance(ptb,dict) else None
- review=await halfway_decision(client,slug,15,fallback,score,d,target)
+def research_rows():
+ return execute("SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner FROM research_calls ORDER BY created_at DESC LIMIT 10000",fetch=True)
+
+_research_cache={"updated_epoch":0,"report":None}
+def research_report():
+ if time.time()-_research_cache["updated_epoch"]>30 or _research_cache["report"] is None:
+  report=summarize(research_rows())
+  legacy=execute("SELECT confidence,result,COUNT(*) FROM ai_decisions WHERE source='AI_REVIEW' AND phase='FINAL_15M' GROUP BY confidence,result",fetch=True)
+  report["previous_halfway_ai_confidence"]=[{"confidence":c,"result":r,"count":n} for c,r,n in legacy]
+  report["max_checkpoints_in_report"]=10000
+  _research_cache.update(updated_epoch=time.time(),report=report)
+ return {**_research_cache["report"],"updated_epoch":_research_cache["updated_epoch"]}
+
+async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,market):
+ key=slug+":"+checkpoint
+ if execute("SELECT id FROM research_calls WHERE id=?",(key,),fetch=True):return
+ # Freeze common evidence BEFORE the AI call; later price changes cannot rewrite it.
+ import copy
+ frozen=copy.deepcopy(d);captured=datetime.now(timezone.utc).isoformat()
+ target=number(((market.get("assetPriceTerms") or {}).get("priceToBeat")))
+ behavior=frozen.get("target_behavior") or {}
+ quote=frozen.get("market_quote") or {}
+ fallback=final_direction(frozen,primary,score)
+ review=await halfway_decision(client,slug,15,fallback,score,frozen,target,seconds_left=left,checkpoint=checkpoint)
  chosen=review.get("direction") if review.get("direction") in ("UP","DOWN") else fallback
- log_signal(slug,phase,chosen,flip,score,now,d)
- if phase=="FINAL_15M":
-  execute("INSERT INTO ai_decisions (id,market,phase,direction,confidence,source,reason,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
-   (slug+":"+phase,slug,phase,chosen,review.get("ai_confidence","UNRATED"),review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],now))
- execute("UPDATE signals SET decision_source=?,decision_reason=?,ai_confidence=? WHERE id=?",
-  (review.get("source","UNKNOWN"),str(review.get("reason",""))[:300],review.get("ai_confidence","UNRATED"),slug+":"+phase))
- state["last_halfway_ai"]={"market":slug,"phase":phase,"direction":chosen,
-  "indicator_direction":fallback,"source":review.get("source"),
-  "reason":review.get("reason"),"ai_confidence":review.get("ai_confidence"),
-  "evidence":review.get("evidence"),
-  "updated":now}
+ confidence=review.get("ai_confidence","UNRATED")
+ quality,quality_reason=signal_quality_snapshot(frozen,primary,score)
+ calls={
+  "AI":{"direction":chosen if review.get("source")=="AI_REVIEW" else "WAIT","source":review.get("source"),"confidence":confidence,"reason":review.get("reason"),"news_assessment":review.get("news_assessment")},
+  "INDICATORS":{"direction":primary,"source":"INDICATORS","confidence":quality,"reason":quality_reason},
+  "INDICATOR_BINARY":{"direction":fallback,"source":"FORCED_INDICATORS","confidence":quality},
+  "TARGET_SIDE":{"direction":behavior.get("side") if behavior.get("status")=="available" and behavior.get("side") in ("UP","DOWN") else "WAIT","source":behavior.get("source"),"confidence":"UNRATED"}}
+ for call in calls.values():
+  direction=call.get("direction")
+  px=quote.get("up_entry" if direction=="UP" else "down_entry") if direction in ("UP","DOWN") and quote.get("status")=="available" else None
+  call["entry_cost"]=entry_cost(px)
+ snapshot={"version":VERSION,"captured_at":captured,"seconds_left":left,"checkpoint":checkpoint,
+  "official_target":target,"target_behavior":behavior,"reference_price":frozen.get("reference_price"),
+  "market_quote":quote,"chart_pattern":frozen.get("chart_pattern"),"graph_evidence":frozen.get("graph_evidence"),
+  "external_intelligence":frozen.get("external_intelligence"),"news_assessment":review.get("news_assessment"),
+  "indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
+ # The checkpoint and its legacy halfway rows commit together or roll back together.
+ with connect() as c:
+  cur=c.cursor()
+  def run(sql,args):cur.execute(sql.replace("?","%s") if DB else sql,args)
+  try:
+   run("INSERT INTO research_calls (id,market,checkpoint,created_at,snapshot_json,calls_json) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(key,slug,checkpoint,captured,json.dumps(snapshot),json.dumps(calls)))
+   if cur.rowcount and checkpoint=="HALFWAY":
+    ident=slug+":FINAL_15M"
+    run("INSERT INTO signals (id,market,phase,direction,flip,score,created_at,quality,quality_reason,decision_source,decision_reason,ai_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,flip,score,captured,quality,quality_reason,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],confidence))
+    run("INSERT INTO ai_decisions (id,market,phase,direction,confidence,source,reason,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,confidence,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],captured))
+  finally:cur.close()
+ if checkpoint=="HALFWAY":state["last_halfway_ai"]={"market":slug,"phase":"FINAL_15M","direction":chosen,"indicator_direction":fallback,"source":review.get("source"),"reason":review.get("reason"),"ai_confidence":confidence,"updated":captured,"news_assessment":review.get("news_assessment")}
+ _research_cache["updated_epoch"]=0
+ state["last_checkpoint"]={"market":slug,"checkpoint":checkpoint,"captured_at":captured,"seconds_left":left,"calls":calls}
 
 async def loop():
  setup()
@@ -499,19 +553,37 @@ async def loop():
      terms=fifteen.get("assetPriceTerms") or {}
      ptb=terms.get("priceToBeat") or {}
      target=ptb.get("value") if isinstance(ptb,dict) else None
+     reference,quote=await asyncio.gather(reference_prices(client,fifteen),market_quote(client,slug))
+     ref_public={k:v for k,v in reference.items() if k!="points"}
+     behavior=target_behavior(d,target,slug,reference)
+     d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote)
+     state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote)
+     avg=reference.get("opening_average");pt=number(target)
+     state["target_validation"]={"status":"match" if abs(avg-pt)<=.02 else "mismatch","difference_usd":round(avg-pt,4)} if avg is not None and pt is not None else {"status":"unavailable"}
+     captured={r[0] for r in execute("SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True)}
+     plan=checkpoint_plan(left15,captured)
+     state["missed_checkpoints"]=plan["missed"]
+     for name in plan["due"]:
+      if d.get("price") is not None:
+       await capture_checkpoint(client,slug,name,round(left15),d,direction,flip,score,fifteen)
      await confirm(client,slug,phase,direction,flip,score,d,price_to_beat=target,seconds_left=round(left15))
-     if 0<left15<=450 and d.get("price") is not None:
-      await record_halfway(client,slug,"FINAL_15M",d,direction,flip,score,now,fifteen)
     else:
      for key in ("phase","seconds_left","score"): state.pop(key,None)
      state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No verified Polymarket US 15-minute market: "+str(reason15))
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
+     state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},missed_checkpoints=[])
      await confirm(client,None,None,"WAIT","WAIT",0,d)
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     await settle(client)
+    state["alerts"]=health_checks(state,public_state(),DB)
+    persist_alerts(execute,state["alerts"])
    except Exception as e:
     for key in ("phase","seconds_left","score"): state.pop(key,None)
-    state.update(status="feed error",signal="WAIT",flip="WAIT",error=str(e),updated=datetime.now(timezone.utc).isoformat())
+    state.update(status="feed error",signal="WAIT",flip="WAIT",error=type(e).__name__+": "+str(e)[:200],updated=datetime.now(timezone.utc).isoformat())
+    db_error=None
+    try:execute("SELECT 1",fetch=True)
+    except Exception:db_error="Database query failed"
+    state["alerts"]=health_checks(state,public_state(),DB,db_error=db_error)
    await asyncio.sleep(max(0, POLL - (time.monotonic() - cycle_started)))
 @asynccontextmanager
 async def lifespan(app):
@@ -534,6 +606,44 @@ async def lifespan(app):
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
 app=FastAPI(lifespan=lifespan)
+@app.get("/research-dashboard.js")
+def dashboard_script():
+ return FileResponse(str(Path(__file__).with_name("research_dashboard.js")),media_type="application/javascript")
+
+@app.get("/api/research")
+def get_research():
+ try:return research_report()
+ except Exception:return JSONResponse({"error":"Research database unavailable"},status_code=503)
+
+@app.get("/api/research.csv")
+def research_csv():
+ import csv,io
+ out=io.StringIO();writer=csv.writer(out)
+ writer.writerow(["market","checkpoint","captured_at","strategy","direction","source","confidence","winner","result","entry_price","assumed_slippage","paper_fee_usd","paper_net_pnl_usd","evidence_json"])
+ for market,checkpoint,created,snapshot,calls_json,winner in research_rows():
+  for strategy,call in json.loads(calls_json).items():
+   direction=call.get("direction");cost=call.get("entry_cost") or {};eligible=direction in ("UP","DOWN") and (strategy!="AI" or call.get("source")=="AI_REVIEW")
+   result=("WIN" if direction==winner else "LOSS") if winner and eligible else "PENDING" if eligible else "NO_CALL"
+   pnl=cost.get("net_if_win_usd" if result=="WIN" else "net_if_loss_usd") if result in ("WIN","LOSS") and cost.get("status")=="estimated" else None
+   fields=[market,checkpoint,created,strategy,direction,call.get("source"),call.get("confidence"),winner,result,cost.get("quoted_entry"),cost.get("assumed_slippage_per_contract"),cost.get("fee_usd"),pnl,snapshot]
+   writer.writerow([("'"+v if v.startswith(("=","+","-","@")) else v) if isinstance(v,str) else v for v in fields])
+ return Response(out.getvalue(),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=btc_15m_forward_research.csv"})
+
+@app.get("/api/entry-estimate")
+def estimate_entry(direction:str="UP",contracts:float=Query(100,gt=0,le=1000000),slippage:float=Query(.005,ge=0,le=.25)):
+ if direction not in ("UP","DOWN"):return JSONResponse({"error":"Direction must be UP or DOWN"},status_code=400)
+ quote=state.get("market_quote") or {}
+ if not state.get("market") or quote.get("market")!=state.get("market") or quote.get("status")!="available" or time.time()-quote.get("fetched_epoch",0)>30:return {"status":"unavailable","reason":"No fresh executable-side quote"}
+ return {"market":state.get("market"),"direction":direction,**entry_cost(quote.get("up_entry" if direction=="UP" else "down_entry"),contracts,slippage)}
+
+@app.get("/api/health")
+def health():
+ try:
+  execute("SELECT 1",fetch=True)
+  alerts=health_checks(state,public_state(),DB)
+  return {"status":"degraded" if alerts else "ok","checked_epoch":time.time(),"alerts":alerts,"history":alert_history(execute),"persistent_database":bool(DB),"monitor_updated":state.get("updated")}
+ except Exception:return JSONResponse({"status":"degraded","alerts":[{"code":"DATABASE","severity":"critical","message":"Database unavailable"}]},status_code=503)
+
 @app.get("/api/historical-15m/status")
 def historical_status():
  return historical_state

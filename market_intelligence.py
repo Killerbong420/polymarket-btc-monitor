@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import math
+import hashlib
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -103,6 +104,43 @@ def parse_headlines(xml,source,now):
                       'verification':'Publisher headline only; article and causal price impact not independently verified'})
     return items
 
+def classify_headline(item, now):
+    """Editorial labels are heuristic; a headline is not independently verified fact."""
+    title=item['title'];lower=title.lower();age=max(0,now-item['published_epoch'])
+    analysis=bool(re.search(r"\b(opinion|analysis|outlook|predicts?|forecast|could|may|might|why|what if)\b",lower))
+    category='BITCOIN' if re.search(r'\b(bitcoin|btc)\b',lower) else 'MACRO' if re.search(r'\b(fed|inflation|treasury|interest rate|war|tariff)\b',lower) else 'REGULATION' if re.search(r'\b(sec|ban|regulat|bank)',lower) else 'CRYPTO'
+    date_match=re.search(r'/(20\d{2})/(\d{2})/(\d{2})/',item['url'])
+    old_url=False
+    if date_match:
+        try:
+            url_date=datetime(*map(int,date_match.groups()),tzinfo=timezone.utc).timestamp()
+            old_url=now-url_date>172800
+        except ValueError:pass
+    item.update(id=hashlib.sha256(item['url'].encode()).hexdigest()[:16],
+                age_seconds=round(age),category=category,
+                content_type='COMMENTARY_OR_FORECAST' if analysis else 'PUBLISHER_REPORT_UNVERIFIED',
+                freshness='OLDER_URL_OR_REPUBLISHED' if old_url else 'RECENT_PUBLICATION' if age<=5400 else 'BACKGROUND',
+                event_time_status='UNKNOWN; publication time is not confirmed event time',
+                possible_republication=old_url)
+    return item
+
+def select_headlines(headlines,now):
+    candidates=[classify_headline(dict(x),now) for x in headlines]
+    candidates.sort(key=lambda x:(x['freshness']=='RECENT_PUBLICATION',x['published_epoch']),reverse=True)
+    chosen=[]
+    for item in candidates:
+        tokens=set(re.findall(r'[a-z0-9]+',item['title'].lower()))-{'the','a','an','and','of','to','in','on','for','as','with'}
+        duplicate=None
+        for prev in chosen:
+            other=set(re.findall(r'[a-z0-9]+',prev['title'].lower()))-{'the','a','an','and','of','to','in','on','for','as','with'}
+            if item['url']==prev['url'] or len(tokens&other)/max(1,len(tokens|other))>=.65:
+                duplicate=prev;break
+        if duplicate:
+            if item['source'] not in duplicate['also_reported_by']:duplicate['also_reported_by'].append(item['source'])
+            continue
+        item['also_reported_by']=[];chosen.append(item)
+    return chosen[:8]
+
 async def news_feed(client, source, url):
     try:
         r=await client.get(url,timeout=8,follow_redirects=True)
@@ -127,7 +165,7 @@ async def refresh(client, include_news=True):
             for item in headlines:
                 key=re.sub(r'\W+','',item['title'].lower())
                 if key not in items or item['published_epoch']>items[key]['published_epoch']:items[key]=item
-        headlines=sorted(items.values(),key=lambda x:x['published_epoch'],reverse=True)[:8]
+        headlines=select_headlines(list(items.values()),now)
         ok=sum(x['status']=='ok' for x in feeds)
         _state['news']={'status':'available' if ok==len(FEEDS) else 'partial' if ok else 'unavailable',
                         'headlines':headlines,'feeds':feeds,'fetched_epoch':now,
