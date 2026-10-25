@@ -109,6 +109,7 @@ h1{font-size:20px;margin:6px 0}
 
 .research-table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}.research-table th,.research-table td{padding:9px 8px;text-align:left;border-bottom:1px solid #2a3e55}.research-scroll{overflow-x:auto;margin-top:10px}.research-alert{padding:9px 0;border-bottom:1px solid #2a3e55}.research-headline{padding:8px 0}.research-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0}.research-controls label{font-size:12px;color:#aab8d1}.research-controls input,.research-controls select{width:100%;min-width:0;background:#0d1526;color:white;border:1px solid #354764;border-radius:8px;padding:10px;margin-top:5px}#researchRecent details{padding:9px 0;border-bottom:1px solid #2a3e55}
 
+.pm-trend-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:10px}.pm-trend-grid>div{background:#0a192a;border:1px solid #2b435a;border-radius:10px;padding:10px 8px}.pm-trend-grid span{display:block;color:#9fb2c7;font-size:10px}.pm-trend-grid strong{display:block;margin-top:4px;font-size:12px}.pm-trend-up{color:#59e3a3}.pm-trend-down{color:#ff929c}.pm-trend-flat{color:#e7c16f}@media(max-width:520px){.pm-trend-grid strong{font-size:11px}}
 #pmChartCard{border-color:#345e6f;background:#101d2e;margin-top:9px}
 #pmOddsCanvas{width:100%;height:300px;display:block;background:#0c1727;border:1px solid #2b435a;border-radius:10px;margin:10px 0 6px}
 #pmChartCard .grid{margin-top:9px}
@@ -158,7 +159,9 @@ body{max-width:940px}
   <div class="card"><div class="label">UP · buy ask</div><div class="value up" id="pmUpQuote">—</div></div>
   <div class="card"><div class="label">DOWN · buy ask</div><div class="value down" id="pmDownQuote">—</div></div>
  </div>
- <canvas id="pmOddsCanvas" aria-label="Polymarket 15-minute UP and DOWN contract ask prices only" role="img"></canvas>
+ <div class="pm-trend-grid"><div><span>UP odds trend</span><strong id="pmUpTrend">—</strong></div><div><span>DOWN odds trend</span><strong id="pmDownTrend">—</strong></div><div><span>Trend window</span><strong>Last 60 seconds</strong></div></div>
+<canvas id="pmOddsCanvas" aria-label="Polymarket 15-minute UP and DOWN contract ask prices only" role="img"></canvas>
+<div class="row small" style="gap:13px;flex-wrap:wrap"><span style="color:#9df5d0">━━ UP trend average</span><span style="color:#ffbbc3">━━ DOWN trend average</span><span style="color:#e7c16f">- - trend support / resistance</span></div>
  <div class="row small" style="gap:15px"><span class="up">● UP contract ask</span><span class="down">● DOWN contract ask</span></div>
  <div class="small" id="pmChartInfo">Waiting for verified Polymarket US contract quotes.</div>
  <p class="small">Prices are cents per $1 contract, sampled from Polymarket US top-of-book quotes. DOWN ask = 1 − UP bid. Not Bitcoin spot prices, actual fills, or winning probabilities. The AI may still analyze external Bitcoin data privately.</p>
@@ -336,6 +339,7 @@ function plot(){
  const left=13,right=50,top=22,bottom=29,pw=w-left-right,ph=h-top-bottom;
  ctx.font='11px system-ui';
  if(points.length<2){
+  $('pmUpTrend').textContent='COLLECTING';$('pmDownTrend').textContent='COLLECTING';
   ctx.fillStyle='#a9bdd5';ctx.fillText(d.status==='unavailable'?'No verified 15-minute market yet':'Waiting for Polymarket contract-price samples…',15,h/2);
   return;
  }
@@ -365,6 +369,25 @@ function plot(){
   }
   ctx.lineWidth=2.5;ctx.strokeStyle=side.color;ctx.lineJoin='round';ctx.stroke();
   if(last){ctx.fillStyle=side.color;ctx.beginPath();ctx.arc(last.xx,last.yy,3,0,Math.PI*2);ctx.fill()}
+ }
+ // Overlay observed contract-odds trends only. No spot-price substitution.
+ const recent=points.filter(p=>p.epoch>=points[points.length-1].epoch-60);
+ for(const side of [{key:'up_ask',id:'pmUpTrend',color:'#9df5d0'},{key:'down_ask',id:'pmDownTrend',color:'#ffbbc3'}]){
+  const values=recent.filter(p=>typeof p[side.key]==='number'&&Number.isFinite(p[side.key]));
+  const node=$(side.id);
+  if(values.length<3){node.textContent='COLLECTING';node.className='pm-trend-flat';continue}
+  const delta=values[values.length-1][side.key]-values[0][side.key];
+  const label=Math.abs(delta)<.008?'SIDEWAYS':delta>0?'RISING':'FALLING';
+  node.textContent=label+' '+(delta>=0?'+':'')+(delta*100).toFixed(1)+'¢';
+  node.className=label==='RISING'?'pm-trend-up':label==='FALLING'?'pm-trend-down':'pm-trend-flat';
+  const series=points.filter(p=>typeof p[side.key]==='number'&&Number.isFinite(p[side.key]));
+  let ema=series[0][side.key];ctx.beginPath();
+  for(let i=0;i<series.length;i++){ema+=.20*(series[i][side.key]-ema);if(!i)ctx.moveTo(x(series[i].epoch),y(ema));else ctx.lineTo(x(series[i].epoch),y(ema))}
+  ctx.strokeStyle=side.color;ctx.lineWidth=1.6;ctx.setLineDash([7,4]);ctx.stroke();ctx.setLineDash([]);
+  const support=Math.min(...values.map(p=>p[side.key])),resistance=Math.max(...values.map(p=>p[side.key]));
+  ctx.lineWidth=.8;ctx.strokeStyle='#e7c16f';ctx.globalAlpha=.45;ctx.setLineDash([3,5]);
+  for(const level of [support,resistance]){ctx.beginPath();ctx.moveTo(x(values[0].epoch),y(level));ctx.lineTo(x(values[values.length-1].epoch),y(level));ctx.stroke()}
+  ctx.setLineDash([]);ctx.globalAlpha=1;
  }
  const last=points[points.length-1],age=Math.round(Date.now()/1000-last.epoch);
  $('pmChartInfo').textContent=points.length+' Polymarket quote samples · latest '+age+'s ago · last UP '+fmt(last.up_ask)+' · DOWN '+fmt(last.down_ask)+' · 15-minute market only';
