@@ -351,6 +351,11 @@ def report(execute):
     winloss=execute("SELECT SUM(CASE WHEN pnl_cents>0 THEN 1 ELSE 0 END),SUM(CASE WHEN pnl_cents<=0 THEN 1 ELSE 0 END),COALESCE(SUM(CASE WHEN pnl_cents>0 THEN pnl_cents ELSE 0 END),0),COALESCE(SUM(CASE WHEN pnl_cents<0 THEN -pnl_cents ELSE 0 END),0) FROM paper_positions WHERE status IN ('CLOSED','SETTLED')",fetch=True)[0]
     wins,losses,gain,loss=winloss;wins=wins or 0;losses=losses or 0;n=wins+losses
     events=execute('SELECT market,created_at,status,reason,detail_json FROM paper_attempts ORDER BY created_at DESC LIMIT 25',fetch=True)
+    blocker_rows=execute("SELECT reason,COUNT(*) FROM paper_attempts WHERE status='SKIPPED' GROUP BY reason ORDER BY COUNT(*) DESC LIMIT 12",fetch=True)
+    signal_rows=execute("SELECT COUNT(*),SUM(CASE WHEN processed=0 THEN 1 ELSE 0 END) FROM paper_live_calls",fetch=True)[0]
+    latest_signal=execute('SELECT created_at,calls_json FROM paper_live_calls ORDER BY created_at DESC LIMIT 1',fetch=True)
+    last_signal_age=round(time.time()-datetime.fromisoformat(latest_signal[0][0]).timestamp(),1) if latest_signal else None
+    diagnostic={'signals_received':signal_rows[0] or 0,'signals_pending':signal_rows[1] or 0,'last_signal_age_seconds':last_signal_age,'skipped_by_reason':[{'reason':reason,'count':count} for reason,count in blocker_rows],'guidance':'No signal: inspect /api/status ai_confirmation and market data. Skipped: inspect attempts and skipped_by_reason. Filled: inspect positions and protective orders.'}
     curve=execute('SELECT created_at,equity_cents FROM paper_equity ORDER BY created_at DESC LIMIT 240',fetch=True)
     days=day_bounds();daily_loss=execute("SELECT COALESCE(SUM(CASE WHEN pnl_cents<0 THEN -pnl_cents ELSE 0 END),0) FROM paper_positions WHERE status IN ('CLOSED','SETTLED') AND COALESCE(closed_at,settled_at)>=? AND COALESCE(closed_at,settled_at)<?",days,fetch=True)[0][0]
     enabled=os.getenv('PAPER_TRADING_ENABLED','true').lower() in ('true','1','yes')
@@ -365,6 +370,7 @@ def report(execute):
             'started_at':a[3],'risk':risk_settings(json.loads(a[4])),'sample_label':'INSUFFICIENT SAMPLE' if n<100 else 'OBSERVED PAPER SAMPLE',
             'positions':[dict(zip(('market','direction','quantity','cost_cents','fee_cents','status','created_at','settled_at','winner','payout_cents','pnl_cents','mark_cents','mark_epoch','exit_reason','exit_fee_cents','closed_at'),x)) for x in positions],
             'attempts':[{'market':m,'created_at':t,'status':s,'reason':why,'details':json.loads(detail)} for m,t,s,why,detail in events],
+            'trading_diagnostics':diagnostic,
             'entry_mode':'LIVE_ANYTIME',
             'latest_live_signal':[{'market':m,'captured_at':t,'call':json.loads(c).get('AI')} for m,t,c in execute('SELECT market,created_at,calls_json FROM paper_live_calls ORDER BY created_at DESC LIMIT 1',fetch=True)],
             'orders':[dict(zip(('market','kind','status','threshold','updated_at','detail'),x)) for x in execute('SELECT market,kind,status,threshold,updated_at,detail FROM paper_orders ORDER BY updated_at DESC LIMIT 60',fetch=True)],
