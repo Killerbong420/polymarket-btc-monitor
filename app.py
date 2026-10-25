@@ -225,6 +225,30 @@ def classify_chart(bars):
   pattern,bias="RANGE","UP" if last>(recent_high+recent_low)/2 else "DOWN"
  return {"pattern":pattern,"bias":bias,"support":round(recent_low,2),"resistance":round(recent_high,2),"range_pct":round(range_pct,4),"volume_spike":volume_spike,"note":"Heuristic classification; predictive value not yet validated"}
 
+def graph_evidence(candles, volume_idx):
+ """Compact chronological completed candles and price-structure measurements."""
+ bars=[[int(float(x[0])),round(float(x[3]),2),round(float(x[2]),2),
+        round(float(x[1]),2),round(float(x[4]),2),round(float(x[volume_idx]),5)]
+       for x in candles[-30:]]
+ closes=[b[4] for b in bars]
+ opens=[b[1] for b in bars]
+ highs=[b[2] for b in bars]
+ lows=[b[3] for b in bars]
+ def pct(a,b): return round(100*(a/b-1),5) if b else None
+ last=closes[-1]
+ return {"timeframe":"1m_completed","candles_ohlcv":bars,
+  "candle_fields":["unix_time","open","high","low","close","volume"],
+  "price_change_3m_pct":pct(last,closes[-4]),
+  "price_change_10m_pct":pct(last,closes[-11]),
+  "price_change_20m_pct":pct(last,closes[-21]),
+  "last_5_higher_highs":sum(highs[i]>highs[i-1] for i in range(len(highs)-4,len(highs))),
+  "last_5_higher_lows":sum(lows[i]>lows[i-1] for i in range(len(lows)-4,len(lows))),
+  "last_5_bullish_candles":sum(closes[i]>opens[i] for i in range(-5,0)),
+  "last_candle_body_pct":round(100*(last-opens[-1])/last,5),
+  "last_upper_wick_pct":round(100*(highs[-1]-max(opens[-1],last))/last,5),
+  "last_lower_wick_pct":round(100*(min(opens[-1],last)-lows[-1])/last,5),
+  "recent_10m_high":max(highs[-10:]),"recent_10m_low":min(lows[-10:])}
+
 async def spot_data(client):
  errors=[]
  # Coinbase public BTC-USD candles: [timestamp, low, high, open, close, volume].
@@ -245,7 +269,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Coinbase BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Coinbase: "+str(e)[:150])
  # Kraken OHLC uses BTC/USD minute candles; last candle is incomplete.
  try:
@@ -264,7 +288,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Kraken BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,6),"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
