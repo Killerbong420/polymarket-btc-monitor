@@ -481,6 +481,7 @@ async def record_halfway(client,slug,phase,d,primary,flip,score,now,market):
  state["last_halfway_ai"]={"market":slug,"phase":phase,"direction":chosen,
   "indicator_direction":fallback,"source":review.get("source"),
   "reason":review.get("reason"),"ai_confidence":review.get("ai_confidence"),
+  "evidence":review.get("evidence"),
   "updated":now}
 
 async def loop():
