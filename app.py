@@ -1,6 +1,6 @@
 import asyncio, json, os, sqlite3, time
 from pathlib import Path
-from ai_confirmation import confirm, public_state
+from ai_confirmation import confirm, public_state, check_auth, auth_state
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import httpx
@@ -209,22 +209,14 @@ async def settle(client):
    if winning not in ("UP","DOWN"): continue
    execute("UPDATE signals SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(winning,slug))
   except Exception: continue
- rows=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING'",fetch=True)
- for (slug,) in rows[:30]:
-  try:
-   r=await client.get("https://gamma-api.polymarket.com/markets",params={"slug":slug},timeout=10)
-   r.raise_for_status()
-   markets=r.json()
-   if not markets: continue
-   w=winner(markets[0])
-   if w:
-    execute("UPDATE signals SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING' AND direction IN ('UP','DOWN')",(w,slug))
-  except Exception: continue
+ # US contracts must never be resolved using international Gamma outcomes.
+ # Keep unknown results PENDING until the US gateway supplies explicit settlement.
 async def loop():
  setup()
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
   while True:
    try:
+    await check_auth(client)
     m=await market_data(client)
     d=await spot_data(client)
     direction,flip,score=judge(d)
@@ -260,8 +252,8 @@ def status():
  try:
   rows=execute("SELECT result,COUNT(*) FROM signals GROUP BY result",fetch=True)
   recent=execute("SELECT market,phase,direction,flip,score,created_at,result FROM signals ORDER BY created_at DESC LIMIT 50",fetch=True)
-  return {**state,"ai_confirmation":public_state(),"counts":dict(rows),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result"),r)) for r in recent]}
- except Exception as e: return {**state,"ai_confirmation":public_state(),"database_error":str(e),"history":[]}
+  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result"),r)) for r in recent]}
+ except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
 @app.get("/",response_class=HTMLResponse)
 def home():
  return Path(__file__).with_name("terminal.html").read_text(encoding="utf-8")
