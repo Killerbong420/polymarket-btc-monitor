@@ -77,6 +77,17 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "flip_risk": parsed.get("flip_risk", "UNKNOWN"),
             "signal": signal, "market": market, "phase": phase,
             "model": MODEL, "updated_epoch": time.time()}
+    except httpx.HTTPStatusError as exc:
+        # Expose only a numeric HTTP status and predefined category.
+        status = exc.response.status_code
+        categories = {400: "request_invalid", 401: "invalid_api_key",
+            403: "permission_denied", 404: "model_or_endpoint_unavailable",
+            408: "request_timeout", 429: "rate_limit_or_quota",
+            500: "provider_error", 502: "provider_error", 503: "provider_unavailable"}
+        category = categories.get(status, "http_error")
+        _cache = {"status": "error", "verdict": "WAIT",
+            "reason": "OpenAI HTTP " + str(status) + " (" + category + "). Check API billing, key permissions, and model access.",
+            "http_status": status, "error_category": category, "model": MODEL}
     except Exception as exc:
         # Never put secrets, full URLs, or response bodies in public diagnostics.
         _cache = {"status": "error", "verdict": "WAIT",
