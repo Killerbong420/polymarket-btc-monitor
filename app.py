@@ -49,6 +49,27 @@ async def market_data(client):
   t=floor+timedelta(minutes=delta)
   slug="btc-updown-5m-"+t.strftime("%Y-%m-%d-%H%Mz").lower()
   if t.timestamp()+300<=time.time(): continue
+  # Polymarket US event slug differs from its contract market slug.
+  # Resolve event first and require a real market record in its markets array.
+  try:
+   er=await client.get(base+"/v1/events/slug/"+slug,timeout=7)
+   if er.status_code==200:
+    body=er.json()
+    event=body.get("event",body) if isinstance(body,dict) else {}
+    contracts=event.get("markets",[]) if isinstance(event,dict) else []
+    if not contracts and isinstance(body,dict): contracts=body.get("markets",[])
+    if isinstance(contracts,list):
+     for contract in contracts:
+      if not isinstance(contract,dict): continue
+      market_slug=contract.get("slug") or contract.get("marketSlug")
+      if not isinstance(market_slug,str) or not market_slug: continue
+      contract=dict(contract)
+      contract["slug"]=market_slug
+      contract["_event_slug"]=slug
+      contract["_round_start"]=t.timestamp()
+      contract["_round_end"]=(t+timedelta(minutes=5)).timestamp()
+      return contract
+  except Exception as exc: errors.append("event lookup "+type(exc).__name__+": "+str(exc)[:90])
   # A successful market lookup must correspond to this exact US round.
   for path in ("/v1/markets/"+slug, "/v1/market/slug/"+slug):
    try:
