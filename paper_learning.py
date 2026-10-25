@@ -143,6 +143,12 @@ def finalize_position(cur,postgres,run,ident,actual_exit,reason):
             "VALUES (?,?,?,?,?,?,?) ON CONFLICT(position_id) DO NOTHING",
             (ident,market,peak,actual_exit,regret,reason,datetime.now(timezone.utc).isoformat()))
 
+def expire_unobserved(execute):
+    """Close stale hypothetical watchers as unobserved; never invent an exit quote."""
+    now=time.time()
+    execute("UPDATE paper_learning_samples SET status='UNOBSERVED',exit_epoch=? "
+            "WHERE status='WATCHING' AND deadline_epoch<?",(now,now-20))
+
 def report(execute):
     rows = execute("SELECT market,direction,price_band,observed_epoch,entry_ask,status,"
                    "exit_epoch,exit_roi_pct,best_roi_pct,worst_roi_pct "
