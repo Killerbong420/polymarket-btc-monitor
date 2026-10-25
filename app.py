@@ -560,11 +560,17 @@ async def loop():
   while True:
    cycle_started=time.monotonic()
    try:
-    await check_auth(client)
-    try:
-     d=await spot_data(client)
-    except Exception as feed_exc:
-     d={"source":"unavailable","candle_age_seconds":None,"signal_quality":{"status":"INSUFFICIENT_DATA","reason":"No fresh verified BTC candles"},"feed_error":str(feed_exc)[:300]}
+    state["loop_started_epoch"]=time.time()
+    auth_result,spot_result,market_result=await asyncio.gather(
+     check_auth(client),spot_data(client),market_15m(client),return_exceptions=True)
+    if isinstance(spot_result,BaseException):
+     d={"source":"unavailable","candle_age_seconds":None,"signal_quality":{"status":"INSUFFICIENT_DATA","reason":"No fresh verified BTC candles"},"feed_error":str(spot_result)[:300]}
+    else:d=spot_result
+    if isinstance(market_result,BaseException):
+     fifteen,reason15=None,"lookup_"+type(market_result).__name__
+    else:fifteen,reason15=market_result
+    state["market_lookup_reason"]=reason15
+    state["ai_auth_error"]=type(auth_result).__name__ if isinstance(auth_result,BaseException) else None
     intel=public_intelligence()
     d["external_intelligence"]=intel
     fresh_flow=[x for x in intel["trade_flow"].get("exchanges",[]) if x.get("status")=="fresh"] if intel["trade_flow"].get("status")!="stale" else []
@@ -575,7 +581,6 @@ async def loop():
     d["pressure_source"]=" + ".join(x["source"] for x in fresh_flow) or "unavailable"
     direction,flip,score=judge(d) if d.get("price") is not None else ("WAIT","WAIT",0.0)
     now=datetime.now(timezone.utc).isoformat()
-    fifteen,reason15=await market_15m(client)
     if fifteen:
      slug=fifteen["slug"]
      left15=fifteen["end"]-time.time()
@@ -590,7 +595,11 @@ async def loop():
      behavior=target_behavior(d,target,slug,reference)
      d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote)
      state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote)
-     capture_polymarket_quote(quote)
+     try:
+      capture_polymarket_quote(quote)
+      state["quote_storage_error"]=None
+     except Exception as quote_exc:
+      state["quote_storage_error"]=type(quote_exc).__name__+": "+str(quote_exc)[:150]
      avg=reference.get("opening_average");pt=number(target)
      state["target_validation"]={"status":"match" if abs(avg-pt)<=.02 else "mismatch","difference_usd":round(avg-pt,4)} if avg is not None and pt is not None else {"status":"unavailable"}
      captured={r[0] for r in execute("SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True)}
@@ -618,6 +627,8 @@ async def loop():
     try:execute("SELECT 1",fetch=True)
     except Exception:db_error="Database query failed"
     state["alerts"]=health_checks(state,public_state(),DB,db_error=db_error)
+   state["last_cycle_duration_seconds"]=round(time.monotonic()-cycle_started,2)
+   state["updated"]=datetime.now(timezone.utc).isoformat()
    await asyncio.sleep(max(0, POLL - (time.monotonic() - cycle_started)))
 async def paper_worker():
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchPaperSandbox/1.0"}) as client:
