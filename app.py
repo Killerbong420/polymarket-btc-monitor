@@ -1,11 +1,12 @@
 import asyncio, json, os, sqlite3, time
 from pathlib import Path
+from historical_15m import main as collect_15m
 from ai_confirmation import confirm, public_state, check_auth, auth_state
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import httpx
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 try:
  import psycopg
 except ImportError:
@@ -288,11 +289,35 @@ async def loop():
 @asynccontextmanager
 async def lifespan(app):
  task=asyncio.create_task(loop())
+ async def historical_job():
+  try:
+   historical_state.update(status="running",started=datetime.now(timezone.utc).isoformat())
+   await collect_15m()
+   records=json.loads(Path("historical_15m_7d.json").read_text())
+   historical_state.update(status="complete",checked=len(records),targets=sum(x["price_to_beat"] is not None for x in records),winners=sum(x["winner"] is not None for x in records),verified=sum(x["status"]=="VERIFIED" for x in records),finished=datetime.now(timezone.utc).isoformat())
+  except Exception as exc: historical_state.update(status="error",error=str(exc)[:300])
+ history_task=asyncio.create_task(historical_job())
  yield
  task.cancel()
- try: await task
- except asyncio.CancelledError: pass
+ history_task.cancel()
+ for running in (task,history_task):
+  try: await running
+  except asyncio.CancelledError: pass
+historical_state={"status":"pending","requested":672,"period":"2026-10-17 through 2026-10-24 UTC","verified":0}
 app=FastAPI(lifespan=lifespan)
+@app.get("/api/historical-15m/status")
+def historical_status():
+ return historical_state
+@app.get("/api/historical-15m/results")
+def historical_results():
+ p=Path("historical_15m_7d.json")
+ if not p.exists(): return JSONResponse({"status":historical_state,"records":[]},status_code=202)
+ return {"status":historical_state,"records":json.loads(p.read_text())}
+@app.get("/api/historical-15m/csv")
+def historical_csv():
+ p=Path("historical_15m_7d.csv")
+ if not p.exists(): return JSONResponse({"status":historical_state},status_code=202)
+ return FileResponse(str(p),media_type="text/csv",filename="polymarket_us_btc_15m_7d.csv")
 @app.get("/api/status")
 def status():
  try:
