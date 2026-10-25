@@ -458,7 +458,10 @@ async def update_marks(client,execute,connect,postgres):
             run(cur,postgres,"SELECT COALESCE(SUM(mark_cents),0) FROM paper_positions WHERE status='OPEN'")
             total_mark=int(cur.fetchone()[0]);cash=account[1];equity=cash+total_mark;high=max(account[5],equity);draw=max(account[6],high-equity)
             run(cur,postgres,'UPDATE paper_account SET high_water_cents=?,max_drawdown_cents=? WHERE id=\'main\'',(high,draw))
-            run(cur,postgres,'INSERT INTO paper_equity (id,created_at,equity_cents,cash_cents,open_mark_cents) VALUES (?,?,?,?,?)',(str(uuid.uuid4()),stamp(),equity,async def cycle(client,execute,connect,postgres,live_signal=None):
+            run(cur,postgres,'INSERT INTO paper_equity (id,created_at,equity_cents,cash_cents,open_mark_cents) VALUES (?,?,?,?,?)',(str(uuid.uuid4()),stamp(),equity,cash,total_mark))
+        finally:cur.close()
+
+async def cycle(client,execute,connect,postgres,live_signal=None):
     global _last_mark, _last_entry_scan, _last_settlement_scan
     now_mono=time.monotonic()
     # Maintain fast protective exits without hammering PostgreSQL on every tick.
@@ -490,7 +493,6 @@ async def update_marks(client,execute,connect,postgres):
         execute('UPDATE paper_live_calls SET processed=1 WHERE id=?',(row[1],))
     if time.monotonic()-_last_mark>=30:
         await update_marks(client,execute,connect,postgres);_last_mark=time.monotonic()
-,connect,postgres);_last_mark=time.monotonic()
 
 def missed_profit_learning(execute):
     """Retrospective, fee-aware analysis of skipped paper entries; never self-modifies live trading rules."""
