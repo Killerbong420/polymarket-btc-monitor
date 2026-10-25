@@ -126,3 +126,47 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "reason": "OpenAI request failed (" + type(exc).__name__ + "). Check API key, model access and billing in Render.",
             "model": MODEL}
     return _cache
+
+async def halfway_decision(client, market, duration, indicator_direction, score, external, price_to_beat=None):
+    """One bounded AI review at the halfway FINAL checkpoint; never invent missing observations."""
+    fallback={"direction":indicator_direction,"source":"INDICATORS_FALLBACK","reason":"AI unavailable; indicator decision retained"}
+    key=os.getenv("OPENAI_API_KEY")
+    if not key: return {**fallback,"reason":"OPENAI_API_KEY not configured"}
+    snapshot={"market":market,"duration_minutes":duration,"indicator_direction":indicator_direction,
+        "score":score,"price_to_beat":price_to_beat,
+        "spot_price":external.get("price"),"momentum_pct":external.get("momentum_pct"),
+        "long_momentum_pct":external.get("long_momentum_pct"),"volume_ratio":external.get("volume_ratio"),
+        "chart":external.get("chart"),"chart_pattern":external.get("chart_pattern"),
+        "signal_quality":external.get("signal_quality"),
+        "candle_age_seconds":external.get("candle_age_seconds"),
+        "source":external.get("source")}
+    schema={"type":"object","properties":{"direction":{"type":"string","enum":["UP","DOWN","WAIT"]},
+        "reason":{"type":"string"},"confidence":{"type":"string","enum":["LOW","MEDIUM","HIGH"]}},
+        "required":["direction","reason","confidence"],"additionalProperties":False}
+    payload={"model":MODEL,"store":False,"instructions":(
+        "At the halfway checkpoint, review the provided BTC market observations and suggest UP, DOWN or WAIT. "
+        "You may disagree with the indicator direction when concrete evidence supports it. "
+        "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. "
+        "Treat stale, thin or conflicting data cautiously. This is a research forecast, not a trade instruction. "
+        "Keep the reason under 160 characters."),
+        "input":json.dumps(snapshot,default=str,separators=(",",":")),
+        "text":{"format":{"type":"json_schema","name":"btc_halfway_final","strict":True,"schema":schema}},
+        "max_output_tokens":200}
+    try:
+        res=await client.post("https://api.openai.com/v1/responses",
+            headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},
+            json=payload,timeout=12)
+        res.raise_for_status()
+        body=res.json()
+        chunks=[p.get("text","") for x in body.get("output",[]) if x.get("type")=="message"
+                for p in x.get("content",[]) if p.get("type")=="output_text"]
+        decision=json.loads("".join(chunks))
+        if decision.get("direction") not in ("UP","DOWN","WAIT"): raise ValueError("Invalid direction")
+        if decision["direction"]=="WAIT":
+            return {**fallback,"reason":"AI abstained: "+str(decision.get("reason",""))[:140],
+                "ai_direction":"WAIT","ai_confidence":decision.get("confidence","LOW")}
+        return {"direction":decision["direction"],"source":"AI_REVIEW",
+            "reason":str(decision.get("reason",""))[:160],
+            "ai_direction":decision["direction"],"ai_confidence":decision.get("confidence","LOW")}
+    except Exception as exc:
+        return {**fallback,"reason":"AI request unavailable ("+type(exc).__name__+")"}
