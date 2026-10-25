@@ -332,6 +332,10 @@ async def loop():
      state.pop("market_diagnostic",None)
      if phase in ("EARLY","LATE") and direction!="WAIT":
       execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":"+phase,slug,phase,direction,flip,score,now))
+     # One independent, immutable FINAL call per 5m round, at the first poll
+     # reaching 2:30 remaining. WAIT is saved if evidence is insufficient.
+     if remaining<=150 and remaining>0:
+      execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":FINAL",slug,"FINAL",direction,flip,score,now))
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(remaining),market=slug,external=d,updated=now,error=None)
      await confirm(client,slug,phase,direction,flip,score,d)
     await settle(client)
