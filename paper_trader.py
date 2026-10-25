@@ -461,6 +461,7 @@ async def update_marks(client,execute,connect,postgres):
 
 async def cycle(client,execute,connect,postgres,live_signal=None):
     global _last_mark
+    learning.expire_unobserved(execute)
     await manage_exits(client,execute,connect,postgres,live_signal)
     settle_positions(connect,postgres)
     signal=live_signal or {};key=signal.get('paper_signal_id')
