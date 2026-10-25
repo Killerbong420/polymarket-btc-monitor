@@ -598,7 +598,7 @@ async def paper_worker():
     state["paper_error"]=None
     state["paper_unfilled_exits"]=execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0]
    except Exception as exc:state["paper_error"]=type(exc).__name__+": "+str(exc)[:160]
-   await asyncio.sleep(max(1,5-(time.monotonic()-started)))
+   await asyncio.sleep(max(0,1-(time.monotonic()-started)))
 
 @asynccontextmanager
 async def lifespan(app):
