@@ -232,31 +232,39 @@ def verified_winner(m,settlement):
 
 async def settle(client):
  pending=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING'",fetch=True)
- diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[]}
+ diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[],"reasons":{}}
+ def unresolved(reason):
+  diagnostic["unresolved"]+=1
+  diagnostic["reasons"][reason]=diagnostic["reasons"].get(reason,0)+1
  for (slug,) in pending[:20]:
   try:
    base="https://gateway.polymarket.us/v1/markets/"+slug
-   r=await client.get(base+"/settlement",timeout=8)
    diagnostic["checked"]+=1
-   if r.status_code in (404,409):
-    diagnostic["unresolved"]+=1
-    continue
-   r.raise_for_status()
-   settlement=r.json()
    mr=await client.get(base,timeout=8)
    if mr.status_code!=200:
-    diagnostic["unresolved"]+=1
+    unresolved("market_http_"+str(mr.status_code))
     continue
    payload=mr.json()
    market=payload.get("market",payload) if isinstance(payload,dict) else None
-   win=verified_winner(market,settlement)
+   if not isinstance(market,dict):
+    unresolved("market_payload_invalid")
+    continue
+   status=str(market.get("status") or market.get("marketStatus") or "").upper()
+   if "RESOLVED" not in status:
+    unresolved("market_not_resolved_"+(status or "unknown")[:35])
+    continue
+   sr=await client.get(base+"/settlement",timeout=8)
+   if sr.status_code!=200:
+    unresolved("settlement_http_"+str(sr.status_code))
+    continue
+   win=verified_winner(market,sr.json())
    if win is None:
-    diagnostic["unresolved"]+=1
+    unresolved("resolved_but_winner_mapping_unverified")
     continue
    execute("UPDATE signals SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    diagnostic["verified"]+=1
   except Exception as exc:
-   diagnostic["errors"].append(type(exc).__name__)
+   diagnostic["errors"].append(type(exc).__name__+": "+str(exc)[:100])
  state["settlement_diagnostic"]=diagnostic
 async def loop():
  setup()
