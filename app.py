@@ -184,6 +184,43 @@ def chart_indicators(candles, volume_idx):
  atr=sum(ranges[-14:])/14
  return {"ema9":round(e9,2),"ema21":round(e21,2),"rsi14":round(rsi(closes),1),"atr14_pct":round(100*atr/last,4),"ema_trend":"UP" if e9>e21 else "DOWN"}
 
+def classify_chart(bars):
+ # bars are chronological completed OHLC candles (timestamp, low, high, open, close, volume).
+ if len(bars)<25: return {"pattern":"INSUFFICIENT_DATA","bias":"WAIT"}
+ highs=[float(b[2]) for b in bars]
+ lows=[float(b[1]) for b in bars]
+ closes=[float(b[4]) for b in bars]
+ vols=[float(b[5]) for b in bars]
+ last=closes[-1]
+ recent_high=max(highs[-11:-1])
+ recent_low=min(lows[-11:-1])
+ previous_high=max(highs[-21:-11])
+ previous_low=min(lows[-21:-11])
+ range_pct=100*(recent_high-recent_low)/last
+ vol_base=sum(vols[-21:-1])/20
+ volume_spike=vol_base>0 and vols[-1]>1.5*vol_base
+ bullish_structure=recent_high>previous_high and recent_low>previous_low
+ bearish_structure=recent_high<previous_high and recent_low<previous_low
+ if last>recent_high and volume_spike:
+  pattern,bias="BULLISH_BREAKOUT","UP"
+ elif last<recent_low and volume_spike:
+  pattern,bias="BEARISH_BREAKOUT","DOWN"
+ elif highs[-1]>recent_high and last<recent_high:
+  pattern,bias="FAILED_UP_BREAKOUT","DOWN"
+ elif lows[-1]<recent_low and last>recent_low:
+  pattern,bias="FAILED_DOWN_BREAKOUT","UP"
+ elif bullish_structure and closes[-1]<closes[-4] and closes[-4]>closes[-9]:
+  pattern,bias="POSSIBLE_BEARISH_REVERSAL","DOWN"
+ elif bearish_structure and closes[-1]>closes[-4] and closes[-4]<closes[-9]:
+  pattern,bias="POSSIBLE_BULLISH_REVERSAL","UP"
+ elif bullish_structure:
+  pattern,bias="UPTREND","UP"
+ elif bearish_structure:
+  pattern,bias="DOWNTREND","DOWN"
+ else:
+  pattern,bias="RANGE","UP" if last>(recent_high+recent_low)/2 else "DOWN"
+ return {"pattern":pattern,"bias":bias,"support":round(recent_low,2),"resistance":round(recent_high,2),"range_pct":round(range_pct,4),"volume_spike":volume_spike,"note":"Heuristic classification; predictive value not yet validated"}
+
 async def spot_data(client):
  errors=[]
  # Coinbase public BTC-USD candles: [timestamp, low, high, open, close, volume].
@@ -202,7 +239,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Coinbase BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Coinbase: "+str(e)[:150])
  # Kraken OHLC uses BTC/USD minute candles; last candle is incomplete.
  try:
@@ -243,6 +280,11 @@ def judge(d):
   rsi=float(chart.get("rsi14",50))
   score+=(0.35 if trend=="UP" else -0.35)+(0.25 if rsi>=55 else -0.25 if rsi<=45 else 0)
   if (fast>0 and trend=="DOWN") or (fast<0 and trend=="UP"): score*=0.65
+ pattern=d.get("chart_pattern") or {}
+ if pattern.get("bias") in ("UP","DOWN"):
+  vote=0.35 if pattern["bias"]=="UP" else -0.35
+  if pattern["pattern"]=="RANGE": vote*=0.3
+  score+=vote
  # No fabricated buy/sell pressure: Coinbase candles provide no taker-side split.
  if d.get("pressure_available"):
   score+=max(-0.5,min(0.5,float(d.get("pressure",0))*1.5))
