@@ -512,12 +512,12 @@ async def cycle(client,execute,connect,postgres,live_signal=None):
         settle_positions(connect,postgres)
         learning.expire_unobserved(execute)
         _last_settlement_scan=now_mono
-    if now_mono-_last_entry_scan<5:
+    if now_mono-_last_entry_scan<2:
         if now_mono-_last_mark>=30:
             await update_marks(client,execute,connect,postgres)
             _last_mark=time.monotonic()
         return
-    _last_entry_scan=now_mono
+    _last_entry_scan=time.monotonic()
     signal=live_signal or {};key=signal.get('paper_signal_id')
     if signal.get('status')=='ready' and key and 0<=time.time()-signal.get('captured_epoch',0)<=60:
         market=signal.get('market');opp=signal.get('profit_opportunity') or {}
