@@ -313,9 +313,46 @@ if(state.bb){const upper=[],lower=[];closes.forEach((_,i)=>{const slice=closes.s
 if(target>0&&target>=lo&&target<=hi){c.setLineDash([5,5]);c.strokeStyle='#ffd260';c.beginPath();c.moveTo(left,y(target));c.lineTo(w-right,y(target));c.stroke();c.setLineDash([])}
 const last=bars[bars.length-1];c.fillStyle='#dce7f7';c.font='bold 12px system-ui';c.fillText(`BTC/USD · ${fmt(last.c)}   O ${fmt(last.o)}  H ${fmt(last.h)}  L ${fmt(last.l)}`,left+5,15);
 }
+// Pure model: completed, contiguous candles only; one forecast per next-minute close.
+function minuteModel(input,now){
+ const bars=input.filter(b=>b.t+60000<=now).slice(-30);
+ if(bars.length<20)return null;
+ if(bars.some((b,i)=>![b.t,b.o,b.h,b.l,b.c,b.v].every(Number.isFinite)||b.c<=0||b.v<0||b.h<Math.max(b.o,b.c)||b.l>Math.min(b.o,b.c)||(i&&b.t-bars[i-1].t!==60000)))return null;
+ const last=bars.at(-1),origin=last.t+60000;
+ if(now-origin>75000)return null;
+ const mean=a=>a.reduce((s,v)=>s+v,0)/a.length;
+ const changes=bars.slice(1).map((b,i)=>b.c-bars[i].c);
+ const noise=Math.max(last.c*.00001,Math.sqrt(mean(changes.slice(-14).map(v=>v*v))));
+ const atr=mean(bars.slice(-14).map((b,i)=>Math.max(b.h-b.l,Math.abs(b.h-bars[bars.length-15+i].c),Math.abs(b.l-bars[bars.length-15+i].c))));
+ const fast=mean(changes.slice(-3)),slow=mean(changes.slice(-10));
+ const travel=changes.slice(-10).reduce((s,v)=>s+Math.abs(v),0);
+ const efficiency=travel?Math.abs(last.c-bars.at(-11).c)/travel:0;
+ const prior=bars.slice(-12,-3),trend=prior.at(-1).c-prior[0].c;
+ const trendSign=Math.abs(trend)>noise?Math.sign(trend):0,reverse=-trendSign;
+ const support=Math.min(...prior.map(b=>b.l)),resistance=Math.max(...prior.map(b=>b.h));
+ const width=Math.max(.01,last.h-last.l),body=Math.abs(last.c-last.o);
+ const rejection=reverse>0?Math.min(last.o,last.c)-last.l>Math.max(body*1.4,width*.35)&&last.c>last.l+width*.6:reverse<0&&last.h-Math.max(last.o,last.c)>Math.max(body*1.4,width*.35)&&last.c<last.l+width*.4;
+ const level=reverse>0?last.l<=support+atr*.25:reverse<0&&last.h>=resistance-atr*.25;
+ const volume=last.v>mean(prior.map(b=>b.v))*1.25&&Math.sign(last.c-last.o)===reverse;
+ const turn=reverse!==0&&fast*reverse>noise*.15&&changes.at(-1)*reverse>noise*.1;
+ const reversal=turn&&((rejection&&level)||volume);
+ const reasons=[];
+ if(turn)reasons.push('opposing momentum');if(rejection)reasons.push('wick rejection');if(level)reasons.push('price level');if(volume)reasons.push('opposing volume');
+ // Normalize multi-minute momentum to USD per minute; damp noisy sideways markets.
+ let projection=(.7*fast+.3*slow)*(.3+.7*efficiency);
+ if(reversal)projection=reverse*Math.min(noise,Math.max(Math.abs(fast),noise*.4));
+ projection=Math.max(-noise*1.5,Math.min(noise*1.5,projection));
+ const band=Math.max(last.c*.00002,noise*.25);
+ const direction=Math.abs(projection)<=band?'SIDEWAYS':projection>0?'UP':'DOWN';
+ if(!reasons.length)reasons.push(efficiency<.3?'choppy price action':'trend continuation');
+ return {origin,target:origin+60000,entry:last.c,direction,projection,band,reversal:reversal&&direction!=='SIDEWAYS'?(reverse>0?'BULLISH':'BEARISH'):null,reasons};
+}
+let barsBusy=false;
 async function getBars(){
+ if(barsBusy)return;barsBusy=true;
+ const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),10000);
  try{
-  const r=await fetch('/api/candles',{cache:'no-store'});
+  const r=await fetch('/api/candles',{cache:'no-store',signal:controller.signal});
   if(!r.ok)throw Error('Server HTTP '+r.status);
   const payload=await r.json();
   if(!Array.isArray(payload.candles)||!payload.candles.length)throw Error(payload.error||'No exchange candles');
@@ -331,65 +368,45 @@ async function getBars(){
   if(pattern){pattern.textContent=label;pattern.className='value '+(label==='UPTREND'?'up':label==='DOWNTREND'?'down':'wait')}
   if(details)details.textContent='Last '+recent.length+' BTC candles · Change '+(change>=0?'+':'')+change.toFixed(2)+' USD · Support '+Math.min(...recent.map(b=>b.l)).toFixed(2)+' · Resistance '+Math.max(...recent.map(b=>b.h)).toFixed(2)+' · '+payload.source;
   {
-   const candles=state.bars.slice(-12),lastC=candles.at(-1);
-   const momentum=lastC.c-candles.at(-5).c;
-   const drift=(lastC.c-candles[0].c)/Math.max(1,candles.length-1);
-   let projection=0.65*momentum+0.35*drift;
-   const diffs=candles.slice(1).map((v,i)=>v.c-candles[i].c);
-   const noise=Math.sqrt(diffs.reduce((n,v)=>n+v*v,0)/diffs.length);
-   const band=Math.max(3,noise*0.3);
-   let direction=Math.abs(projection)<band?'SIDEWAYS':projection>0?'UP':'DOWN';
-   // Five independent reversal heuristics, using only candles already observed.
-   const prior=candles.slice(0,-4),recent4=candles.slice(-4);
-   const trendDelta=prior.at(-1).c-prior[0].c;
-   const trendSign=trendDelta>=0?1:-1;
-   const reversalSign=-trendSign;
-   const oldMomentum=prior.at(-1).c-prior.at(-4).c;
-   const newMomentum=lastC.c-recent4[0].c;
-   const divergence=trendSign*newMomentum<trendSign*oldMomentum*0.5;
-   const body=Math.max(0.01,Math.abs(lastC.c-lastC.o));
-   const lowerWick=Math.min(lastC.o,lastC.c)-lastC.l;
-   const upperWick=lastC.h-Math.max(lastC.o,lastC.c);
-   const rejection=reversalSign>0?lowerWick>body*1.4&&lastC.c>lastC.l+(lastC.h-lastC.l)*0.55:upperWick>body*1.4&&lastC.c<lastC.l+(lastC.h-lastC.l)*0.45;
-   const avgVolume=prior.reduce((n,v)=>n+v.v,0)/prior.length;
-   const volumeConfirm=lastC.v>avgVolume*1.25&&Math.sign(lastC.c-lastC.o)===reversalSign;
-   const support=Math.min(...prior.map(v=>v.l)),resistance=Math.max(...prior.map(v=>v.h));
-   const proximity=Math.max(noise*1.5,lastC.c*0.00015);
-   const atLevel=reversalSign>0?lastC.l<=support+proximity:lastC.h>=resistance-proximity;
-   const exhaustion=recent4.slice(1).reduce((n,v)=>n+Math.abs(v.c-v.o),0)/3<prior.slice(-4).reduce((n,v)=>n+Math.abs(v.c-v.o),0)/4*0.8;
-   const signals=[divergence,rejection,volumeConfirm,atLevel,exhaustion];
-   const reversalScore=signals.filter(Boolean).length;
-   const reversalDirection=reversalSign>0?'BULLISH':'BEARISH';
-   const reversalLikely=reversalScore>=3;
-   // A multi-signal reversal can override raw momentum, but weak evidence cannot.
-   if(reversalLikely){projection=reversalSign*Math.max(Math.abs(projection)*0.5,noise*0.6);direction=reversalSign>0?'UP':'DOWN'}
    const now=Date.now();
-   let calls=[];try{calls=JSON.parse(sessionStorage.getItem('btcMinuteCalls')||'[]')}catch(e){}
-   for(const call of calls){if(call.actual==null&&now>=call.target){const actual=state.bars.find(v=>v.t+60000>=call.target&&v.t+60000<=call.target+120000&&v.t+60000<=now-2000);if(actual){call.actual=actual.c;call.correct=call.direction==='SIDEWAYS'?Math.abs(actual.c-call.entry)<call.band:call.direction==='UP'?actual.c>call.entry:actual.c<call.entry}}}
-   if(!calls.length||now-calls.at(-1).created>=60000)calls.push({created:now,target:now+60000,entry:lastC.c,direction,projection,band,reversal:reversalLikely?reversalDirection:null,reversalScore});
+   const completed=state.bars.filter(b=>b.t+60000<=now);
+   let calls=[];try{const saved=JSON.parse(sessionStorage.getItem('btcMinuteCallsV2')||'[]');if(Array.isArray(saved))calls=saved}catch(e){}
+   // Score only the exact forecast candle, from the same exchange.
+   for(const call of calls){
+    if(call.actual!=null||call.expired||now<call.target)continue;
+    const actual=completed.find(b=>b.t+60000===call.target);
+    if(actual&&call.source===payload.source){call.actual=actual.c;const move=actual.c-call.entry;call.correct=call.direction==='SIDEWAYS'?Math.abs(move)<=call.band:call.direction==='UP'?move>call.band:move< -call.band}
+    else if(now>call.target+120000)call.expired=true;
+   }
+   const forecast=minuteModel(completed,now);
+   if(forecast&&now-forecast.origin<=15000&&!calls.some(c=>c.target===forecast.target)){
+    calls.push({...forecast,created:now,source:payload.source});
+   }
    calls=calls.slice(-100);
-   const call=calls.at(-1),done=calls.filter(v=>v.actual!=null),wins=done.filter(v=>v.correct).length;
-   document.getElementById('minuteForecast').textContent='NEXT 1 MIN · PREDICTED '+call.direction+' · Estimated move '+(call.projection>=0?'+':'')+call.projection.toFixed(2)+' USD · LOW confidence';
-   document.getElementById('minuteAccuracy').textContent='Verified after 60s: '+wins+'/'+done.length+' correct · BTC spot forecast only';
-   const reasons=['Momentum divergence','Wick rejection','Volume confirmation','Support/resistance','Trend exhaustion'].filter((v,i)=>signals[i]);
-   document.getElementById('minuteReversal').textContent='REVERSAL WATCH · '+(reversalLikely?reversalDirection+' REVERSAL POSSIBLE':'NO CONFIRMED REVERSAL')+' · '+reversalScore+'/5 signals · '+(reversalScore>=4?'MODERATE':'LOW')+' confidence · '+(reasons.join(', ')||'No confirmations');
-   const reversalDone=done.filter(v=>v.reversal),reversalWins=reversalDone.filter(v=>v.reversal==='BULLISH'?v.actual>v.entry:v.actual<v.entry).length;
-   document.getElementById('minuteReversalStats').textContent='Reversal calls verified: '+reversalWins+'/'+reversalDone.length+' correct · tracked separately';
+   const call=calls.at(-1),active=call&&call.target>now&&forecast&&call.source===payload.source;
+   const done=calls.filter(c=>c.actual!=null),wins=done.filter(c=>c.correct).length;
+   $('minuteForecast').textContent=active?'NEXT MINUTE CLOSE · '+call.direction+' · '+Math.ceil((call.target-now)/1000)+'s remaining · Estimated move '+(call.projection>=0?'+':'')+call.projection.toFixed(2)+' USD · Experimental':forecast?'NEXT MINUTE · Waiting for the next candle close':'NEXT MINUTE · Insufficient, stale or gapped candles';
+   $('minuteAccuracy').textContent='Exact candle-close results: '+wins+'/'+done.length+' correct · '+calls.filter(c=>c.expired).length+' unscored · local session only';
+   $('minuteReversal').textContent=active?'REVERSAL WATCH · '+(call.reversal?call.reversal+' POSSIBLE':'NO CONFIRMED REVERSAL')+' · '+call.reasons.join(', '):'REVERSAL WATCH · Awaiting fresh forecast';
+   const reversals=done.filter(c=>c.reversal);
+   $('minuteReversalStats').textContent='Reversal calls: '+reversals.filter(c=>c.correct).length+'/'+reversals.length+' correct · not calibrated probabilities';
+   try{sessionStorage.setItem('btcMinuteCallsV2',JSON.stringify(calls))}catch(e){}
 
-   try{sessionStorage.setItem('btcMinuteCalls',JSON.stringify(calls))}catch(e){}
   }
   draw();
  }catch(e){
+  $('minuteForecast').textContent='NEXT MINUTE · Feed unavailable; forecast inactive';
+  $('minuteReversal').textContent='REVERSAL WATCH · Feed unavailable';
   if(!state.bars.length){
    const rect=canvas.parentElement.getBoundingClientRect(),scale=Math.min(window.devicePixelRatio||1,2);
    canvas.width=Math.max(1,Math.floor(rect.width*scale));canvas.height=Math.max(1,Math.floor(rect.height*scale));
    const ctx=canvas.getContext('2d');if(!ctx)return;ctx.setTransform(scale,0,0,scale,0,0);ctx.fillStyle='#0d1320';ctx.fillRect(0,0,rect.width,rect.height);
    ctx.fillStyle='#e6b365';ctx.font='13px system-ui';ctx.fillText('Candles unavailable: '+String(e.message).slice(0,65),12,55);
   }
- }
+ }finally{clearTimeout(timeout);barsBusy=false}
 }
 /* Update the visible candles only while Safari is active; no per-second full canvas redraw. */
-setInterval(()=>{if(!document.hidden)getBars()},15000);
+setInterval(()=>{if(!document.hidden)getBars()},5000);
 getBars();for(const id of ['chart15','chart30','chart60'])$(id).addEventListener('click',()=>setTimeout(draw,30));window.addEventListener('resize',draw);
 })();
 </script><section class="card" id="serverHistory"><div class="label">RENDER SERVER · PERSISTED SIGNAL LOG</div><div class="row"><span class="status" id="serverState">Connecting…</span><span class="small" id="serverCounts"></span></div><div class="result-grid" aria-label="Server prediction results"><div class="result-tile"><div class="result-number up" id="winCount">0</div><div class="result-label">WINS</div></div><div class="result-tile"><div class="result-number down" id="lossCount">0</div><div class="result-label">LOSSES</div></div><div class="result-tile"><div class="result-number wait" id="pendingCount">0</div><div class="result-label">PENDING</div></div><div class="result-tile"><div class="result-number" id="winRate">—</div><div class="result-label">WIN RATE</div></div></div><div class="small" id="serverLatest" aria-live="polite">Checking saved predictions…</div><div class="result-foot" id="settlementInfo">Settlement verification: checking…</div><p class="small">Server results are separate from this Safari page's local spot-direction forward tests. WIN/LOSS requires verified Polymarket US settlement. Prediction history requires a configured persistent database.</p></section><script>(()=>{const $=id=>document.getElementById(id);function safeText(v){return String(v??'—')}async function updateServer(){try{const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json(),counts=d.counts||{};const fifteen=d.final_15m||{},fifteenRow=(d.history||[]).find(x=>x.phase==='FINAL_15M'&&x.market===fifteen.market);const fifteenEl=$('final15Signal');if(fifteenRow){fifteenEl.textContent='FINAL 15M '+fifteenRow.direction;fifteenEl.className='value '+(fifteenRow.direction==='UP'?'up':fifteenRow.direction==='DOWN'?'down':'wait');$('final15Time').textContent='Locked '+new Date(fifteenRow.created_at).toLocaleTimeString();$('final15Reason').textContent='Official result: '+fifteenRow.result+' · Score '+fifteenRow.score+' · Locked for this 15-minute round.';}else{fifteenEl.textContent=fifteen.market?'SCHEDULED · 7:30 LEFT':'15M MARKET UNAVAILABLE';fifteenEl.className='value wait';$('final15Time').textContent=fifteen.seconds_left!=null?Math.max(0,Math.ceil(fifteen.seconds_left-450))+'s to trigger':'Awaiting verified contract';$('final15Reason').textContent=fifteen.market?'Server will save one independent 15-minute final call at the first poll reaching 7:30 remaining.':'Polymarket US 15m lookup: '+(fifteen.lookup||'pending');}const pat=d.external?.chart_pattern||{};$('patternName').textContent=(pat.pattern||'UNAVAILABLE').replaceAll('_',' ');$('patternName').className='value '+(pat.bias==='UP'?'up':pat.bias==='DOWN'?'down':'wait');$('patternDetails').textContent='Bias '+(pat.bias||'—')+' · Support '+(pat.support??'—')+' · Resistance '+(pat.resistance??'—')+' · Volume spike '+(pat.volume_spike===true?'yes':pat.volume_spike===false?'no':'—')+' · '+(d.external?.source||'No feed');const strong=$('strongSignal'),strongReason=$('strongReason'),strongAge=$('strongAge'),quality=d.external?.signal_quality||{};const confirmed=d.status==='running'&&quality.status==='CONFIRMED_TREND'&&(d.signal==='UP'||d.signal==='DOWN');strong.textContent=confirmed?'CONFIRMED '+d.signal:'WAIT · NO STRONG CONFIRMATION';strong.className='value '+(confirmed?(d.signal==='UP'?'up':'down'):'wait');strongAge.textContent=d.updated?'Checked '+new Date(d.updated).toLocaleTimeString():'Awaiting server';strongReason.textContent='3m '+(quality.fast_3m_pct??'—')+'% · 15m '+(quality.slow_15m_pct??'—')+'% · volume '+(quality.volume_ratio??'—')+'× · '+(quality.status||d.status||'CHECKING')+' · not a calibrated win probability';const wins=Number(counts.WIN)||0,losses=Number(counts.LOSS)||0,pending=Number(counts.PENDING)||0; $('serverState').textContent=d.status||'UNKNOWN';$('serverCounts').textContent='Last check '+new Date().toLocaleTimeString();$('winCount').textContent=wins;$('lossCount').textContent=losses;$('pendingCount').textContent=pending;$('winRate').textContent=wins+losses?Math.round(wins/(wins+losses)*100)+'%':'—';const info=d.settlement_diagnostic;$('settlementInfo').textContent=info?'Settlement: '+(info.verified||0)+' verified this check · '+(info.unresolved||0)+' unresolved · '+(info.checked||0)+' checked'+((info.errors||[]).length?' · '+info.errors.length+' errors':''):'Settlement: awaiting diagnostics from latest server version';const box=$('serverLatest');box.replaceChildren();const history=(d.history||[]).slice(0,8);if(!history.length){box.textContent='No saved server predictions yet.';return}for(const h of history){const item=document.createElement('div');item.className='history-item';const left=document.createElement('div'),title=document.createElement('div'),meta=document.createElement('div'),status=document.createElement('span');title.className='history-title';title.textContent=safeText(h.phase)+' · '+safeText(h.direction);meta.className='history-meta';meta.textContent=safeText(h.market)+' · '+(h.created_at?new Date(h.created_at).toLocaleString():'');left.append(title,meta);status.textContent=safeText(h.result);status.className=h.result==='WIN'?'up':h.result==='LOSS'?'down':'wait';item.append(left,status);box.append(item)}}catch(e){$('serverState').textContent='Server unavailable';$('settlementInfo').textContent='Settlement: unavailable';$('serverLatest').textContent='Unable to load results: '+e.message}}document.getElementById('advancedToggle')?.addEventListener('click',()=>{if(document.body.classList.contains('show-advanced'))updateServer()});setInterval(()=>{if(!document.hidden&&document.body.classList.contains('show-advanced'))updateServer()},30000)})();</script><section class="card" id="externalIntelPanel"><div class="label">AI OUTSIDE DATA · EXCHANGE FLOW &amp; NEWS</div><div id="intelFlow" class="small" style="margin-top:10px">Loading exchange trades…</div><div id="intelBook" class="small" style="margin-top:8px"></div><div id="intelNewsStatus" class="small" style="margin-top:12px"></div><div id="intelHeadlines" class="small"></div><p class="small">Observed Coinbase/Kraken trade samples and Kraken depth update about every 15 seconds. Selected publisher headlines refresh about every 2 minutes. Coverage is partial; wallet transfers are not verified buys or sells.</p></section><section class="card" id="aiConfirmationPanel" style="margin:14px 0;border:1px solid #354766;border-radius:14px;padding:16px;background:#121d31;color:#e8f0ff"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><strong style="font-size:17px">AI CONFIRMATION · 15-MIN ONLY</strong><span id="aiVerdict" style="font-weight:800">NOT CONFIGURED</span></div><div id="aiReason" style="margin-top:10px;font-size:13px;line-height:1.5;color:#bac9dd">Waiting for server data…</div><div id="aiMeta" style="margin-top:9px;font-size:11px;color:#8ca2bd">AI reviews indicator consistency; it does not predict guaranteed wins or place orders.</div></section><section class="card" id="aiDecisionLog" style="margin:12px 0"><div class="label">AI DECISION HISTORY · 15-MIN FINAL ONLY</div><div class="small" id="aiLogStats" style="margin:8px 0">Awaiting recorded AI decisions…</div><div id="aiLogRows" class="small"></div></section><script>(function(){async function pollAI(){try{const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error('Server unavailable');const d=await r.json();const a=d.ai_confirmation||{};const intel=d.external?.external_intelligence||{},flow=intel.trade_flow||{},book=intel.order_book||{},news=intel.news||{};
@@ -523,3 +540,4 @@ refresh();setInterval(refresh,8000);
  const toggle=document.getElementById('advancedToggle');if(toggle)cards.insertAdjacentElement('afterend',toggle);
 })();
 </script></body></html>
+
