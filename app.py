@@ -119,20 +119,24 @@ async def market_data(client):
  return None
 async def spot_data(client):
  errors=[]
- for host in ("https://api.binance.us","https://api.binance.com"):
+ for host in ("https://api.binance.com","https://api.binance.us"):
   try:
    r=await client.get(host+"/api/v3/klines",params={"symbol":"BTCUSDT","interval":"1m","limit":30},timeout=10)
    r.raise_for_status()
    candles=r.json()
    if len(candles)<20: raise ValueError("insufficient candles")
+   candles=candles[:-1] # Ignore incomplete candle
    closes=[float(x[4]) for x in candles]
    vols=[float(x[5]) for x in candles]
    buy=[float(x[9]) for x in candles]
    recent=sum(vols[-5:])
+   if recent<0.05: raise ValueError("BTC volume too thin")
    pressure=(2*sum(buy[-5:])/recent-1) if recent else 0
    momentum=(closes[-1]/closes[-6]-1)*100
    long_momentum=(closes[-1]/closes[-16]-1)*100
-   volume_ratio=recent/(sum(vols[-20:-5])/3) if sum(vols[-20:-5]) else 1
+   baseline=sum(vols[-20:-5])/3
+   if baseline<0.05: raise ValueError("BTC baseline volume too thin")
+   volume_ratio=min(10.0,recent/baseline)
    return {"price":closes[-1],"momentum_pct":round(momentum,4),"long_momentum_pct":round(long_momentum,4),"pressure":round(pressure,3),"volume_ratio":round(volume_ratio,2),"source":host}
   except Exception as e: errors.append(str(e))
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
@@ -152,9 +156,18 @@ def winner(m):
  w=str(outcomes[p.index(1.0)]).upper()
  return w if w in ("UP","DOWN") else None
 async def settle(client):
- # US settlement must be verified against the official US settlement endpoint.
- # Do not grade US markets using international Gamma outcome prices.
- return
+ rows=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING'",fetch=True)
+ for (slug,) in rows[:30]:
+  try:
+   r=await client.get("https://gateway.polymarket.us/v1/markets/"+slug+"/settlement",timeout=8)
+   if r.status_code in (404,409): continue
+   r.raise_for_status()
+   data=r.json()
+   if not isinstance(data,dict): continue
+   winning=str(data.get("winningOutcome") or data.get("winner") or "").upper()
+   if winning not in ("UP","DOWN"): continue
+   execute("UPDATE signals SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(winning,slug))
+  except Exception: continue
  rows=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING'",fetch=True)
  for (slug,) in rows[:30]:
   try:
@@ -176,17 +189,20 @@ async def loop():
     direction,flip,score=judge(d)
     now=datetime.now(timezone.utc).isoformat()
     if not m:
+     for key in ("phase","seconds_left","score"): state.pop(key,None)
      state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No compatible Polymarket US 5-minute market found; see market_diagnostic")
     else:
      slug=m["slug"]
      end=m["_round_end"]
      remaining=end-time.time()
      phase="EARLY" if remaining>=180 else "LATE" if remaining<=90 else "MID"
+     state.pop("market_diagnostic",None)
      if phase in ("EARLY","LATE") and direction!="WAIT":
       execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":"+phase,slug,phase,direction,flip,score,now))
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(remaining),market=slug,external=d,updated=now,error=None)
     await settle(client)
    except Exception as e:
+    for key in ("phase","seconds_left","score"): state.pop(key,None)
     state.update(status="feed error",signal="WAIT",flip="WAIT",error=str(e),updated=datetime.now(timezone.utc).isoformat())
    await asyncio.sleep(POLL)
 @asynccontextmanager
