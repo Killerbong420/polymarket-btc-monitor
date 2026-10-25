@@ -1,7 +1,7 @@
 import asyncio, json, os, sqlite3, time
 from pathlib import Path
 from historical_15m import main as collect_15m
-from ai_confirmation import confirm, public_state, check_auth, auth_state
+from ai_confirmation import confirm, public_state, check_auth, auth_state, halfway_decision
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import httpx
@@ -468,6 +468,21 @@ def accuracy_report():
   item["accuracy_pct"]=round(100*item["WIN"]/graded,1) if graded else None
  return sorted(report.values(),key=lambda x:(x["phase"],x["quality"]))
 
+async def record_halfway(client,slug,phase,d,primary,flip,score,now,market):
+ existing=execute("SELECT id FROM signals WHERE id=?",(slug+":"+phase,),fetch=True)
+ if existing: return
+ fallback=final_direction(d,primary,score)
+ terms=market.get("assetPriceTerms") if isinstance(market,dict) else None
+ ptb=(terms or {}).get("priceToBeat") if isinstance(terms,dict) else None
+ target=ptb.get("value") if isinstance(ptb,dict) else None
+ review=await halfway_decision(client,slug,15 if phase=="FINAL_15M" else 5,fallback,score,d,target)
+ chosen=review.get("direction") if review.get("direction") in ("UP","DOWN") else fallback
+ log_signal(slug,phase,chosen,flip,score,now,d)
+ state["last_halfway_ai"]={"market":slug,"phase":phase,"direction":chosen,
+  "indicator_direction":fallback,"source":review.get("source"),
+  "reason":review.get("reason"),"ai_confidence":review.get("ai_confidence"),
+  "updated":now}
+
 async def loop():
  setup()
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
@@ -492,7 +507,7 @@ async def loop():
      # One independent, immutable FINAL call per 5m round, at the first poll
      # reaching 2:30 remaining. Force a research prediction even when trend confirmation is weak.
      if remaining<=150 and remaining>0:
-      log_signal(slug,"FINAL",final_direction(d,direction,score),flip,score,now,d)
+      await record_halfway(client,slug,"FINAL",d,direction,flip,score,now,m)
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(remaining),market=slug,external=d,updated=now,error=None)
      await confirm(client,slug,phase,direction,flip,score,d)
     # Dedicated 15m FINAL call at 7:30 remaining, independent of 5m FINAL.
@@ -501,7 +516,7 @@ async def loop():
      left15=fifteen["end"]-time.time()
      state["final_15m"]={"market":fifteen["slug"],"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
      if 0<left15<=450:
-      log_signal(fifteen["slug"],"FINAL_15M",final_direction(d,direction,score),flip,score,now,d)
+      await record_halfway(client,fifteen["slug"],"FINAL_15M",d,direction,flip,score,now,fifteen)
     else:
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
     await settle(client)
