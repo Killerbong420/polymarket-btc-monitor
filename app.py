@@ -326,7 +326,7 @@ async def settle(client):
  # Resolve the original event when the market-slug endpoint is unavailable.
  # Never infer official outcomes from Coinbase spot candles.
  from datetime import timedelta
- pending=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE '%btc-updown-15m-%' ORDER BY market DESC",fetch=True)
+ pending=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE ? ORDER BY market DESC",("%btc-updown-15m-%",),fetch=True)
  diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[],"reasons":{}}
  def unresolved(reason):
   diagnostic["unresolved"]+=1
