@@ -19,9 +19,12 @@ def connect():
 def execute(sql, params=(), fetch=False):
  with connect() as c:
   if DB: sql = sql.replace("?", "%s")
-  with c.cursor() as cur:
+  cur = c.cursor()
+  try:
    cur.execute(sql, params)
    if fetch: return cur.fetchall()
+  finally:
+   cur.close()
 def setup():
  execute("""CREATE TABLE IF NOT EXISTS signals (
  id TEXT PRIMARY KEY, market TEXT NOT NULL, phase TEXT NOT NULL,
