@@ -74,6 +74,11 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "pressure": external.get("pressure") if external.get("pressure_available") else None,
         "data_source": external.get("source"),
         "candle_age_seconds": external.get("candle_age_seconds"),
+        "chart_indicators": external.get("chart"),
+        "chart_pattern": external.get("chart_pattern"),
+        "signal_quality": external.get("signal_quality"),
+        "graph_evidence": {**(external.get("graph_evidence") or {}),
+            "candles_ohlcv": (external.get("graph_evidence") or {}).get("candles_ohlcv", [])[-20:]},
     }
     schema = {"type": "object", "properties": {
         "verdict": {"type": "string", "enum": ["UP", "DOWN"]},
@@ -84,17 +89,21 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
     payload = {
         "model": MODEL, "store": False,
         "instructions": (
-            "Make a binary BTC direction research forecast: UP or DOWN. Never output WAIT. "
-            "Use only supplied observations, emphasizing fresh price momentum and trend. "
-            "When indicators disagree or data is incomplete, select the better-supported direction "
-            "and set confidence LOW. Do not invent observations or claim certainty. "
-            "Mention stale data when applicable. This is not a trade instruction. "
+            "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
+            "in graph_evidence (oldest to newest), not just the precomputed indicator signal. "
+            "Assess higher highs/lows, candle bodies and wicks, breakout or rejection near support/resistance, "
+            "momentum acceleration/fading, EMA alignment, RSI and volume where provided. "
+            "Weigh recent structure most heavily; compare contradictory trade pressure or indicators. "
+            "Independently select the better-supported next-direction forecast UP or DOWN, never WAIT "
+            "when usable candles exist; confidence LOW when unclear or stale. "
+            "Explain the specific chart evidence for the direction, not just generic bullish/bearish claims. "
+            "Never invent unavailable data, probabilities or certainty; research only, not trading advice. "
             "Keep reason under 180 characters."
         ),
         "input": json.dumps(snapshot, separators=(",", ":")),
         "text": {"format": {"type": "json_schema", "name": "btc_confirmation",
             "strict": True, "schema": schema}},
-        "max_output_tokens": 180,
+        "max_output_tokens": 240,
     }
     try:
         r = await client.post("https://api.openai.com/v1/responses",
