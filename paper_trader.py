@@ -9,7 +9,7 @@ INITIAL_CENTS=100000
 RISK={'max_trade_cents':1000,'daily_loss_cents':2500,'max_open_cents':5000,
       'min_price':.10,'max_price':.85,'max_all_in_price':.85,'max_spread':.08,'slippage':.005,
       'take_profit_pct':.05,'stop_loss_pct':.08,'max_hold_seconds':180,'exit_before_expiry_seconds':180,
-      'min_confidence':'MEDIUM','checkpoint':'LIVE_ANYTIME','daily_timezone':'America/Chicago'}
+      'min_confidence':'LOW','low_confidence_max_trade_cents':500,'checkpoint':'LIVE_ANYTIME','daily_timezone':'America/Chicago'}
 _last_mark=0.0
 
 def risk_settings(stored):
@@ -17,6 +17,8 @@ def risk_settings(stored):
     risk['max_price']=min(float(risk['max_price']),.85)
     risk['max_all_in_price']=min(float(risk.get('max_all_in_price',.85)),.85)
     risk['checkpoint']='LIVE_ANYTIME'
+    risk['min_confidence']='LOW'
+    risk['low_confidence_max_trade_cents']=min(int(risk['low_confidence_max_trade_cents']),500)
     # Apply the faster profit strategy to existing accounts without resetting their ledger.
     risk['take_profit_pct']=min(float(risk['take_profit_pct']),RISK['take_profit_pct'])
     return risk
@@ -155,7 +157,7 @@ async def try_entry(client,execute,connect,postgres,row):
     if call.get('source')!='AI_REVIEW':reason='No actual AI directional review'
     elif call.get('source_mode')=='LIVE' and call.get('profit_action') not in ('ENTER_UP','ENTER_DOWN'):reason='Live AI sees no near-term profit opportunity'
     elif direction not in ('UP','DOWN'):reason='No actionable directional call'
-    elif call.get('confidence') not in ('MEDIUM','HIGH'):reason='AI confidence below paper-test minimum'
+    elif call.get('confidence') not in ('MEDIUM','HIGH') and not (call.get('source_mode')=='LIVE' and call.get('confidence')=='LOW'):reason='AI confidence below paper-test minimum'
     elif not 0<=age<=60:reason='Saved call is too old for a new paper entry'
     elif (snapshot.get('reference_price') or {}).get('status')!='fresh':reason='No fresh reference-price evidence at decision time'
     elif number(snapshot.get('official_target')) is None:reason='Official target unavailable'
@@ -180,6 +182,7 @@ async def try_entry(client,execute,connect,postgres,row):
             run(cur,postgres,'SELECT COALESCE(SUM(cost_cents),0) FROM paper_positions WHERE status=\'OPEN\'')
             opened=int(cur.fetchone()[0]);daily=gross_daily_losses(cur,postgres)
             budget=min(cash,risk['max_trade_cents'],risk['max_open_cents']-opened,risk['daily_loss_cents']-daily-opened)
+            if call.get('confidence')=='LOW':budget=min(budget,risk['low_confidence_max_trade_cents'])
             if budget<=0:attempt('SKIPPED','Cash, open-risk or daily-loss budget reached',{'open_risk_cents':opened,'daily_realized_losses_cents':daily});return
             fill=entry_fill(book,direction,budget,risk)
             if fill and fill['cost_cents']/(100*fill['quantity'])>=risk['max_all_in_price']:
@@ -319,7 +322,7 @@ async def cycle(client,execute,connect,postgres,live_signal=None):
         snapshot=signal.get('snapshot') or {};created=datetime.fromtimestamp(signal['captured_epoch'],timezone.utc).isoformat()
         call={'direction':'UP' if opp.get('action')=='ENTER_UP' else 'DOWN' if opp.get('action')=='ENTER_DOWN' else 'WAIT',
               'source':'AI_REVIEW','source_mode':'LIVE','profit_action':opp.get('action'),
-              'confidence':opp.get('confidence','LOW'),'reason':opp.get('reason'),
+              'confidence':opp.get('confidence'),'reason':opp.get('reason'),
               'max_entry_price':opp.get('max_entry_price'),'target_exit_bid':opp.get('target_exit_bid')}
         execute('INSERT INTO paper_live_calls (id,market,created_at,snapshot_json,calls_json) VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING',(key,market,created,json.dumps(snapshot),json.dumps({'AI':call})))
     started=execute("SELECT started_at FROM paper_account WHERE id='main'",fetch=True)[0][0]
@@ -367,5 +370,5 @@ def report(execute):
             'orders':[dict(zip(('market','kind','status','threshold','updated_at','detail'),x)) for x in execute('SELECT market,kind,status,threshold,updated_at,detail FROM paper_orders ORDER BY updated_at DESC LIMIT 60',fetch=True)],
             'unfilled_exit_orders':execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0],
             'equity_history':[{'at':t,'equity_cents':v} for t,v in reversed(curve)],
-            'note':'Fake money only. Fresh MEDIUM/HIGH live AI profit opportunities at any point in the round; one filled entry per market; quoted odds and all-in entry cost strictly below 85 percent; fresh two-sided entry book required. Simulated take profit +5% / stop loss -8% net of fees, max hold 180 seconds, and exit at least 180 seconds before expiry. Full-position sell fills only; unfilled exits are flagged and retried, not fabricated. Missing exit depth is valued at zero until official settlement. Paper fills, timing and profitability can differ from real trading. Pause stops entries, not protective sells or settlement fallback. Holding to settlement is an exceptional unfilled-exit fallback, not the strategy. Daily loss budget uses Chicago time, gross realized losses plus all open cost. Sandbox controls are shared with dashboard visitors.'}
+            'note':'Fake money only. Fresh LOW/MEDIUM/HIGH live AI profit opportunities (LOW entries capped at $5) at any point in the round; one filled entry per market; quoted odds and all-in entry cost strictly below 85 percent; fresh two-sided entry book required. Simulated take profit +5% / stop loss -8% net of fees, max hold 180 seconds, and exit at least 180 seconds before expiry. Full-position sell fills only; unfilled exits are flagged and retried, not fabricated. Missing exit depth is valued at zero until official settlement. Paper fills, timing and profitability can differ from real trading. Pause stops entries, not protective sells or settlement fallback. Holding to settlement is an exceptional unfilled-exit fallback, not the strategy. Daily loss budget uses Chicago time, gross realized losses plus all open cost. Sandbox controls are shared with dashboard visitors.'}
 

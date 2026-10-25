@@ -126,6 +126,24 @@ class LedgerTests(unittest.IsolatedAsyncioTestCase):
   with patch('paper_trader.time.time',return_value=self.now):await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal(target=.76))
   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
   self.assertIn('net profit',app.execute('SELECT reason FROM paper_attempts',fetch=True)[0][0])
+ async def test_low_live_buy_uses_smaller_budget_for_existing_account(self):
+  app.execute('UPDATE paper_account SET risk_json=?',(json.dumps({'min_confidence':'MEDIUM','max_trade_cents':1000}),))
+  signal=self.live_signal();signal['profit_opportunity']['confidence']='LOW'
+  with patch('paper_trader.time.time',return_value=self.now):
+   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,signal)
+  cost=app.execute('SELECT cost_cents FROM paper_positions',fetch=True)[0][0]
+  self.assertGreater(cost,0);self.assertLessEqual(cost,500)
+  self.assertEqual(p.report(app.execute)['risk']['min_confidence'],'LOW')
+ async def test_missing_confidence_does_not_become_low_buy(self):
+  signal=self.live_signal();del signal['profit_opportunity']['confidence']
+  with patch('paper_trader.time.time',return_value=self.now):
+   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,signal)
+  self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
+ async def test_low_buy_still_requires_net_profit(self):
+  signal=self.live_signal(target=.76);signal['profit_opportunity']['confidence']='LOW'
+  with patch('paper_trader.time.time',return_value=self.now):
+   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,signal)
+  self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
  async def test_smaller_opportunity_enters_on_existing_account_and_takes_profit(self):
   risk=dict(p.RISK,take_profit_pct=.10)
   app.execute('UPDATE paper_account SET risk_json=?',(json.dumps(risk),))
