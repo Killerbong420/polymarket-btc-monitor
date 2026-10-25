@@ -244,7 +244,7 @@ def settlement_price(data):
  if not isinstance(data,dict): return None
  for obj in (data,data.get("settlement"),data.get("data")):
   if not isinstance(obj,dict): continue
-  for key in ("settlementPrice","settlement_price","price","value"):
+  for key in ("settlement","settlementPrice","settlement_price","price","value"):
    if key in obj and obj[key] is not None:
     try: return float(obj[key])
     except (TypeError,ValueError): pass
@@ -275,7 +275,7 @@ async def settle(client):
  # Resolve the original event when the market-slug endpoint is unavailable.
  # Never infer official outcomes from Coinbase spot candles.
  from datetime import timedelta
- pending=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING'",fetch=True)
+ pending=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING' ORDER BY market DESC",fetch=True)
  diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[],"reasons":{}}
  def unresolved(reason):
   diagnostic["unresolved"]+=1
@@ -283,7 +283,7 @@ async def settle(client):
  for (slug,) in pending[:30]:
   try:
    # The US slug embeds the start time, e.g. cpc-btc-updown-5m-2026-10-25-0525z.
-   stamp=slug.split("btc-updown-5m-",1)[-1]
+   stamp=slug.split("btc-updown-15m-" if "btc-updown-15m-" in slug else "btc-updown-5m-",1)[-1]
    start=datetime.strptime(stamp,"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc)
    if datetime.now(timezone.utc)<start+timedelta(minutes=16 if "btc-updown-15m-" in slug else 6):
     unresolved("round_not_yet_settled")
@@ -321,7 +321,7 @@ async def settle(client):
     continue
    sr=await client.get(gateway+"/v1/markets/"+slug+"/settlement",timeout=10)
    if sr.status_code!=200:
-    unresolved("official_settlement_http_"+str(sr.status_code))
+    unresolved("settlement_not_published" if sr.status_code==404 else "official_settlement_http_"+str(sr.status_code))
     continue
    win=verified_winner(market,sr.json())
    if win is None:
