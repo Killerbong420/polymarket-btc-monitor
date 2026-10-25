@@ -111,12 +111,6 @@ h1{font-size:20px;margin:6px 0}
 
 .pm-trend-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:10px}.pm-trend-grid>div{background:#0a192a;border:1px solid #2b435a;border-radius:10px;padding:10px 8px}.pm-trend-grid span{display:block;color:#9fb2c7;font-size:10px}.pm-trend-grid strong{display:block;margin-top:4px;font-size:12px}.pm-trend-up{color:#59e3a3}.pm-trend-down{color:#ff929c}.pm-trend-flat{color:#e7c16f}@media(max-width:520px){.pm-trend-grid strong{font-size:11px}}
 .pm-patterns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}.pm-patterns>div{background:#0b1c2d;border:1px solid #38536c;border-radius:11px;padding:10px}.pm-patterns span{font-size:10px;color:#9db5cc;display:block}.pm-patterns strong{font-size:12px;color:#e3f0ff;display:block;margin-top:5px}
-#pmChartCard{border-color:#345e6f;background:#101d2e;margin-top:9px}
-#pmOddsCanvas{width:100%;height:300px;display:block;background:#0c1727;border:1px solid #2b435a;border-radius:10px;margin:10px 0 6px}
-#pmChartCard .grid{margin-top:9px}
-#pmChartCard .grid .card{margin:0}
-#pmQuoteStatus{font-size:11px}
-@media(max-width:520px){#pmOddsCanvas{height:265px}}
 
 /* Mobile-first BRTI terminal: lightweight native canvas, no chart framework. */
 body{max-width:940px}
@@ -136,7 +130,6 @@ body{max-width:940px}
 .brti-legend{display:flex;gap:13px;flex-wrap:wrap;color:#b8cbdc;font-size:10px;margin:7px 0 11px}
 .brti-key{display:inline-block;width:10px;height:4px;border-radius:3px;margin-right:5px;vertical-align:middle}
 .brti-footer{font-size:11px;color:#9bacbf;line-height:1.55;margin-top:10px}
-#pmChartCard{border-radius:17px!important}
 #monitorHealth{border-color:#2b4358}
 #healthAlerts{max-height:190px;overflow-y:auto}
 @media(max-width:520px){#brtiHero{padding:12px!important}#brtiCanvas{height:245px}.brti-stats strong{font-size:12px}.brti-head h2{font-size:18px}}
@@ -165,7 +158,6 @@ body{max-width:1360px!important;background:#0d111b;color:#e8edf7;padding:12px 16
 #terminalQuickCards .value{font-size:clamp(19px,2vw,29px);font-weight:800}
 #terminalQuickCards .label{font-size:12px;font-weight:750;color:#e4eaf6}
 #terminalQuickCards .small{font-size:12px;line-height:1.5}
-#pmChartCard,#brtiHero{background:#131b2a!important;border:1px solid #38475d!important;border-radius:12px!important}
 @media(max-width:720px){body{padding:9px 8px 35px}#terminalQuickCards{grid-template-columns:1fr;gap:7px}#heroChart .chart-wrap.candle-wrap{height:330px!important}#heroChart .secondary-chart{height:80px!important}#heroChart .chart-controls button{padding:7px 9px;font-size:11px}}
 </style><style>
 /* Keep only actionable 15-minute prediction surfaces in the default view. */
@@ -518,7 +510,6 @@ refresh();setInterval(refresh,8000);
 (()=>{
  const chart=document.getElementById('heroChart');
  const reference=document.getElementById('targetResearch');
- const odds=document.getElementById('pmChartCard');
  const ai=document.getElementById('aiConfirmationPanel');
  const brti=document.getElementById('brtiHero');
  if(!chart)return;
@@ -528,7 +519,6 @@ refresh();setInterval(refresh,8000);
  // The reference panel has no live updater; do not show a permanent CONNECTING placeholder.
  if(reference)reference.remove();
  if(ai)cards.append(ai);
- if(odds)cards.append(odds);
  if(brti)cards.insertAdjacentElement('afterend',brti);
  const toggle=document.getElementById('advancedToggle');if(toggle)cards.insertAdjacentElement('afterend',toggle);
 })();
