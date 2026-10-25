@@ -16,7 +16,8 @@ try:
 except ImportError:
  psycopg = None
 
-POLL = max(5, int(os.getenv("POLL_SECONDS", "5")))
+# Fixed requested cadence also overrides legacy Render POLL_SECONDS=15 settings.
+POLL = 5
 DB = os.getenv("DATABASE_URL", "")
 state = {"status":"starting","signal":"WAIT","flip":"WAIT","market":None,"updated":None,"error":None}
 @contextmanager
@@ -794,7 +795,7 @@ def brti_chart():
    return {"status":"unavailable","points":[],"reason":"No current 15-minute BRTI reference observations"}
   age=time.time()-float(chart.get("observed_epoch") or 0)
   points=chart.get("points") or []
-  return {"status":"fresh" if points and age<=20 and float(chart.get("sample_age_seconds") or 999)<=15 else "stale" if points else "unavailable",
+  return {"status":"fresh" if points and age<=20 and float(chart.get("sample_age_seconds") if chart.get("sample_age_seconds") is not None else 999)<=15 else "stale" if points else "unavailable",
           "market":market,"points":points,"source":"Polymarket US BTC reference / BRTI",
           "official_target":number((state.get("target_behavior") or {}).get("target")),
           "observed_age_seconds":round(age,1),
@@ -841,10 +842,11 @@ async def candle_proxy():
     import math
     bars={}
     for x in series.get("candles",[]):
-     if int(x.get("tickCount") or 0)<=0:continue
+     if not isinstance(x,dict):continue
      try:
+      if int(x.get("tickCount") or 0)<=0:continue
       t,lo,hi,op,cl=[float(x[k]) for k in ("timestamp","low","high","open","close")]
-     except (KeyError,ValueError,TypeError):continue
+     except (KeyError,ValueError,TypeError,OverflowError):continue
      if not all(math.isfinite(v) for v in (t,lo,hi,op,cl)):continue
      if t%60 or t>time.time() or min(lo,hi,op,cl)<=0 or lo>min(op,cl) or hi<max(op,cl):continue
      bars[t]=[t,lo,hi,op,cl,0]
@@ -856,8 +858,13 @@ async def candle_proxy():
      "volume_available":False,"bucket_age_seconds":round(age,1),
      "note":"Published reference OHLC. No trading volume; zero-tick buckets omitted."}
   except Exception as e:
+   if isinstance(e,httpx.HTTPStatusError):
+    code="HTTP_"+str(e.response.status_code)
+   elif isinstance(e,httpx.TimeoutException):code="TIMEOUT"
+   elif isinstance(e,httpx.RequestError):code="CONNECTION_ERROR"
+   else:code="INVALID_FEED_DATA"
    payload={"source":source,"candles":[],"status":"unavailable","volume_available":False,
-    "error":"Reference candles unavailable: "+type(e).__name__}
+    "error_code":code,"error":"Polymarket reference feed: "+code}
   _reference_candle_cache.update(at=time.monotonic(),payload=payload)
   return payload
 
@@ -873,5 +880,6 @@ def status():
 @app.get("/",response_class=HTMLResponse)
 def home():
  return Path(__file__).with_name("terminal.html").read_text(encoding="utf-8")
+
 
 

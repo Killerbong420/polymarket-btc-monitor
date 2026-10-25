@@ -1,5 +1,6 @@
 import json,os,tempfile,time,unittest,asyncio
 from datetime import datetime,timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 import app,paper_trader as p
 from fastapi.testclient import TestClient
@@ -27,13 +28,29 @@ class BookTests(unittest.TestCase):
 
 class LedgerTests(unittest.IsolatedAsyncioTestCase):
  def setUp(self):
+  self.mono=1000.0
+  self.clock=patch('paper_trader.time',SimpleNamespace(time=time.time,monotonic=lambda:self.mono));self.clock.start();self.addCleanup(self.clock.stop)
+  p._last_entry_scan=p._last_mark=p._last_settlement_scan=0.0
   self.cwd=os.getcwd();self.tmp=tempfile.TemporaryDirectory();os.chdir(self.tmp.name)
   self.db=app.DB;app.DB='';app.setup();app.execute("UPDATE paper_account SET started_at='2000-01-01T00:00:00+00:00'")
   self.now=int(time.time()//900)*900+450
+  self.stamp=patch('paper_trader.stamp',side_effect=lambda:datetime.fromtimestamp(self.now,timezone.utc).isoformat());self.stamp.start();self.addCleanup(self.stamp.stop)
   self.slug='cpc-btc-updown-15m-'+datetime.fromtimestamp(self.now-450,timezone.utc).strftime('%Y-%m-%d-%H%Mz')
   self.created=datetime.fromtimestamp(self.now,timezone.utc).isoformat()
   self.row=(self.slug,self.slug+':HALFWAY',self.created,json.dumps({'reference_price':{'status':'fresh'},'official_target':80000}),json.dumps({'AI':{'direction':'UP','source':'AI_REVIEW','confidence':'MEDIUM'}}))
  def tearDown(self):app.DB=self.db;os.chdir(self.cwd);self.tmp.cleanup()
+ async def cycle(self,*args,**kwargs):
+  # Each simulated worker tick occurs after the production two-second throttle.
+  self.mono+=3
+  return await p.cycle(*args,**kwargs)
+ async def test_entry_scan_throttle_and_retry(self):
+  with patch('paper_trader.time.time',return_value=self.now):
+   await self.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('expensive',max_entry=.74))
+   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('retry'))
+   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
+   self.mono+=2
+   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('retry'))
+   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],1)
  def client(self):
   now=self.now;slug=self.slug
   class R:
@@ -112,52 +129,52 @@ class LedgerTests(unittest.IsolatedAsyncioTestCase):
           'profit_opportunity':{'action':action,'confidence':'HIGH','max_entry_price':max_entry,'target_exit_bid':target,'position_action':'HOLD','reason':'test profit case'}}
  async def test_live_entry_does_not_wait_for_halfway(self):
   self.now=self.now-330 # Two minutes into the round, not halfway.
-  with patch('paper_trader.time.time',return_value=self.now):await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal())
+  with patch('paper_trader.time.time',return_value=self.now):await self.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal())
   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],1)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM research_calls',fetch=True)[0][0],0)
  async def test_new_prediction_can_reconsider_skipped_market(self):
   with patch('paper_trader.time.time',return_value=self.now):
-   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('too-expensive',max_entry=.74))
+   await self.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('too-expensive',max_entry=.74))
    self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
-   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('good-entry'))
-   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('good-entry'))
+   await self.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('good-entry'))
+   await self.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('good-entry'))
   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],1)
  async def test_profit_target_must_cover_fees(self):
-  with patch('paper_trader.time.time',return_value=self.now):await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal(target=.76))
+  with patch('paper_trader.time.time',return_value=self.now):await self.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal(target=.76))
   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
   self.assertIn('net profit',app.execute('SELECT reason FROM paper_attempts',fetch=True)[0][0])
  async def test_low_live_buy_uses_smaller_budget_for_existing_account(self):
   app.execute('UPDATE paper_account SET risk_json=?',(json.dumps({'min_confidence':'MEDIUM','max_trade_cents':1000}),))
   signal=self.live_signal();signal['profit_opportunity']['confidence']='LOW'
   with patch('paper_trader.time.time',return_value=self.now):
-   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,signal)
+   await self.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,signal)
   cost=app.execute('SELECT cost_cents FROM paper_positions',fetch=True)[0][0]
   self.assertGreater(cost,0);self.assertLessEqual(cost,500)
   self.assertEqual(p.report(app.execute)['risk']['min_confidence'],'LOW')
  async def test_missing_confidence_does_not_become_low_buy(self):
   signal=self.live_signal();del signal['profit_opportunity']['confidence']
   with patch('paper_trader.time.time',return_value=self.now):
-   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,signal)
+   await self.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,signal)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
  async def test_low_buy_still_requires_net_profit(self):
   signal=self.live_signal(target=.76);signal['profit_opportunity']['confidence']='LOW'
   with patch('paper_trader.time.time',return_value=self.now):
-   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,signal)
+   await self.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,signal)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
  async def test_smaller_opportunity_enters_on_existing_account_and_takes_profit(self):
   risk=dict(p.RISK,take_profit_pct=.10)
   app.execute('UPDATE paper_account SET risk_json=?',(json.dumps(risk),))
   with patch('paper_trader.time.time',return_value=self.now):
-   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal(target=.83))
+   await self.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal(target=.86))
    self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],1)
-   await p.manage_exits(self.exit_client(.83,.84),app.execute,app.connect,False)
+   await p.manage_exits(self.exit_client(.86,.87),app.execute,app.connect,False)
   status,pnl,cost=app.execute('SELECT status,pnl_cents,cost_cents FROM paper_positions',fetch=True)[0]
-  self.assertEqual(status,'CLOSED');self.assertGreaterEqual(pnl/cost,.05);self.assertLess(pnl/cost,.10)
-  self.assertEqual(p.report(app.execute)['risk']['take_profit_pct'],.05)
+  self.assertEqual(status,'CLOSED');self.assertGreaterEqual(pnl/cost,.08);self.assertLess(pnl/cost,.15)
+  self.assertEqual(p.report(app.execute)['risk']['take_profit_pct'],.08)
  async def test_cap_applies_to_existing_account_and_all_in_cost(self):
   risk=dict(p.RISK,max_price=.99,max_all_in_price=.99);app.execute('UPDATE paper_account SET risk_json=?',(json.dumps(risk),))
   self.assertEqual(p.report(app.execute)['risk']['max_price'],.85)
-  with patch('paper_trader.time.time',return_value=self.now):await p.cycle(self.exit_client(.83,.84),app.execute,app.connect,False,self.live_signal(max_entry=.84,target=.99))
+  with patch('paper_trader.time.time',return_value=self.now):await self.cycle(self.exit_client(.83,.84),app.execute,app.connect,False,self.live_signal(max_entry=.84,target=.99))
   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
   b={'bids':[(.84,100)],'offers':[(.85,100)],'book_epoch':self.now,'spread':.01}
   self.assertIsNone(p.entry_fill(b,'UP',1000,p.risk_settings(risk)))
@@ -176,4 +193,5 @@ class LedgerTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(c.get('/api/paper').json()['status'],'paused')
 
 if __name__=='__main__':unittest.main()
+
 

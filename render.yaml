@@ -9,6 +9,5 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: POLL_SECONDS
-        value: "15"
-      - key: MARKET_SLUG_PREFIX
-        value: btc-updown-5m
+        value: "5"
+
