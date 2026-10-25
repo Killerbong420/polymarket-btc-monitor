@@ -9,7 +9,7 @@ import paper_learning as learning
 INITIAL_CENTS=100000
 RISK={'max_trade_cents':1000,'daily_loss_cents':2500,'max_open_cents':5000,
       'min_price':.10,'max_price':.85,'max_all_in_price':.85,'max_spread':.08,'slippage':.005,
-      'take_profit_pct':.05,'stop_loss_pct':.08,'max_hold_seconds':180,'exit_before_expiry_seconds':180,
+      'take_profit_pct':.08,'stop_loss_pct':.08,'max_hold_seconds':180,'exit_before_expiry_seconds':180,
       'min_confidence':'LOW','low_confidence_max_trade_cents':500,'checkpoint':'LIVE_ANYTIME','daily_timezone':'America/Chicago'}
 _last_mark=0.0
 _last_entry_scan=0.0
@@ -23,7 +23,7 @@ def risk_settings(stored):
     risk['min_confidence']='LOW'
     risk['low_confidence_max_trade_cents']=min(int(risk['low_confidence_max_trade_cents']),500)
     # Apply the faster profit strategy to existing accounts without resetting their ledger.
-    risk['take_profit_pct']=min(float(risk['take_profit_pct']),RISK['take_profit_pct'])
+    risk['take_profit_pct']=RISK['take_profit_pct']
     return risk
 
 def stamp():return datetime.now(timezone.utc).isoformat()
@@ -408,6 +408,10 @@ def position_context(execute,market):
             'mark_age_seconds':round(time.time()-epoch,1) if epoch else None,'opened_at':created}
 
 async def manage_exits(client,execute,connect,postgres,live_signal=None):
+    # Existing positions may have a saved 5% order from the old strategy.
+    # Raise only the paper take-profit trigger, preserving stops and time exits.
+    execute("UPDATE paper_orders SET threshold=? WHERE kind='TAKE_PROFIT' AND position_id IN (SELECT id FROM paper_positions WHERE status='OPEN') AND threshold<?",
+            (RISK['take_profit_pct'],RISK['take_profit_pct']))
     rows=execute("SELECT id,market,direction,quantity,cost_cents FROM paper_positions WHERE status='OPEN'",fetch=True)
     for ident,market,direction,quantity,cost in rows:
         orders=execute('SELECT kind,threshold,status FROM paper_orders WHERE position_id=?',(ident,),fetch=True)
@@ -581,11 +585,11 @@ def report(execute):
             'missed_opportunity_counts':shadow_counts,
             'missed_opportunities':[dict(zip(('market','direction','observed_epoch','entry_ask','quantity','entry_cost_cents',
                 'status','best_exit_bid','best_exit_epoch','best_net_cents','max_roi_pct','resolved_epoch'),row)) for row in shadow_recent],
-            'missed_opportunity_note':'Forward observed Polymarket BBO top-of-book hypothetical trades (10 contracts, taker-fee and adverse slippage model), sampled approximately every 20s per direction. MISSED_QUOTED_PROFIT means a later quote hypothetically beat the net 5% target within 180s without a matching paper position. Not a guaranteed fill or realized profit; depth, latency and slippage can differ.',
+            'missed_opportunity_note':'Forward observed Polymarket BBO top-of-book hypothetical trades (10 contracts, taker-fee and adverse slippage model), sampled approximately every 20s per direction. MISSED_QUOTED_PROFIT means a later quote hypothetically beat the net 8% target within 180s without a matching paper position. Not a guaranteed fill or realized profit; depth, latency and slippage can differ.',
             'entry_mode':'LIVE_ANYTIME',
             'latest_live_signal':[{'market':m,'captured_at':t,'call':json.loads(c).get('AI')} for m,t,c in execute('SELECT market,created_at,calls_json FROM paper_live_calls ORDER BY created_at DESC LIMIT 1',fetch=True)],
             'orders':[dict(zip(('market','kind','status','threshold','updated_at','detail'),x)) for x in execute('SELECT market,kind,status,threshold,updated_at,detail FROM paper_orders ORDER BY updated_at DESC LIMIT 60',fetch=True)],
             'unfilled_exit_orders':execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0],
             'equity_history':[{'at':t,'equity_cents':v} for t,v in reversed(curve)],
-            'note':'Fake money only. Fresh LOW/MEDIUM/HIGH live AI profit opportunities (LOW entries capped at $5) at any point in the round; one filled entry per market; quoted odds and all-in entry cost strictly below 85 percent; fresh two-sided entry book required. Simulated take profit +5% / stop loss -8% net of fees, max hold 180 seconds, and exit at least 180 seconds before expiry. Full-position sell fills only; unfilled exits are flagged and retried, not fabricated. Missing exit depth is valued at zero until official settlement. Paper fills, timing and profitability can differ from real trading. Pause stops entries, not protective sells or settlement fallback. Holding to settlement is an exceptional unfilled-exit fallback, not the strategy. Daily loss budget uses Chicago time, gross realized losses plus all open cost. Sandbox controls are shared with dashboard visitors.'}
+            'note':'Fake money only. Fresh LOW/MEDIUM/HIGH live AI profit opportunities (LOW entries capped at $5) at any point in the round; one filled entry per market; quoted odds and all-in entry cost strictly below 85 percent; fresh two-sided entry book required. Simulated take profit +8% / stop loss -8% net of fees, max hold 180 seconds, and exit at least 180 seconds before expiry. Full-position sell fills only; unfilled exits are flagged and retried, not fabricated. Missing exit depth is valued at zero until official settlement. Paper fills, timing and profitability can differ from real trading. Pause stops entries, not protective sells or settlement fallback. Holding to settlement is an exceptional unfilled-exit fallback, not the strategy. Daily loss budget uses Chicago time, gross realized losses plus all open cost. Sandbox controls are shared with dashboard visitors.'}
 
