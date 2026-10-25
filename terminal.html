@@ -149,7 +149,25 @@ body:not(.show-advanced) #externalIntelPanel,
 body:not(.show-advanced) #signalTiles,
 body:not(.show-advanced) #monitorHealth {display:none!important}
 #advancedToggle{position:relative;display:block;width:100%;margin:8px 0;background:#233b55;border:1px solid #45627b;font-size:13px}
-</style></head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
+<style>
+/* Reference-inspired trading terminal: large candle chart and compact market cards. */
+body{max-width:1360px!important;background:#0d111b;color:#e8edf7;padding:12px 16px 42px}
+#heroChart{background:#111723!important;border:1px solid #475169!important;border-radius:12px!important;padding:13px!important;box-shadow:0 8px 26px #0004}
+#heroChart .market-strip{font-size:12px;font-weight:750;color:#dce9fa;letter-spacing:.035em;padding:5px 0 10px}
+#heroChart .chart-wrap.candle-wrap{height:clamp(320px,47vw,590px)!important;background:#0b101b}
+#heroChart .secondary-chart{height:95px!important}
+#heroChart .chart-controls{display:flex;gap:5px;flex-wrap:wrap}
+#heroChart .chart-controls button{flex:0 0 auto;background:#1b2333;border:1px solid #45536c;border-radius:5px;font-size:12px;padding:7px 11px}
+#heroChart .chart-controls button.active{background:#3a405b;border-color:#b49adf}
+#patternPanel{background:#171c2a!important;border:1px solid #48566e!important;border-left:3px solid #a994dc!important;border-radius:8px!important}
+#terminalQuickCards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:10px 0}
+#terminalQuickCards>.card{margin:0!important;min-width:0;border:1px solid #57647d!important;background:#161e2d!important;border-radius:10px!important;padding:15px!important}
+#terminalQuickCards .value{font-size:clamp(19px,2vw,29px);font-weight:800}
+#terminalQuickCards .label{font-size:12px;font-weight:750;color:#e4eaf6}
+#terminalQuickCards .small{font-size:12px;line-height:1.5}
+#pmChartCard,#brtiHero{background:#131b2a!important;border:1px solid #38475d!important;border-radius:12px!important}
+@media(max-width:720px){body{padding:9px 8px 35px}#terminalQuickCards{grid-template-columns:1fr;gap:7px}#heroChart .chart-wrap.candle-wrap{height:330px!important}#heroChart .secondary-chart{height:80px!important}#heroChart .chart-controls button{padding:7px 9px;font-size:11px}}
+</style></style></head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
 document.getElementById('advancedToggle').addEventListener('click',function(){
  const enabled=document.body.classList.toggle('show-advanced');
  this.setAttribute('aria-expanded',String(enabled));
@@ -569,4 +587,22 @@ window.addEventListener('resize',paint);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
 refresh();setInterval(refresh,8000);
 })();
-</script></body></html>
+<script>
+/* Arrange existing live widgets into the requested chart-first terminal layout.
+   Move DOM nodes rather than duplicate them, preserving live update handlers. */
+(()=>{
+ const chart=document.getElementById('heroChart');
+ const reference=document.getElementById('targetResearch');
+ const odds=document.getElementById('pmChartCard');
+ const ai=document.getElementById('aiConfirmationPanel');
+ const brti=document.getElementById('brtiHero');
+ if(!chart||!reference)return;
+ reference.parentNode.insertBefore(chart,reference);
+ const cards=document.createElement('div');cards.id='terminalQuickCards';
+ chart.insertAdjacentElement('afterend',cards);
+ cards.append(reference);
+ if(ai)cards.append(ai);
+ if(odds)cards.append(odds);
+ if(brti)cards.insertAdjacentElement('afterend',brti);
+})();
+</script></script></body></html>
