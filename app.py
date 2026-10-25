@@ -33,6 +33,11 @@ def setup():
  id TEXT PRIMARY KEY, market TEXT NOT NULL, phase TEXT NOT NULL,
  direction TEXT NOT NULL, flip TEXT NOT NULL, score REAL NOT NULL,
  created_at TEXT NOT NULL, result TEXT NOT NULL DEFAULT 'PENDING')""")
+ execute("""CREATE TABLE IF NOT EXISTS ai_decisions (
+ id TEXT PRIMARY KEY, market TEXT NOT NULL, phase TEXT NOT NULL,
+ direction TEXT NOT NULL, confidence TEXT NOT NULL, source TEXT NOT NULL,
+ reason TEXT NOT NULL, created_at TEXT NOT NULL,
+ result TEXT NOT NULL DEFAULT 'PENDING')""")
  for col in ("quality TEXT NOT NULL DEFAULT 'UNRATED'","quality_reason TEXT NOT NULL DEFAULT 'Legacy prediction; quality not captured'","decision_source TEXT NOT NULL DEFAULT 'LEGACY'","decision_reason TEXT NOT NULL DEFAULT ''","ai_confidence TEXT NOT NULL DEFAULT 'UNRATED'"):
   try: execute("ALTER TABLE signals ADD COLUMN "+col)
   except Exception as exc:
@@ -494,6 +499,7 @@ async def settle(client):
     unresolved("official_winner_mapping_unverified")
     continue
    execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
+   execute("UPDATE ai_decisions SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    diagnostic["verified"]+=1
   except Exception as exc:
    diagnostic["errors"].append(type(exc).__name__+": "+str(exc)[:100])
@@ -555,6 +561,9 @@ async def record_halfway(client,slug,phase,d,primary,flip,score,now,market):
  review=await halfway_decision(client,slug,15 if phase=="FINAL_15M" else 5,fallback,score,d,target)
  chosen=review.get("direction") if review.get("direction") in ("UP","DOWN") else fallback
  log_signal(slug,phase,chosen,flip,score,now,d)
+ if phase=="FINAL_15M":
+  execute("INSERT INTO ai_decisions (id,market,phase,direction,confidence,source,reason,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
+   (slug+":"+phase,slug,phase,chosen,review.get("ai_confidence","UNRATED"),review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],now))
  execute("UPDATE signals SET decision_source=?,decision_reason=?,ai_confidence=? WHERE id=?",
   (review.get("source","UNKNOWN"),str(review.get("reason",""))[:300],review.get("ai_confidence","UNRATED"),slug+":"+phase))
  state["last_halfway_ai"]={"market":slug,"phase":phase,"direction":chosen,
@@ -665,7 +674,9 @@ def status():
  try:
   rows=execute("SELECT result,COUNT(*) FROM signals WHERE phase='FINAL_15M' GROUP BY result",fetch=True)
   recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason,decision_source,decision_reason,ai_confidence FROM signals WHERE phase='FINAL_15M' ORDER BY created_at DESC LIMIT 50",fetch=True)
-  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
+  ai_rows=execute("SELECT market,phase,direction,confidence,source,reason,created_at,result FROM ai_decisions WHERE phase='FINAL_15M' ORDER BY created_at DESC LIMIT 50",fetch=True)
+  ai_counts=execute("SELECT result,COUNT(*) FROM ai_decisions WHERE phase='FINAL_15M' GROUP BY result",fetch=True)
+  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"ai_decision_counts":dict(ai_counts),"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
  except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
 @app.get("/",response_class=HTMLResponse)
 def home():
