@@ -286,7 +286,7 @@ async def try_entry(client,execute,connect,postgres,row):
     if call.get('source') not in ('AI_REVIEW','AI_DIRECTION_DIP_RULE'):reason='No AI directional review or authorized paper-only market trigger'
     elif call.get('source_mode')=='LIVE' and call.get('profit_action') not in ('ENTER_UP','ENTER_DOWN'):reason='Live AI sees no near-term profit opportunity'
     elif direction not in ('UP','DOWN'):reason='No actionable directional call'
-    elif call.get('confidence') not in ('MEDIUM','HIGH') and not (call.get('source_mode')=='LIVE' and call.get('confidence')=='LOW'):reason='AI confidence below paper-test minimum'
+    elif call.get('confidence') not in ('MEDIUM','HIGH') and not (call.get('source_mode') in ('LIVE','DIP_WATCH') and call.get('confidence')=='LOW'):reason='AI confidence below paper-test minimum'
     if reason is None and not 0<=age<=60:reason='Saved call is too old for a new paper entry'
     if reason is None and (snapshot.get('reference_price') or {}).get('status')!='fresh':reason='No fresh reference-price evidence at decision time'
     if reason is None and number(snapshot.get('official_target')) is None:reason='Official target unavailable'
