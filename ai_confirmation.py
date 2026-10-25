@@ -3,6 +3,7 @@ import json
 import os
 import time
 import httpx
+from paper_trader import opportunity_context
 
 # Fixed research sample; never present these frequencies as calibrated live odds.
 HISTORY_CONTEXT_VERSION = "btc15m-20261018-20261024-v1"
@@ -87,7 +88,7 @@ def historical_context(external, price_to_beat, market):
     return {"research":HISTORICAL_CONTEXT,"current_observations":observed}
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-MIN_INTERVAL = max(60, int(os.getenv("AI_INTERVAL_SECONDS", "120")))
+MIN_INTERVAL = max(60, int(os.getenv("AI_INTERVAL_SECONDS", "60")))
 _last_request = 0.0
 _cache = {"status": "not_configured", "verdict": "WAIT", "reason": "Add OPENAI_API_KEY in Render environment settings.", "model": MODEL}
 _lock = None
@@ -126,7 +127,32 @@ async def check_auth(client):
 def public_state():
     if not os.getenv("OPENAI_API_KEY"):
         return {"status": "not_configured", "verdict": "WAIT", "reason": "Set OPENAI_API_KEY securely in Render to activate AI confirmation.", "model": MODEL}
-    return dict(_cache)
+    return {k:v for k,v in _cache.items() if not k.startswith("_")}
+
+def paper_signal_state():
+    return {**public_state(),"snapshot":_cache.get("_paper_snapshot",{})}
+
+PROFIT_SCHEMA={"type":"object","properties":{
+    "action":{"type":"string","enum":["ENTER_UP","ENTER_DOWN","WAIT"]},
+    "confidence":{"type":"string","enum":["LOW","MEDIUM","HIGH"]},
+    "max_entry_price":{"type":["number","null"]},
+    "target_exit_bid":{"type":["number","null"]},
+    "position_action":{"type":"string","enum":["HOLD","TAKE_PROFIT","EXIT_RISK"]},
+    "reason":{"type":"string"}},
+    "required":["action","confidence","max_entry_price","target_exit_bid","position_action","reason"],"additionalProperties":False}
+PROFIT_INSTRUCTIONS=(
+    "Separately assess a near-term FAKE-MONEY contract trade using paper_trade_context, live quotes, "
+    "target behavior, chart and outside evidence. There is NO halfway timing requirement. "
+    "A settlement-direction forecast is not enough to justify entry. Output profit_opportunity WAIT "
+    "unless a concrete price-action case supports reaching the fee-aware minimum exit bid within "
+    "the 180-second maximum hold. Do not invent calibrated probabilities or guarantee profit. "
+    "For ENTER_UP/ENTER_DOWN give the highest acceptable quoted entry price and a plausible exit BID "
+    "for that same chosen side. Entry odds and all-in entry costs must be strictly below 0.85. "
+    "If an open paper position is supplied and there is positive net liquidation profit with fading "
+    "upside, choose position_action TAKE_PROFIT; the engine independently checks that the sale is "
+    "actually profitable after costs. EXIT_RISK may request an earlier protective exit. "
+    "Without a supplied position use HOLD. Keep the opportunity reason under 160 characters. "
+)
 
 def news_assessment(parsed,external):
     supplied={h.get('id'):h for h in ((external.get('external_intelligence') or {}).get('news') or {}).get('headlines',[]) if h.get('id')}
@@ -169,7 +195,10 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             _cache = {"status": "waiting_for_refresh", "verdict": "WAIT", "market": market, "model": MODEL, "reason": "New 15-minute round; awaiting next AI refresh."}
         return _cache
     _last_request = now
+    captured_epoch=time.time()
     snapshot = {
+        "paper_trade_context":opportunity_context(external.get("market_quote")),
+        "paper_position":external.get("paper_position"),
         "target_behavior": external.get("target_behavior"), "reference_price": external.get("reference_price"),
         "market_quote": external.get("market_quote"),
         "external_intelligence": external.get("external_intelligence", {"status":"unavailable"}),
@@ -191,17 +220,18 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "candles_ohlcv": (external.get("graph_evidence") or {}).get("candles_ohlcv", [])[-20:]},
     }
     schema = {"type": "object", "properties": {
+        "profit_opportunity":PROFIT_SCHEMA,
         "verdict": {"type": "string", "enum": ["UP", "DOWN"]},
         "reason": {"type": "string"},
         "flip_risk": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "UNKNOWN"]},
         "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
         "news_ids": {"type":"array","items":{"type":"string"}},
         "news_effect": {"type":"string","enum":["UP","DOWN","MIXED","NONE","UNKNOWN"]}
-    }, "required": ["verdict", "reason", "flip_risk", "confidence", "news_ids", "news_effect"], "additionalProperties": False}
+    }, "required": ["verdict", "reason", "flip_risk", "confidence", "news_ids", "news_effect", "profit_opportunity"], "additionalProperties": False}
     payload = {
         "model": MODEL, "store": False,
         "instructions": (
-            ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
+            PROFIT_INSTRUCTIONS + ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
             "in graph_evidence (oldest to newest), not just the precomputed indicator signal. "
             "Assess higher highs/lows, candle bodies and wicks, breakout or rejection near support/resistance, "
             "momentum acceleration/fading, EMA alignment, RSI and volume where provided. "
@@ -215,7 +245,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "input": json.dumps(snapshot, separators=(",", ":")),
         "text": {"format": {"type": "json_schema", "name": "btc_confirmation",
             "strict": True, "schema": schema}},
-        "max_output_tokens": 360,
+        "max_output_tokens": 600,
     }
     try:
         r = await client.post("https://api.openai.com/v1/responses",
@@ -238,6 +268,9 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "confidence": parsed.get("confidence", "LOW"),
             "news_assessment":news_assessment(parsed,external),"analysis_context_version":"forward-15m-v1",
             "signal": signal, "market": market, "phase": phase,
+            "profit_opportunity":parsed.get("profit_opportunity",{}),
+            "captured_epoch":captured_epoch,"paper_signal_id":market+":LIVE:"+str(int(captured_epoch*1000)),
+            "_paper_snapshot":{**snapshot,"official_target":price_to_beat},
             "model": MODEL, "external_context_included": bool(external.get("external_intelligence")),
             "external_context_status": {k:v.get("status") for k,v in (external.get("external_intelligence") or {}).items() if isinstance(v,dict)},
             "historical_context_version": HISTORY_CONTEXT_VERSION,

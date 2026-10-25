@@ -7,10 +7,17 @@ from research import number, market_start, FEE_THETA
 
 INITIAL_CENTS=100000
 RISK={'max_trade_cents':1000,'daily_loss_cents':2500,'max_open_cents':5000,
-      'min_price':.10,'max_price':.90,'max_spread':.08,'slippage':.005,
+      'min_price':.10,'max_price':.85,'max_all_in_price':.85,'max_spread':.08,'slippage':.005,
       'take_profit_pct':.10,'stop_loss_pct':.08,'max_hold_seconds':180,'exit_before_expiry_seconds':180,
-      'min_confidence':'MEDIUM','checkpoint':'HALFWAY','daily_timezone':'America/Chicago'}
+      'min_confidence':'MEDIUM','checkpoint':'LIVE_ANYTIME','daily_timezone':'America/Chicago'}
 _last_mark=0.0
+
+def risk_settings(stored):
+    risk={**RISK,**stored}
+    risk['max_price']=min(float(risk['max_price']),.85)
+    risk['max_all_in_price']=min(float(risk.get('max_all_in_price',.85)),.85)
+    risk['checkpoint']='LIVE_ANYTIME'
+    return risk
 
 def stamp():return datetime.now(timezone.utc).isoformat()
 def day_bounds():
@@ -40,6 +47,9 @@ def setup(execute):
       id TEXT PRIMARY KEY,position_id TEXT NOT NULL,market TEXT NOT NULL,kind TEXT NOT NULL,
       status TEXT NOT NULL,threshold REAL NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
       detail TEXT NOT NULL,UNIQUE(position_id,kind))''')
+    execute('''CREATE TABLE IF NOT EXISTS paper_live_calls (
+      id TEXT PRIMARY KEY,market TEXT NOT NULL,created_at TEXT NOT NULL,snapshot_json TEXT NOT NULL,
+      calls_json TEXT NOT NULL,processed INTEGER NOT NULL DEFAULT 0)''')
     execute('INSERT INTO paper_account (id,initial_cents,cash_cents,paused,started_at,risk_json,high_water_cents,max_drawdown_cents) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
             ('main',INITIAL_CENTS,INITIAL_CENTS,0,stamp(),json.dumps(RISK),INITIAL_CENTS,0))
 
@@ -97,7 +107,7 @@ def entry_fill(book,direction,budget_cents,risk):
     for p,available in levels:
         fill=float(Decimal(str(p))+Decimal(str(risk['slippage'])))
         if fill<risk['min_price']:continue
-        if fill>risk['max_price']:break
+        if fill>=risk['max_price']:break
         low=0;high=min(available,budget_cents) # At least one cent per contract.
         while low<high:
             mid=(low+high+1)//2
@@ -108,6 +118,7 @@ def entry_fill(book,direction,budget_cents,risk):
         if low<available:break
     if not lots:return None
     quantity=sum(q for p,q in lots);cost,fee=cost_lots(lots)
+    if cost/(100*quantity)>=min(risk.get('max_all_in_price',.85),.85):return None
     return {'quantity':quantity,'cost_cents':cost,'fee_cents':fee,
             'average_assumed_fill':sum(p*q for p,q in lots)/quantity,
             'average_book_price':sum(p*q for p,q in quoted)/quantity,
@@ -132,40 +143,54 @@ def gross_daily_losses(cur,postgres):
     return int(cur.fetchone()[0])
 
 def record_attempt(cur,postgres,market,status,reason,detail):
-    run(cur,postgres,'INSERT INTO paper_attempts (market,created_at,status,reason,detail_json) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING',(market,stamp(),status,reason,json.dumps(detail)))
+    run(cur,postgres,'INSERT INTO paper_attempts (market,created_at,status,reason,detail_json) VALUES (?,?,?,?,?) ON CONFLICT(market) DO UPDATE SET created_at=excluded.created_at,status=excluded.status,reason=excluded.reason,detail_json=excluded.detail_json',(market,stamp(),status,reason,json.dumps(detail)))
 
 async def try_entry(client,execute,connect,postgres,row):
     market,call_id,created,snapshot_json,calls_json=row
     snapshot=json.loads(snapshot_json);call=(json.loads(calls_json).get('AI') or {})
     direction=call.get('direction');reason=None;book=None
     age=time.time()-datetime.fromisoformat(created).timestamp()
-    if call.get('source')!='AI_REVIEW' or direction not in ('UP','DOWN'):reason='No actual AI directional review'
+    if call.get('source')!='AI_REVIEW':reason='No actual AI directional review'
+    elif call.get('source_mode')=='LIVE' and call.get('profit_action') not in ('ENTER_UP','ENTER_DOWN'):reason='Live AI sees no near-term profit opportunity'
+    elif direction not in ('UP','DOWN'):reason='No actionable directional call'
     elif call.get('confidence') not in ('MEDIUM','HIGH'):reason='AI confidence below paper-test minimum'
     elif not 0<=age<=60:reason='Saved call is too old for a new paper entry'
     elif (snapshot.get('reference_price') or {}).get('status')!='fresh':reason='No fresh reference-price evidence at decision time'
     elif number(snapshot.get('official_target')) is None:reason='Official target unavailable'
-    elif market_start(market) is None or market_start(market)+900-time.time()<120:reason='Too close to contract expiry'
+    elif market_start(market) is None or market_start(market)+900-time.time()<RISK['exit_before_expiry_seconds']+30:reason='Too close to contract expiry'
     if reason is None:
         try:book=await fetch_book(client,market)
         except Exception as exc:reason='Book unavailable: '+type(exc).__name__+': '+str(exc)[:90]
     with connect() as c:
         cur,account=locked_account(c,postgres)
         try:
-            run(cur,postgres,'SELECT market FROM paper_attempts WHERE market=?',(market,))
-            if cur.fetchone():return
-            initial,cash,paused,started,risk_json,high,drawdown=account;risk={**RISK,**json.loads(risk_json)}
+            run(cur,postgres,'SELECT status,detail_json FROM paper_attempts WHERE market=?',(market,))
+            prior=cur.fetchone()
+            if prior and (prior[0]=='FILLED' or json.loads(prior[1]).get('call_id')==call_id):return
+            def attempt(status,why,detail):record_attempt(cur,postgres,market,status,why,{'call_id':call_id,**detail})
+            initial,cash,paused,started,risk_json,high,drawdown=account;risk=risk_settings(json.loads(risk_json))
             if paused or os.getenv('PAPER_TRADING_ENABLED','true').lower() not in ('true','1','yes'):
-                record_attempt(cur,postgres,market,'SKIPPED','Paper trading paused',{});return
+                attempt('SKIPPED','Paper trading paused',{});return
             if created<started:return
             if reason is None and time.time()-datetime.fromisoformat(created).timestamp()>60:reason='Saved call became stale before simulated entry'
-            if reason is None and (time.time()-book['book_epoch']>30 or market_start(market)+900-time.time()<120):reason='Book or contract became ineligible before entry'
-            if reason:record_attempt(cur,postgres,market,'SKIPPED',reason,{'call_id':call_id});return
+            if reason is None and (time.time()-book['book_epoch']>30 or market_start(market)+900-time.time()<RISK['exit_before_expiry_seconds']+30):reason='Book or contract became ineligible before entry'
+            if reason:attempt('SKIPPED',reason,{'call_id':call_id});return
             run(cur,postgres,'SELECT COALESCE(SUM(cost_cents),0) FROM paper_positions WHERE status=\'OPEN\'')
             opened=int(cur.fetchone()[0]);daily=gross_daily_losses(cur,postgres)
             budget=min(cash,risk['max_trade_cents'],risk['max_open_cents']-opened,risk['daily_loss_cents']-daily-opened)
-            if budget<=0:record_attempt(cur,postgres,market,'SKIPPED','Cash, open-risk or daily-loss budget reached',{'open_risk_cents':opened,'daily_realized_losses_cents':daily});return
+            if budget<=0:attempt('SKIPPED','Cash, open-risk or daily-loss budget reached',{'open_risk_cents':opened,'daily_realized_losses_cents':daily});return
             fill=entry_fill(book,direction,budget,risk)
-            if not fill:record_attempt(cur,postgres,market,'SKIPPED','No eligible depth within entry price, spread and risk limits',{'budget_cents':budget,'spread':book.get('spread')});return
+            if fill and fill['cost_cents']/(100*fill['quantity'])>=risk['max_all_in_price']:
+                fill=None;reason='Entry odds or all-in cost reaches the strict 85 percent cap'
+            if fill and call.get('source_mode')=='LIVE':
+                max_entry=number(call.get('max_entry_price'));target_bid=number(call.get('target_exit_bid'))
+                target_book={'bids':[(target_bid,fill['quantity'])] if target_bid is not None else [],'offers':[(1-target_bid,fill['quantity'])] if target_bid is not None else []}
+                projected=full_exit(target_book,'UP',fill['quantity'],risk['slippage']) if target_bid is not None and 0<target_bid<1 else None
+                immediate=full_exit(book,direction,fill['quantity'],risk['slippage'])
+                if max_entry is None or any(px>max_entry for px,q in fill['quoted_lots']):fill=None;reason='Current entry exceeds AI maximum entry price'
+                elif not projected or projected['net_cents']<fill['cost_cents']*(1+risk['take_profit_pct']):fill=None;reason='AI exit target does not cover required net profit after fees/slippage'
+                elif not immediate or immediate['net_cents']<=fill['cost_cents']*(1-risk['stop_loss_pct']):fill=None;reason='Spread/depth and fees would already breach the stop-loss limit'
+            if not fill:attempt('SKIPPED',reason or 'No eligible depth within entry price, spread and risk limits',{'budget_cents':budget,'spread':book.get('spread')});return
             evidence={'model_call':call,'decision_snapshot':snapshot,'entry':fill,'risk':risk,'book':book,'entry_delay_seconds':round(age,2)}
             position_id=str(uuid.uuid4())
             run(cur,postgres,'INSERT INTO paper_positions (id,market,call_id,direction,quantity,cost_cents,fee_cents,status,created_at,mark_cents,mark_epoch,evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -174,14 +199,14 @@ async def try_entry(client,execute,connect,postgres,row):
                 run(cur,postgres,'INSERT INTO paper_orders (id,position_id,market,kind,status,threshold,created_at,updated_at,detail) VALUES (?,?,?,?,?,?,?,?,?)',
                     (str(uuid.uuid4()),position_id,market,kind,'WAITING',threshold,stamp(),stamp(),'Simulated protective sell; full fill required, no real order'))
             run(cur,postgres,'UPDATE paper_account SET cash_cents=cash_cents-? WHERE id=\'main\'',(fill['cost_cents'],))
-            record_attempt(cur,postgres,market,'FILLED','Simulated depth fill',{'call_id':call_id,**fill})
+            attempt('FILLED','Simulated depth fill',{'call_id':call_id,**fill})
         finally:cur.close()
 
 def settle_positions(connect,postgres):
     with connect() as c:
         cur,account=locked_account(c,postgres)
         try:
-            run(cur,postgres,"SELECT p.id,p.quantity,p.direction,p.cost_cents,r.winner FROM paper_positions p JOIN research_calls r ON r.id=p.call_id WHERE p.status='OPEN' AND r.winner IS NOT NULL")
+            run(cur,postgres,"SELECT p.id,p.quantity,p.direction,p.cost_cents,COALESCE(p.winner,r.winner) FROM paper_positions p LEFT JOIN research_calls r ON r.id=p.call_id WHERE p.status='OPEN' AND COALESCE(p.winner,r.winner) IS NOT NULL")
             for ident,quantity,direction,cost,winner in cur.fetchall():
                 payout=quantity*100 if direction==winner else 0
                 run(cur,postgres,"UPDATE paper_positions SET status='SETTLED',winner=?,payout_cents=?,pnl_cents=?,settled_at=?,mark_cents=?,mark_epoch=? WHERE id=? AND status='OPEN'",(winner,payout,payout-cost,stamp(),payout,time.time(),ident))
@@ -202,7 +227,35 @@ def full_exit(book,direction,quantity,slippage):
     _,fee=cost_lots(lots)
     return {'net_cents':net,'fee_cents':fee,'lots':lots,'quantity':quantity}
 
-async def manage_exits(client,execute,connect,postgres):
+def opportunity_context(quote):
+    examples={}
+    for direction,key in [('UP','up_entry'),('DOWN','down_entry')]:
+        price=number((quote or {}).get(key))
+        if price is None or not RISK['min_price']<=price+RISK['slippage']<=RISK['max_price']:continue
+        q=max(1,int((RISK['max_trade_cents']/100)/(price+RISK['slippage']+.02)))
+        cost,_=cost_lots([(price+RISK['slippage'],q)])
+        low=price;high=.999
+        for _ in range(24):
+            bid=(low+high)/2
+            fill=full_exit({'bids':[(bid,q)],'offers':[]},'UP',q,RISK['slippage'])
+            if fill and fill['net_cents']>=cost*(1+RISK['take_profit_pct']):high=bid
+            else:low=bid
+        fill=full_exit({'bids':[(high,q)],'offers':[]},'UP',q,RISK['slippage'])
+        examples[direction]={'current_entry_ask':price,'example_quantity':q,'example_cost_cents':cost,
+                             'minimum_exit_bid_for_net_target':round(high,4) if fill and fill['net_cents']>=cost*(1+RISK['take_profit_pct']) else None}
+    return {'mode':'PAPER_ONLY','max_trade_usd':RISK['max_trade_cents']/100,'net_profit_target_pct':10,
+            'max_hold_seconds':max(0,min(180,int(market_start((quote or {}).get('market'))+900-time.time()-RISK['exit_before_expiry_seconds']))) if market_start((quote or {}).get('market')) is not None else 0,'entry_examples':examples,
+            'note':'Fee-aware scenarios, not predicted prices or calibrated probabilities. Current executable depth is checked separately.'}
+
+def position_context(execute,market):
+    rows=execute("SELECT id,direction,quantity,cost_cents,mark_cents,mark_epoch,created_at FROM paper_positions WHERE market=? AND status='OPEN'",(market,),fetch=True)
+    if not rows:return None
+    ident,direction,q,cost,mark,epoch,created=rows[0]
+    return {'position_id':ident,'direction':direction,'quantity':q,'entry_cost_cents':cost,
+            'last_exit_mark_cents':mark,'net_liquidation_return_pct':round(100*(mark-cost)/cost,2),
+            'mark_age_seconds':round(time.time()-epoch,1) if epoch else None,'opened_at':created}
+
+async def manage_exits(client,execute,connect,postgres,live_signal=None):
     rows=execute("SELECT id,market,direction,quantity,cost_cents FROM paper_positions WHERE status='OPEN'",fetch=True)
     for ident,market,direction,quantity,cost in rows:
         orders=execute('SELECT kind,threshold,status FROM paper_orders WHERE position_id=?',(ident,),fetch=True)
@@ -215,7 +268,11 @@ async def manage_exits(client,execute,connect,postgres):
             if fill is None:problem='Insufficient exit depth for a full-position simulated sell'
         except Exception as exc:problem='Exit book unavailable: '+type(exc).__name__
         roi=(fill['net_cents']-cost)/cost if fill and cost else None
-        kind='TIME_EXIT' if forced else 'STOP_LOSS' if stop_working or (roi is not None and roi<=-terms.get('STOP_LOSS',(RISK['stop_loss_pct'],''))[0]) else 'TAKE_PROFIT' if roi is not None and roi>=terms.get('TAKE_PROFIT',(RISK['take_profit_pct'],''))[0] else None
+        live_signal=live_signal or {};position=(live_signal.get('snapshot') or {}).get('paper_position') or {}
+        opp=live_signal.get('profit_opportunity') or {};fresh=live_signal.get('status')=='ready' and 0<=time.time()-live_signal.get('captured_epoch',0)<=60 and position.get('position_id')==ident
+        ai_profit=fresh and opp.get('position_action')=='TAKE_PROFIT' and roi is not None and roi>0
+        ai_risk=fresh and opp.get('position_action')=='EXIT_RISK'
+        kind='TIME_EXIT' if forced else 'STOP_LOSS' if ai_risk or stop_working or (roi is not None and roi<=-terms.get('STOP_LOSS',(RISK['stop_loss_pct'],''))[0]) else 'TAKE_PROFIT' if ai_profit or (roi is not None and roi>=terms.get('TAKE_PROFIT',(RISK['take_profit_pct'],''))[0]) else None
         if kind is None:continue
         with connect() as c:
             cur,account=locked_account(c,postgres)
@@ -250,13 +307,24 @@ async def update_marks(client,execute,connect,postgres):
             run(cur,postgres,'INSERT INTO paper_equity (id,created_at,equity_cents,cash_cents,open_mark_cents) VALUES (?,?,?,?,?)',(str(uuid.uuid4()),stamp(),equity,cash,total_mark))
         finally:cur.close()
 
-async def cycle(client,execute,connect,postgres):
+async def cycle(client,execute,connect,postgres,live_signal=None):
     global _last_mark
-    await manage_exits(client,execute,connect,postgres)
+    await manage_exits(client,execute,connect,postgres,live_signal)
     settle_positions(connect,postgres)
+    signal=live_signal or {};key=signal.get('paper_signal_id')
+    if signal.get('status')=='ready' and key and 0<=time.time()-signal.get('captured_epoch',0)<=60:
+        market=signal.get('market');opp=signal.get('profit_opportunity') or {}
+        snapshot=signal.get('snapshot') or {};created=datetime.fromtimestamp(signal['captured_epoch'],timezone.utc).isoformat()
+        call={'direction':'UP' if opp.get('action')=='ENTER_UP' else 'DOWN' if opp.get('action')=='ENTER_DOWN' else 'WAIT',
+              'source':'AI_REVIEW','source_mode':'LIVE','profit_action':opp.get('action'),
+              'confidence':opp.get('confidence','LOW'),'reason':opp.get('reason'),
+              'max_entry_price':opp.get('max_entry_price'),'target_exit_bid':opp.get('target_exit_bid')}
+        execute('INSERT INTO paper_live_calls (id,market,created_at,snapshot_json,calls_json) VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING',(key,market,created,json.dumps(snapshot),json.dumps({'AI':call})))
     started=execute("SELECT started_at FROM paper_account WHERE id='main'",fetch=True)[0][0]
-    rows=execute("SELECT market,id,created_at,snapshot_json,calls_json FROM research_calls WHERE checkpoint='HALFWAY' AND created_at>=? AND winner IS NULL AND market NOT IN (SELECT market FROM paper_attempts) ORDER BY created_at DESC LIMIT 5",(started,),fetch=True)
-    for row in rows:await try_entry(client,execute,connect,postgres,row)
+    rows=execute('SELECT market,id,created_at,snapshot_json,calls_json FROM paper_live_calls WHERE processed=0 AND created_at>=? ORDER BY created_at DESC LIMIT 5',(started,),fetch=True)
+    for row in rows:
+        await try_entry(client,execute,connect,postgres,row)
+        execute('UPDATE paper_live_calls SET processed=1 WHERE id=?',(row[1],))
     if time.monotonic()-_last_mark>=30:
         await update_marks(client,execute,connect,postgres);_last_mark=time.monotonic()
 
@@ -289,10 +357,12 @@ def report(execute):
             'max_drawdown_cents':a[6],'closed_trades':n,'settled_trades':n,'winning_trades':wins,'losing_trades':losses,
             'win_rate_pct':round(100*wins/n,1) if n else None,'profit_factor':round(gain/loss,3) if loss else None,
             'daily_realized_losses_cents':daily_loss,'daily_loss_risk_used_cents':daily_loss+open_cost[0],
-            'started_at':a[3],'risk':{**RISK,**json.loads(a[4])},'sample_label':'INSUFFICIENT SAMPLE' if n<100 else 'OBSERVED PAPER SAMPLE',
+            'started_at':a[3],'risk':risk_settings(json.loads(a[4])),'sample_label':'INSUFFICIENT SAMPLE' if n<100 else 'OBSERVED PAPER SAMPLE',
             'positions':[dict(zip(('market','direction','quantity','cost_cents','fee_cents','status','created_at','settled_at','winner','payout_cents','pnl_cents','mark_cents','mark_epoch','exit_reason','exit_fee_cents','closed_at'),x)) for x in positions],
             'attempts':[{'market':m,'created_at':t,'status':s,'reason':why,'details':json.loads(detail)} for m,t,s,why,detail in events],
+            'entry_mode':'LIVE_ANYTIME',
+            'latest_live_signal':[{'market':m,'captured_at':t,'call':json.loads(c).get('AI')} for m,t,c in execute('SELECT market,created_at,calls_json FROM paper_live_calls ORDER BY created_at DESC LIMIT 1',fetch=True)],
             'orders':[dict(zip(('market','kind','status','threshold','updated_at','detail'),x)) for x in execute('SELECT market,kind,status,threshold,updated_at,detail FROM paper_orders ORDER BY updated_at DESC LIMIT 60',fetch=True)],
             'unfilled_exit_orders':execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0],
             'equity_history':[{'at':t,'equity_cents':v} for t,v in reversed(curve)],
-            'note':'Fake money only. One actual MEDIUM/HIGH AI halfway call per market; fresh two-sided entry book required. Simulated take profit +10% / stop loss -8% net of fees, max hold 180 seconds, and exit at least 180 seconds before expiry. Full-position sell fills only; unfilled exits are flagged and retried, not fabricated. Missing exit depth is valued at zero until official settlement. Paper fills, timing and profitability can differ from real trading. Pause stops entries, not protective sells or settlement fallback. Holding to settlement is an exceptional unfilled-exit fallback, not the strategy. Daily loss budget uses Chicago time, gross realized losses plus all open cost. Sandbox controls are shared with dashboard visitors.'}
+            'note':'Fake money only. Fresh MEDIUM/HIGH live AI profit opportunities at any point in the round; one filled entry per market; quoted odds and all-in entry cost strictly below 85 percent; fresh two-sided entry book required. Simulated take profit +10% / stop loss -8% net of fees, max hold 180 seconds, and exit at least 180 seconds before expiry. Full-position sell fills only; unfilled exits are flagged and retried, not fabricated. Missing exit depth is valued at zero until official settlement. Paper fills, timing and profitability can differ from real trading. Pause stops entries, not protective sells or settlement fallback. Holding to settlement is an exceptional unfilled-exit fallback, not the strategy. Daily loss budget uses Chicago time, gross realized losses plus all open cost. Sandbox controls are shared with dashboard visitors.'}

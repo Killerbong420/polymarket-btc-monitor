@@ -1,7 +1,7 @@
 import asyncio, json, os, sqlite3, time
 from pathlib import Path
 from historical_15m import main as collect_15m, START as HISTORY_START, END as HISTORY_END
-from ai_confirmation import confirm, public_state, check_auth, auth_state, halfway_decision
+from ai_confirmation import confirm, public_state, check_auth, auth_state, halfway_decision, paper_signal_state
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 import httpx
@@ -347,7 +347,7 @@ async def settle(client):
  # Resolve the original event when the market-slug endpoint is unavailable.
  # Never infer official outcomes from Coinbase spot candles.
  from datetime import timedelta
- pending=execute("SELECT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE ? UNION SELECT market FROM research_calls WHERE winner IS NULL ORDER BY market DESC",("%btc-updown-15m-%",),fetch=True)
+ pending=execute("SELECT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE ? UNION SELECT market FROM research_calls WHERE winner IS NULL UNION SELECT market FROM paper_positions WHERE status='OPEN' ORDER BY market DESC",("%btc-updown-15m-%",),fetch=True)
  diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[],"reasons":{}}
  def unresolved(reason):
   diagnostic["unresolved"]+=1
@@ -416,6 +416,7 @@ async def settle(client):
    execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    execute("UPDATE ai_decisions SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    execute("UPDATE research_calls SET winner=?,settled_at=? WHERE market=? AND winner IS NULL",(win,datetime.now(timezone.utc).isoformat(),slug))
+   execute("UPDATE paper_positions SET winner=? WHERE market=? AND status='OPEN'",(win,slug))
    diagnostic["verified"]+=1
   except Exception as exc:
    diagnostic["errors"].append(type(exc).__name__+": "+str(exc)[:100])
@@ -568,6 +569,7 @@ async def loop():
      for name in plan["due"]:
       if d.get("price") is not None:
        await capture_checkpoint(client,slug,name,round(left15),d,direction,flip,score,fifteen)
+     d["paper_position"]=paper.position_context(execute,slug)
      await confirm(client,slug,phase,direction,flip,score,d,price_to_beat=target,seconds_left=round(left15))
     else:
      for key in ("phase","seconds_left","score"): state.pop(key,None)
@@ -577,11 +579,6 @@ async def loop():
      await confirm(client,None,None,"WAIT","WAIT",0,d)
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     await settle(client)
-    try:
-     await paper.cycle(client,execute,connect,bool(DB))
-     state["paper_error"]=None
-     state["paper_unfilled_exits"]=execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0]
-    except Exception as paper_exc:state["paper_error"]=type(paper_exc).__name__+": "+str(paper_exc)[:160]
     state["alerts"]=health_checks(state,public_state(),DB)
     persist_alerts(execute,state["alerts"])
    except Exception as e:
@@ -592,10 +589,22 @@ async def loop():
     except Exception:db_error="Database query failed"
     state["alerts"]=health_checks(state,public_state(),DB,db_error=db_error)
    await asyncio.sleep(max(0, POLL - (time.monotonic() - cycle_started)))
+async def paper_worker():
+ async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchPaperSandbox/1.0"}) as client:
+  while True:
+   started=time.monotonic()
+   try:
+    await paper.cycle(client,execute,connect,bool(DB),paper_signal_state())
+    state["paper_error"]=None
+    state["paper_unfilled_exits"]=execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0]
+   except Exception as exc:state["paper_error"]=type(exc).__name__+": "+str(exc)[:160]
+   await asyncio.sleep(max(1,5-(time.monotonic()-started)))
+
 @asynccontextmanager
 async def lifespan(app):
  task=asyncio.create_task(loop())
  context_task=asyncio.create_task(intelligence_loop())
+ paper_task=asyncio.create_task(paper_worker())
  async def historical_job():
   try:
    historical_state.update(status="running",started=datetime.now(timezone.utc).isoformat())
@@ -608,7 +617,8 @@ async def lifespan(app):
  task.cancel()
  history_task.cancel()
  context_task.cancel()
- for running in (task,history_task,context_task):
+ paper_task.cancel()
+ for running in (task,history_task,context_task,paper_task):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}

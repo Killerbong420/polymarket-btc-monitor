@@ -106,6 +106,39 @@ class LedgerTests(unittest.IsolatedAsyncioTestCase):
    await p.manage_exits(self.exit_client(.49,.50),app.execute,app.connect,False)
   self.assertEqual(app.execute('SELECT paused FROM paper_account',fetch=True)[0][0],1)
   self.assertEqual(app.execute('SELECT status,exit_reason FROM paper_positions',fetch=True)[0],('CLOSED','TIME_EXIT'))
+ def live_signal(self,ident='live-1',max_entry=.76,target=.91,action='ENTER_UP'):
+  return {'status':'ready','market':self.slug,'paper_signal_id':ident,'captured_epoch':self.now,
+          'snapshot':{'reference_price':{'status':'fresh'},'official_target':80000,'checkpoint':'EARLY'},
+          'profit_opportunity':{'action':action,'confidence':'HIGH','max_entry_price':max_entry,'target_exit_bid':target,'position_action':'HOLD','reason':'test profit case'}}
+ async def test_live_entry_does_not_wait_for_halfway(self):
+  self.now=self.now-330 # Two minutes into the round, not halfway.
+  with patch('paper_trader.time.time',return_value=self.now):await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal())
+  self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],1)
+  self.assertEqual(app.execute('SELECT COUNT(*) FROM research_calls',fetch=True)[0][0],0)
+ async def test_new_prediction_can_reconsider_skipped_market(self):
+  with patch('paper_trader.time.time',return_value=self.now):
+   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('too-expensive',max_entry=.74))
+   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
+   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('good-entry'))
+   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal('good-entry'))
+  self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],1)
+ async def test_profit_target_must_cover_fees(self):
+  with patch('paper_trader.time.time',return_value=self.now):await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal(target=.76))
+  self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
+  self.assertIn('net profit',app.execute('SELECT reason FROM paper_attempts',fetch=True)[0][0])
+ async def test_cap_applies_to_existing_account_and_all_in_cost(self):
+  risk=dict(p.RISK,max_price=.99,max_all_in_price=.99);app.execute('UPDATE paper_account SET risk_json=?',(json.dumps(risk),))
+  self.assertEqual(p.report(app.execute)['risk']['max_price'],.85)
+  with patch('paper_trader.time.time',return_value=self.now):await p.cycle(self.exit_client(.83,.84),app.execute,app.connect,False,self.live_signal(max_entry=.84,target=.99))
+  self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
+  b={'bids':[(.84,100)],'offers':[(.85,100)],'book_epoch':self.now,'spread':.01}
+  self.assertIsNone(p.entry_fill(b,'UP',1000,p.risk_settings(risk)))
+ async def test_ai_can_take_positive_profit_before_fixed_target(self):
+  await self.enter();ident=app.execute('SELECT id FROM paper_positions',fetch=True)[0][0]
+  signal={'status':'ready','captured_epoch':self.now,'snapshot':{'paper_position':{'position_id':ident}},'profit_opportunity':{'position_action':'TAKE_PROFIT'}}
+  with patch('paper_trader.time.time',return_value=self.now):await p.manage_exits(self.exit_client(.55,.56),app.execute,app.connect,False,signal)
+  status,pnl,cost=app.execute('SELECT status,pnl_cents,cost_cents FROM paper_positions',fetch=True)[0]
+  self.assertEqual(status,'CLOSED');self.assertGreater(pnl,0);self.assertLess(pnl/cost,.10)
  async def test_control_requires_same_origin_and_no_real_action(self):
   c=TestClient(app.app)
   self.assertEqual(c.post('/api/paper/control',json={'action':'pause'}).status_code,403)
