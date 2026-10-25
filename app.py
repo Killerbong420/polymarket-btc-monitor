@@ -399,6 +399,15 @@ async def settle(client):
     continue
    win=verified_winner(market,sr.json())
    if win is None:
+    # Expose sanitized API schema so mapping failures can be fixed from real responses.
+    examples=diagnostic.setdefault("mapping_samples",[])
+    if len(examples)<3:
+     sides=market.get("marketSides") or market.get("market_sides") or []
+     examples.append({"market":slug,"market_keys":list(market.keys())[:30],
+      "side_samples":[{k:(str(v)[:90] if isinstance(v,(str,int,float,bool)) else type(v).__name__) for k,v in side.items() if k in ("long","side","position","description","outcome","name","label","identifier","id","status")} for side in sides[:3] if isinstance(side,dict)] if isinstance(sides,list) else [],
+      "settlement_type":type(sr.json()).__name__,
+      "settlement_keys":list(sr.json().keys())[:20] if isinstance(sr.json(),dict) else [],
+      "settlement_value":settlement_price(sr.json())})
     unresolved("official_winner_mapping_unverified")
     continue
    execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
