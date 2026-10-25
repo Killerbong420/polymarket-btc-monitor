@@ -533,7 +533,7 @@ def log_signal(slug,phase,direction,flip,score,now,d):
  execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at,quality,quality_reason) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":"+phase,slug,phase,direction,flip,score,now,quality,reason))
 
 def accuracy_report():
- rows=execute("SELECT phase,quality,result,COUNT(*) FROM signals GROUP BY phase,quality,result",fetch=True)
+ rows=execute("SELECT phase,quality,result,COUNT(*) FROM signals WHERE phase='FINAL_15M' GROUP BY phase,quality,result",fetch=True)
  report={}
  for phase,quality,result,n in rows:
   key=phase+" / "+(quality or "UNRATED")
@@ -586,12 +586,8 @@ async def loop():
      remaining=end-time.time()
      phase="EARLY" if remaining>=180 else "LATE" if remaining<=90 else "MID"
      state.pop("market_diagnostic",None)
-     if phase in ("EARLY","LATE") and direction!="WAIT":
-      log_signal(slug,phase,direction,flip,score,now,d)
-     # One independent, immutable FINAL call per 5m round, at the first poll
-     # reaching 2:30 remaining. Force a research prediction even when trend confirmation is weak.
-     if remaining<=150 and remaining>0 and d.get("price") is not None:
-      await record_halfway(client,slug,"FINAL",d,direction,flip,score,now,m)
+     # Five-minute market remains visible for context, but is never recorded.
+     # Persist predictions exclusively for verified fifteen-minute markets.
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(remaining),market=slug,external=d,updated=now,error=None)
      await confirm(client,slug,phase,direction,flip,score,d)
     # Dedicated 15m FINAL call at 7:30 remaining, independent of 5m FINAL.
@@ -667,8 +663,8 @@ async def candle_proxy():
 @app.get("/api/status")
 def status():
  try:
-  rows=execute("SELECT result,COUNT(*) FROM signals GROUP BY result",fetch=True)
-  recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason,decision_source,decision_reason,ai_confidence FROM signals ORDER BY created_at DESC LIMIT 50",fetch=True)
+  rows=execute("SELECT result,COUNT(*) FROM signals WHERE phase='FINAL_15M' GROUP BY result",fetch=True)
+  recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason,decision_source,decision_reason,ai_confidence FROM signals WHERE phase='FINAL_15M' ORDER BY created_at DESC LIMIT 50",fetch=True)
   return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
  except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
 @app.get("/",response_class=HTMLResponse)
