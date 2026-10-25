@@ -8,7 +8,7 @@ from research import number, market_start, FEE_THETA
 INITIAL_CENTS=100000
 RISK={'max_trade_cents':1000,'daily_loss_cents':2500,'max_open_cents':5000,
       'min_price':.10,'max_price':.85,'max_all_in_price':.85,'max_spread':.08,'slippage':.005,
-      'take_profit_pct':.10,'stop_loss_pct':.08,'max_hold_seconds':180,'exit_before_expiry_seconds':180,
+      'take_profit_pct':.05,'stop_loss_pct':.08,'max_hold_seconds':180,'exit_before_expiry_seconds':180,
       'min_confidence':'MEDIUM','checkpoint':'LIVE_ANYTIME','daily_timezone':'America/Chicago'}
 _last_mark=0.0
 
@@ -17,6 +17,8 @@ def risk_settings(stored):
     risk['max_price']=min(float(risk['max_price']),.85)
     risk['max_all_in_price']=min(float(risk.get('max_all_in_price',.85)),.85)
     risk['checkpoint']='LIVE_ANYTIME'
+    # Apply the faster profit strategy to existing accounts without resetting their ledger.
+    risk['take_profit_pct']=min(float(risk['take_profit_pct']),RISK['take_profit_pct'])
     return risk
 
 def stamp():return datetime.now(timezone.utc).isoformat()
@@ -243,7 +245,7 @@ def opportunity_context(quote):
         fill=full_exit({'bids':[(high,q)],'offers':[]},'UP',q,RISK['slippage'])
         examples[direction]={'current_entry_ask':price,'example_quantity':q,'example_cost_cents':cost,
                              'minimum_exit_bid_for_net_target':round(high,4) if fill and fill['net_cents']>=cost*(1+RISK['take_profit_pct']) else None}
-    return {'mode':'PAPER_ONLY','max_trade_usd':RISK['max_trade_cents']/100,'net_profit_target_pct':10,
+    return {'mode':'PAPER_ONLY','max_trade_usd':RISK['max_trade_cents']/100,'net_profit_target_pct':100*RISK['take_profit_pct'],
             'max_hold_seconds':max(0,min(180,int(market_start((quote or {}).get('market'))+900-time.time()-RISK['exit_before_expiry_seconds']))) if market_start((quote or {}).get('market')) is not None else 0,'entry_examples':examples,
             'note':'Fee-aware scenarios, not predicted prices or calibrated probabilities. Current executable depth is checked separately.'}
 
@@ -365,4 +367,5 @@ def report(execute):
             'orders':[dict(zip(('market','kind','status','threshold','updated_at','detail'),x)) for x in execute('SELECT market,kind,status,threshold,updated_at,detail FROM paper_orders ORDER BY updated_at DESC LIMIT 60',fetch=True)],
             'unfilled_exit_orders':execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0],
             'equity_history':[{'at':t,'equity_cents':v} for t,v in reversed(curve)],
-            'note':'Fake money only. Fresh MEDIUM/HIGH live AI profit opportunities at any point in the round; one filled entry per market; quoted odds and all-in entry cost strictly below 85 percent; fresh two-sided entry book required. Simulated take profit +10% / stop loss -8% net of fees, max hold 180 seconds, and exit at least 180 seconds before expiry. Full-position sell fills only; unfilled exits are flagged and retried, not fabricated. Missing exit depth is valued at zero until official settlement. Paper fills, timing and profitability can differ from real trading. Pause stops entries, not protective sells or settlement fallback. Holding to settlement is an exceptional unfilled-exit fallback, not the strategy. Daily loss budget uses Chicago time, gross realized losses plus all open cost. Sandbox controls are shared with dashboard visitors.'}
+            'note':'Fake money only. Fresh MEDIUM/HIGH live AI profit opportunities at any point in the round; one filled entry per market; quoted odds and all-in entry cost strictly below 85 percent; fresh two-sided entry book required. Simulated take profit +5% / stop loss -8% net of fees, max hold 180 seconds, and exit at least 180 seconds before expiry. Full-position sell fills only; unfilled exits are flagged and retried, not fabricated. Missing exit depth is valued at zero until official settlement. Paper fills, timing and profitability can differ from real trading. Pause stops entries, not protective sells or settlement fallback. Holding to settlement is an exceptional unfilled-exit fallback, not the strategy. Daily loss budget uses Chicago time, gross realized losses plus all open cost. Sandbox controls are shared with dashboard visitors.'}
+

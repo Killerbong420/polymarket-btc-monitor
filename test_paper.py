@@ -126,6 +126,16 @@ class LedgerTests(unittest.IsolatedAsyncioTestCase):
   with patch('paper_trader.time.time',return_value=self.now):await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal(target=.76))
   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],0)
   self.assertIn('net profit',app.execute('SELECT reason FROM paper_attempts',fetch=True)[0][0])
+ async def test_smaller_opportunity_enters_on_existing_account_and_takes_profit(self):
+  risk=dict(p.RISK,take_profit_pct=.10)
+  app.execute('UPDATE paper_account SET risk_json=?',(json.dumps(risk),))
+  with patch('paper_trader.time.time',return_value=self.now):
+   await p.cycle(self.exit_client(.74,.75),app.execute,app.connect,False,self.live_signal(target=.83))
+   self.assertEqual(app.execute('SELECT COUNT(*) FROM paper_positions',fetch=True)[0][0],1)
+   await p.manage_exits(self.exit_client(.83,.84),app.execute,app.connect,False)
+  status,pnl,cost=app.execute('SELECT status,pnl_cents,cost_cents FROM paper_positions',fetch=True)[0]
+  self.assertEqual(status,'CLOSED');self.assertGreaterEqual(pnl/cost,.05);self.assertLess(pnl/cost,.10)
+  self.assertEqual(p.report(app.execute)['risk']['take_profit_pct'],.05)
  async def test_cap_applies_to_existing_account_and_all_in_cost(self):
   risk=dict(p.RISK,max_price=.99,max_all_in_price=.99);app.execute('UPDATE paper_account SET risk_json=?',(json.dumps(risk),))
   self.assertEqual(p.report(app.execute)['risk']['max_price'],.85)
@@ -148,3 +158,4 @@ class LedgerTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(c.get('/api/paper').json()['status'],'paused')
 
 if __name__=='__main__':unittest.main()
+
