@@ -306,7 +306,7 @@ async def settle(client):
    if win is None:
     unresolved("official_winner_mapping_unverified")
     continue
-   execute("UPDATE signals SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
+   execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    diagnostic["verified"]+=1
   except Exception as exc:
    diagnostic["errors"].append(type(exc).__name__+": "+str(exc)[:100])
