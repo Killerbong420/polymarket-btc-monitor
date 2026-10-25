@@ -2,7 +2,7 @@
 Run: python historical_15m.py
 Outputs: historical_15m_7d.json and historical_15m_7d.csv
 """
-import asyncio,csv,json,re
+import asyncio,csv,json,re,math
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 import httpx
@@ -60,8 +60,55 @@ async def main():
      target=target or extract_target(detail)
    return {"utc_start":t.isoformat(),"event_slug":slug,"market_slug":market_slug,"price_to_beat":target,"winner":outcome,"status":"VERIFIED" if target is not None and outcome else "INCOMPLETE","error":err if market is None else None}
   rows=await asyncio.gather(*(one(i) for i in range(672)))
+  # Coinbase public 1-minute OHLC: [epoch,low,high,open,close,volume].
+  # Fetch overlapping <=300-minute windows; use only candles whose timestamps
+  # fall in the round. Never fill missing candles with invented values.
+  candles={}
+  for chunk in range(0,7*24*60,290):
+   start=START+timedelta(minutes=chunk)
+   end=min(END,start+timedelta(minutes=290))
+   try:
+    async with sem:
+     response=await client.get("https://api.exchange.coinbase.com/products/BTC-USD/candles",params={"granularity":60,"start":start.isoformat(),"end":end.isoformat()},timeout=25)
+    response.raise_for_status()
+    for bar in response.json():
+     if isinstance(bar,list) and len(bar)>=6:
+      ts=int(bar[0])
+      if START.timestamp()<=ts<END.timestamp():
+       candles[ts]={"open":float(bar[3]),"high":float(bar[2]),"low":float(bar[1]),"close":float(bar[4]),"volume":float(bar[5])}
+   except Exception as exc:
+    print("Coinbase candle batch unavailable:",start.isoformat(),type(exc).__name__)
+  for i,row in enumerate(rows):
+   t=int((START+timedelta(minutes=i*15)).timestamp())
+   bars=[candles.get(t+j*60) for j in range(15)]
+   valid=[b for b in bars if b]
+   row["candles_available"]=len(valid)
+   row["movement_status"]="COMPLETE" if len(valid)==15 else "INCOMPLETE"
+   row["open_spot"]=bars[0]["open"] if bars[0] else None
+   row["close_spot"]=bars[-1]["close"] if bars[-1] else None
+   row["high_spot"]=max(b["high"] for b in valid) if valid else None
+   row["low_spot"]=min(b["low"] for b in valid) if valid else None
+   row["spot_return_pct"]=round((bars[-1]["close"]/bars[0]["open"]-1)*100,5) if len(valid)==15 else None
+   row["spot_direction"]="UP" if row["spot_return_pct"] is not None and row["spot_return_pct"]>0 else "DOWN" if row["spot_return_pct"] is not None and row["spot_return_pct"]<0 else None
+   target=row["price_to_beat"]
+   if target is not None and len(valid)==15:
+    row["start_vs_target"]="ABOVE" if bars[0]["open"]>target else "BELOW" if bars[0]["open"]<target else "AT"
+    row["end_vs_target"]="ABOVE" if bars[-1]["close"]>target else "BELOW" if bars[-1]["close"]<target else "AT"
+    row["target_touched"]=any(b["low"]<=target<=b["high"] for b in bars)
+    row["minutes_above_target"]=sum(b["close"]>target for b in bars)
+    row["minutes_below_target"]=sum(b["close"]<target for b in bars)
+    row["first_target_touch_minute"]=next((j for j,b in enumerate(bars) if b["low"]<=target<=b["high"]),None)
+    row["target_crossings_at_close"]=sum((bars[j-1]["close"]-target)*(bars[j]["close"]-target)<0 for j in range(1,15))
+   else:
+    for key in ("start_vs_target","end_vs_target","target_touched","minutes_above_target","minutes_below_target","first_target_touch_minute","target_crossings_at_close"): row[key]=None
+   # Minute-close reversal count (changes in the sign of consecutive minute returns).
+   if len(valid)==15:
+    signs=[1 if bars[j]["close"]>bars[j-1]["close"] else -1 if bars[j]["close"]<bars[j-1]["close"] else 0 for j in range(1,15)]
+    signs=[s for s in signs if s]
+    row["minute_direction_reversals"]=sum(signs[j]!=signs[j-1] for j in range(1,len(signs)))
+   else: row["minute_direction_reversals"]=None
  Path("historical_15m_7d.json").write_text(json.dumps(rows,indent=2))
  with open("historical_15m_7d.csv","w",newline="") as f:
   w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
- print(json.dumps({"requested":672,"verified":sum(r["status"]=="VERIFIED" for r in rows),"targets":sum(r["price_to_beat"] is not None for r in rows),"winners":sum(r["winner"] is not None for r in rows),"missing":sum(r["status"]!="VERIFIED" for r in rows)}))
+ print(json.dumps({"movement_complete":sum(r["movement_status"]=="COMPLETE" for r in rows),"target_movement_complete":sum(r["movement_status"]=="COMPLETE" and r["price_to_beat"] is not None for r in rows),"requested":672,"verified":sum(r["status"]=="VERIFIED" for r in rows),"targets":sum(r["price_to_beat"] is not None for r in rows),"winners":sum(r["winner"] is not None for r in rows),"missing":sum(r["status"]!="VERIFIED" for r in rows)}))
 if __name__=="__main__": asyncio.run(main())
