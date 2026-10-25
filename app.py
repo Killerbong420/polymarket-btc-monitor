@@ -339,7 +339,7 @@ def verified_winner(m, settlement):
   labels=[str(side.get(k) or "") for k in ("description","outcome","name","label","identifier")]
   matches=set()
   for label in labels:
-   matches.update(re.findall(r"\\b(?:UP|DOWN)\\b",label.upper()))
+   matches.update(re.findall(r"\b(?:UP|DOWN)\b",label.upper()))
   if len(matches)==1: identified.append(next(iter(matches)))
  if len(identified)!=1: return None
  yes=identified[0]
