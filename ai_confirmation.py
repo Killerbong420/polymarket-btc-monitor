@@ -147,6 +147,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     if target is None: missing.append("official_price_to_beat")
     if spot is None: missing.append("spot_price")
     if not chart: missing.append("technical_chart_indicators")
+    if not external.get("graph_evidence"): missing.append("completed_price_graph_candles")
     if not pattern: missing.append("chart_pattern")
     if not external.get("pressure_available"): missing.append("verified_buy_sell_pressure")
     if external.get("volume_ratio") is None: missing.append("volume_ratio")
@@ -170,6 +171,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
                    "range_pct":pattern.get("range_pct"),
                    "volume_spike":pattern.get("volume_spike"),
                    "note":pattern.get("note")},
+        "graph_evidence":external.get("graph_evidence"),
         "signal_quality":quality,
         "candle_age_seconds":external.get("candle_age_seconds"),
         "missing_evidence":missing}
@@ -181,6 +183,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "You may disagree with the indicator direction when concrete evidence supports it. "
         "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. "
         "When evidence is weak or conflicting, still choose the more supported direction and set confidence LOW; explicitly explain the uncertainty. This is a research forecast, not a trade instruction. "
+        "Analyze the chronological OHLCV candle graph itself: swing highs/lows, trend structure, recent candle bodies/wicks, support/resistance, breakout/rejection, and reversal versus continuation. "
         "Consider every supplied evidence field, contradictions, proximity to the official target, "
         "freshness and missing evidence. Spot vs BRTI target is a proxy, not the settlement index. "
         "Do not claim unavailable buy/sell pressure or other missing data. "
