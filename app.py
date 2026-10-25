@@ -322,26 +322,28 @@ def settlement_price(data):
     except (TypeError,ValueError): pass
  return None
 
-def verified_winner(m,settlement):
- # Only resolve if the contract explicitly identifies the long/YES outcome as UP or DOWN.
- # Never align outcomePrices with outcomes by array index.
+def verified_winner(m, settlement):
+ # Use official market-side metadata and the official YES settlement payout.
+ # Never guess UP/DOWN from Coinbase or an arbitrary array position.
  if not isinstance(m,dict): return None
- status=str(m.get("status") or m.get("marketStatus") or "").upper()
- if "RESOLVED" not in status: return None
- sides=m.get("marketSides") or m.get("market_sides")
+ p=settlement_price(settlement)
+ if p not in (0.0,1.0): return None
+ sides=m.get("marketSides") or m.get("market_sides") or []
  if not isinstance(sides,list): return None
- yes=None
+ import re
+ identified=[]
  for side in sides:
   if not isinstance(side,dict): continue
-  position=str(side.get("side") or side.get("position") or side.get("type") or "").upper()
-  label=str(side.get("outcome") or side.get("name") or side.get("label") or "").upper()
-  if position in ("LONG","YES","MARKET_SIDE_LONG") and label in ("UP","DOWN"):
-   yes=label
- if yes is None: return None
- p=settlement_price(settlement)
- if p==1.0: return yes
- if p==0.0: return "DOWN" if yes=="UP" else "UP"
- return None
+  is_long=side.get("long") is True or str(side.get("side") or side.get("position") or "").upper() in ("LONG","YES","MARKET_SIDE_LONG")
+  if not is_long: continue
+  labels=[str(side.get(k) or "") for k in ("description","outcome","name","label","identifier")]
+  matches=set()
+  for label in labels:
+   matches.update(re.findall(r"\\b(?:UP|DOWN)\\b",label.upper()))
+  if len(matches)==1: identified.append(next(iter(matches)))
+ if len(identified)!=1: return None
+ yes=identified[0]
+ return yes if p==1.0 else ("DOWN" if yes=="UP" else "UP")
 
 async def settle(client):
  # Resolve the original event when the market-slug endpoint is unavailable.
