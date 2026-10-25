@@ -1,6 +1,6 @@
 import asyncio, json, os, sqlite3, time
 from pathlib import Path
-from historical_15m import main as collect_15m
+from historical_15m import main as collect_15m, START as HISTORY_START, END as HISTORY_END
 from ai_confirmation import confirm, public_state, check_auth, auth_state, halfway_decision
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -346,7 +346,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Kraken BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,6),"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
@@ -579,35 +579,30 @@ async def loop():
    cycle_started=time.monotonic()
    try:
     await check_auth(client)
-    m=await market_data(client)
     try:
      d=await spot_data(client)
     except Exception as feed_exc:
      d={"source":"unavailable","candle_age_seconds":None,"signal_quality":{"status":"INSUFFICIENT_DATA","reason":"No fresh verified BTC candles"},"feed_error":str(feed_exc)[:300]}
     direction,flip,score=judge(d) if d.get("price") is not None else ("WAIT","WAIT",0.0)
     now=datetime.now(timezone.utc).isoformat()
-    if not m:
-     for key in ("phase","seconds_left","score"): state.pop(key,None)
-     state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No compatible Polymarket US 5-minute market found; see market_diagnostic")
-    else:
-     slug=m["slug"]
-     end=m["_round_end"]
-     remaining=end-time.time()
-     phase="EARLY" if remaining>=180 else "LATE" if remaining<=90 else "MID"
-     state.pop("market_diagnostic",None)
-     # Five-minute market remains visible for context, but is never recorded.
-     # Persist predictions exclusively for verified fifteen-minute markets.
-     state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(remaining),market=slug,external=d,updated=now,error=None)
-     await confirm(client,slug,phase,direction,flip,score,d)
-    # Dedicated 15m FINAL call at 7:30 remaining, independent of 5m FINAL.
     fifteen,reason15=await market_15m(client)
     if fifteen:
+     slug=fifteen["slug"]
      left15=fifteen["end"]-time.time()
-     state["final_15m"]={"market":fifteen["slug"],"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
+     phase="EARLY" if left15>450 else "LATE" if left15<=180 else "MID"
+     state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(left15),market=slug,external=d,updated=now,error=None)
+     state["final_15m"]={"market":slug,"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
+     terms=fifteen.get("assetPriceTerms") or {}
+     ptb=terms.get("priceToBeat") or {}
+     target=ptb.get("value") if isinstance(ptb,dict) else None
+     await confirm(client,slug,phase,direction,flip,score,d,price_to_beat=target,seconds_left=round(left15))
      if 0<left15<=450 and d.get("price") is not None:
-      await record_halfway(client,fifteen["slug"],"FINAL_15M",d,direction,flip,score,now,fifteen)
+      await record_halfway(client,slug,"FINAL_15M",d,direction,flip,score,now,fifteen)
     else:
+     for key in ("phase","seconds_left","score"): state.pop(key,None)
+     state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No verified Polymarket US 15-minute market: "+str(reason15))
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
+     await confirm(client,None,None,"WAIT","WAIT",0,d)
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     await settle(client)
    except Exception as e:
@@ -631,7 +626,7 @@ async def lifespan(app):
  for running in (task,history_task):
   try: await running
   except asyncio.CancelledError: pass
-historical_state={"status":"pending","requested":672,"period":"2026-10-17 through 2026-10-24 UTC","verified":0}
+historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
 app=FastAPI(lifespan=lifespan)
 @app.get("/api/historical-15m/status")
 def historical_status():
@@ -681,3 +676,4 @@ def status():
 @app.get("/",response_class=HTMLResponse)
 def home():
  return Path(__file__).with_name("terminal.html").read_text(encoding="utf-8")
+

@@ -31,7 +31,8 @@ async def check_auth(client):
         r = await client.get("https://api.openai.com/v1/models/" + MODEL,
             headers={"Authorization": "Bearer " + key}, timeout=12)
         if r.status_code == 200:
-            _auth_cache = {"status": "authenticated", "reason": "Key accepted; inference and billing not yet verified."}
+            if _auth_cache.get("status") != "inference_verified":
+                _auth_cache = {"status": "authenticated", "reason": "Key accepted; inference and billing not yet verified."}
         else:
             category = {401:"invalid_api_key",403:"permission_denied",404:"model_not_found",429:"rate_limit_or_quota"}.get(r.status_code,"http_error")
             _auth_cache = {"status": "error", "http_status": r.status_code, "reason": category}
@@ -45,27 +46,28 @@ def public_state():
         return {"status": "not_configured", "verdict": "WAIT", "reason": "Set OPENAI_API_KEY securely in Render to activate AI confirmation.", "model": MODEL}
     return dict(_cache)
 
-async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score, external):
-    global _last_request, _cache
+async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score, external, price_to_beat=None, seconds_left=None):
+    global _last_request, _cache, _auth_cache
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         _cache = public_state()
         return _cache
-    if signal not in ("UP", "DOWN") and external:
+    if not market or "btc-updown-15m-" not in str(market) or not external or external.get("price") is None:
+        _cache = {"status": "waiting_for_data", "verdict": "WAIT", "reason": "Awaiting a verified 15-minute market and fresh BTC candles.", "model": MODEL}
+        return _cache
+    if signal not in ("UP", "DOWN"):
         fast = float(external.get("momentum_pct") or 0)
         slow = float(external.get("long_momentum_pct") or 0)
         signal = "UP" if fast * 2 + slow >= 0 else "DOWN"
-    if not market or not external:
-        if _cache.get("status") in ("ready", "error"):
-            return _cache
-        _cache = {"status": "waiting_for_signal", "verdict": "WAIT", "reason": "No eligible directional signal yet.", "model": MODEL}
-        return _cache
     now = time.monotonic()
     if now - _last_request < MIN_INTERVAL:
+        if _cache.get("market") != market:
+            _cache = {"status": "waiting_for_refresh", "verdict": "WAIT", "market": market, "model": MODEL, "reason": "New 15-minute round; awaiting next AI refresh."}
         return _cache
     _last_request = now
     snapshot = {
-        "market": str(market), "phase": str(phase), "indicator_signal": signal,
+        "market": str(market), "duration_minutes": 15, "seconds_left": seconds_left,
+        "official_price_to_beat": price_to_beat, "settlement_index": "BRTI; spot price is only a proxy", "phase": str(phase), "indicator_signal": signal,
         "possible_flip": flip, "indicator_score": score,
         "external_price": external.get("price"),
         "momentum_pct": external.get("momentum_pct"),
@@ -94,7 +96,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "Assess higher highs/lows, candle bodies and wicks, breakout or rejection near support/resistance, "
             "momentum acceleration/fading, EMA alignment, RSI and volume where provided. "
             "Weigh recent structure most heavily; compare contradictory trade pressure or indicators. "
-            "Independently select the better-supported next-direction forecast UP or DOWN, never WAIT "
+            "Predict the current 15-minute contract settlement direction relative to its official price to beat, not the next candle. Account for seconds_left. Spot prices are proxies, not BRTI settlement. Select UP or DOWN, never WAIT "
             "when usable candles exist; confidence LOW when unclear or stale. "
             "Explain the specific chart evidence for the direction, not just generic bullish/bearish claims. "
             "Never invent unavailable data, probabilities or certainty; research only, not trading advice. "
@@ -119,6 +121,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         parsed = json.loads("".join(text_parts))
         if parsed.get("verdict") not in ("UP", "DOWN"):
             raise ValueError("Invalid model verdict")
+        _auth_cache = {"status": "inference_verified", "reason": "OpenAI inference succeeded."}
         _cache = {"status": "ready", "verdict": parsed["verdict"],
             "reason": str(parsed.get("reason", ""))[:240],
             "flip_risk": parsed.get("flip_risk", "UNKNOWN"),
@@ -146,6 +149,8 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
 async def halfway_decision(client, market, duration, indicator_direction, score, external, price_to_beat=None):
     """One bounded AI review at the halfway FINAL checkpoint; never invent missing observations."""
     fallback={"direction":indicator_direction,"source":"INDICATORS_FALLBACK","reason":"AI unavailable; indicator decision retained"}
+    if duration != 15 or "btc-updown-15m-" not in str(market):
+        return {**fallback,"reason":"AI restricted to verified 15-minute markets"}
     key=os.getenv("OPENAI_API_KEY")
     if not key: return {**fallback,"reason":"OPENAI_API_KEY not configured","evidence_available":False}
     try:
@@ -238,3 +243,4 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     except Exception as exc:
         return {**fallback,"reason":"AI request unavailable ("+type(exc).__name__+")",
                 "evidence":snapshot}
+

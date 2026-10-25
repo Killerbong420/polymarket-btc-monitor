@@ -8,12 +8,17 @@ from pathlib import Path
 import httpx
 
 BASE="https://gateway.polymarket.us"
-END=datetime(2026,10,24,tzinfo=timezone.utc)
+END=datetime.now(timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0)
 START=END-timedelta(days=7)
 def extract_target(obj):
  if not isinstance(obj,dict): return None
+ terms=obj.get("assetPriceTerms")
+ if isinstance(terms,dict):
+  target=extract_target(terms)
+  if target is not None: return target
  for key in ("priceToBeat","price_to_beat","targetPrice","target_price","strikePrice","strike_price"):
   v=obj.get(key)
+  if isinstance(v,dict): v=v.get("value")
   try:
    if v is not None and float(v)>1000: return float(v)
   except (TypeError,ValueError): pass
@@ -42,8 +47,9 @@ async def main():
    event,err=await get("/v1/events/slug/"+slug)
    e=event.get("event",event) if isinstance(event,dict) else {}
    markets=e.get("markets",[]) if isinstance(e,dict) else []
+   if not markets and isinstance(event,dict): markets=event.get("markets",[])
    if not isinstance(markets,list): markets=[]
-   market=next((x for x in markets if isinstance(x,dict)),None)
+   market=next((x for x in markets if isinstance(x,dict) and slug in str(x.get("slug") or x.get("marketSlug") or "")),None)
    if market is None:
     market,err2=await get("/v1/markets/"+slug)
     if isinstance(market,dict): market=market.get("market",market)
@@ -56,8 +62,16 @@ async def main():
     detail,_=await get("/v1/markets/"+str(market_slug))
     if isinstance(detail,dict):
      detail=detail.get("market",detail)
-     outcome=extract_winner(detail)
-     target=target or extract_target(detail)
+     if isinstance(detail,dict): market={**(market or {}),**detail}
+     outcome=extract_winner(market)
+     target=target or extract_target(market)
+   if market_slug and not outcome:
+    # Reuse the same strict official payout mapping as live settlement.
+    from app import verified_winner
+    status=str((market or {}).get("status") or (market or {}).get("marketStatus") or "").upper()
+    if "RESOLVED" in status:
+     payout,_=await get("/v1/markets/"+str(market_slug)+"/settlement")
+     outcome=verified_winner(market,payout)
    return {"utc_start":t.isoformat(),"event_slug":slug,"market_slug":market_slug,"price_to_beat":target,"winner":outcome,"status":"VERIFIED" if target is not None and outcome else "INCOMPLETE","error":err if market is None else None}
   rows=await asyncio.gather(*(one(i) for i in range(672)))
   # Coinbase public 1-minute OHLC: [epoch,low,high,open,close,volume].
@@ -112,3 +126,4 @@ async def main():
   w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
  print(json.dumps({"movement_complete":sum(r["movement_status"]=="COMPLETE" for r in rows),"target_movement_complete":sum(r["movement_status"]=="COMPLETE" and r["price_to_beat"] is not None for r in rows),"requested":672,"verified":sum(r["status"]=="VERIFIED" for r in rows),"targets":sum(r["price_to_beat"] is not None for r in rows),"winners":sum(r["winner"] is not None for r in rows),"missing":sum(r["status"]!="VERIFIED" for r in rows)}))
 if __name__=="__main__": asyncio.run(main())
+
