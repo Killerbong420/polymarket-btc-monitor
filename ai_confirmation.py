@@ -4,6 +4,78 @@ import os
 import time
 import httpx
 
+# Fixed research sample; never present these frequencies as calibrated live odds.
+HISTORY_CONTEXT_VERSION = "btc15m-20261018-20261024-v1"
+HISTORICAL_CONTEXT = {
+    "version": HISTORY_CONTEXT_VERSION,
+    "period_utc": "2026-10-18 inclusive through 2026-10-25 exclusive",
+    "verified_rounds": 663,
+    "price_source": "Coinbase BTC-USD completed 1-minute candles",
+    "outcome_source": "Official Polymarket US settlements",
+    "measurement": "Whether the minute-close spot side of the official target matched the eventual official winner",
+    "checkpoint_counts": [
+        {"elapsed_minutes": m, "matched_winner": wins, "rounds": 663}
+        for m, wins in [(3,446),(5,474),(7,488),(8,510),(10,540),(12,572),(14,634)]
+    ],
+    "minute8_absolute_target_gap_buckets_pct": [
+        {"lower_inclusive":0,"upper_exclusive":0.025,"matched_winner":85,"rounds":147},
+        {"lower_inclusive":0.025,"upper_exclusive":0.05,"matched_winner":85,"rounds":126},
+        {"lower_inclusive":0.05,"upper_exclusive":0.10,"matched_winner":144,"rounds":179},
+        {"lower_inclusive":0.10,"upper_exclusive":None,"matched_winner":196,"rounds":211}
+    ],
+    "rounds_with_target_crossing_between_minute_closes":434,
+    "median_minute_direction_reversals":7,
+    "final_spot_target_side_disagreed_with_official_outcome":36,
+    "limitations":[
+        "Descriptive, selected seven-day sample; no independent out-of-sample validation or demonstrated improvement to AI forecasts",
+        "Not AI accuracy, calibrated win probabilities, expected returns, or evidence of profitable entries",
+        "Minute 8 observations occur AFTER the 7:30-elapsed halfway call; do not use as evidence already observed at that call",
+        "Coinbase spot is a BRTI proxy; Kraken live prices have additional exchange basis differences",
+        "Historical full-window crossings/reversals are not known for the current unfinished round",
+        "Do not use these outcomes as current-round evidence or let them override missing or stale live data"
+    ]
+}
+HISTORY_INSTRUCTIONS = (
+    "Use historical_context as descriptive research background only. Weigh observed current-round "
+    "distance from the official target, elapsed time, and observed target crossings alongside live chart structure. "
+    "A tiny lead with repeated crossings warrants caution; a larger sustained lead is stronger evidence, "
+    "but no historical bucket guarantees continuation. Do not copy sample frequencies into live confidence "
+    "or quote them as calibrated probabilities. The minute-8 table is not a measurement at minute 7.5. "
+    "Never infer future current-round crossings from completed historical windows. "
+)
+
+def historical_context(external, price_to_beat, market):
+    """Attach fixed findings plus only already-observed live target measurements."""
+    import math
+    from datetime import datetime, timezone
+    observed={"target_gap_pct_proxy_only":None,"observed_target_crossings":None,
+              "observed_round_candles":0,"spot_source":external.get("source")}
+    try:
+        target=float(price_to_beat)
+        spot=float(external.get("price"))
+        if not math.isfinite(target) or not math.isfinite(spot) or target<=0 or spot<=0:
+            raise ValueError("Invalid target/spot")
+        observed["target_gap_pct_proxy_only"]=round(100*(spot/target-1),5)
+        stamp=str(market).split("btc-updown-15m-",1)[1]
+        start=datetime.strptime(stamp,"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc).timestamp()
+        now=time.time()
+        bars=(external.get("graph_evidence") or {}).get("candles_ohlcv") or []
+        closes={}
+        for b in bars:
+            if not isinstance(b,(list,tuple)) or len(b)<5: continue
+            ts=float(b[0]); close=float(b[4])
+            if start<=ts<start+900 and ts+60<=now and math.isfinite(close) and close>0:
+                closes[ts]=close
+        ordered=sorted(closes.items())
+        observed["observed_round_candles"]=len(ordered)
+        # Count adjacent observed minute closes only; gaps do not imply a crossing.
+        observed["observed_target_crossings"]=sum(
+            t1-t0==60 and (p0-target)*(p1-target)<0
+            for (t0,p0),(t1,p1) in zip(ordered,ordered[1:])) if len(ordered)>=2 else None
+    except (TypeError,ValueError,IndexError,OverflowError):
+        pass
+    return {"research":HISTORICAL_CONTEXT,"current_observations":observed}
+
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 MIN_INTERVAL = max(60, int(os.getenv("AI_INTERVAL_SECONDS", "120")))
 _last_request = 0.0
@@ -66,6 +138,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         return _cache
     _last_request = now
     snapshot = {
+        "historical_context": historical_context(external, price_to_beat, market),
         "market": str(market), "duration_minutes": 15, "seconds_left": seconds_left,
         "official_price_to_beat": price_to_beat, "settlement_index": "BRTI; spot price is only a proxy", "phase": str(phase), "indicator_signal": signal,
         "possible_flip": flip, "indicator_score": score,
@@ -91,7 +164,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
     payload = {
         "model": MODEL, "store": False,
         "instructions": (
-            "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
+            HISTORY_INSTRUCTIONS + "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
             "in graph_evidence (oldest to newest), not just the precomputed indicator signal. "
             "Assess higher highs/lows, candle bodies and wicks, breakout or rejection near support/resistance, "
             "momentum acceleration/fading, EMA alignment, RSI and volume where provided. "
@@ -127,7 +200,8 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "flip_risk": parsed.get("flip_risk", "UNKNOWN"),
             "confidence": parsed.get("confidence", "LOW"),
             "signal": signal, "market": market, "phase": phase,
-            "model": MODEL, "updated_epoch": time.time()}
+            "model": MODEL, "historical_context_version": HISTORY_CONTEXT_VERSION,
+            "historical_context_rounds": HISTORICAL_CONTEXT["verified_rounds"], "updated_epoch": time.time()}
     except httpx.HTTPStatusError as exc:
         # Expose only a numeric HTTP status and predefined category.
         status = exc.response.status_code
@@ -174,6 +248,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     if external.get("volume_ratio") is None: missing.append("volume_ratio")
     if external.get("candle_age_seconds") is None: missing.append("candle_freshness")
     snapshot={
+        "historical_context":historical_context(external, target, market),
         "market":market,"duration_minutes":duration,
         "indicator_direction":indicator_direction,"indicator_score":score,
         "official_polymarket_price_to_beat":target,
@@ -213,7 +288,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "reason":{"type":"string"},"confidence":{"type":"string","enum":["LOW","MEDIUM","HIGH"]}},
         "required":["direction","reason","confidence"],"additionalProperties":False}
     payload={"model":MODEL,"store":False,"instructions":(
-        "At the halfway checkpoint, review the provided BTC market observations and make exactly one binary research forecast: UP or DOWN. Never output WAIT.  "
+        HISTORY_INSTRUCTIONS + "At the halfway checkpoint, review the provided BTC market observations and make exactly one binary research forecast: UP or DOWN. Never output WAIT.  "
         "You may disagree with the indicator direction when concrete evidence supports it. "
         "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. "
         "When evidence is weak or conflicting, still choose the more supported direction and set confidence LOW; explicitly explain the uncertainty. This is a research forecast, not a trade instruction. "
@@ -243,4 +318,5 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     except Exception as exc:
         return {**fallback,"reason":"AI request unavailable ("+type(exc).__name__+")",
                 "evidence":snapshot}
+
 
