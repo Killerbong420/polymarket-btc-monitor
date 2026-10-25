@@ -600,7 +600,7 @@ refresh();setInterval(refresh,8000);
  const ai=document.getElementById('aiConfirmationPanel');
  const brti=document.getElementById('brtiHero');
  if(!chart||!reference)return;
- reference.parentNode.insertBefore(chart,reference);
+ document.body.insertBefore(chart,document.body.firstElementChild);
  const cards=document.createElement('div');cards.id='terminalQuickCards';
  chart.insertAdjacentElement('afterend',cards);
  cards.append(reference);
