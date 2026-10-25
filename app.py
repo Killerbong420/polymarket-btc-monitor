@@ -143,6 +143,27 @@ async def market_data(client):
  except Exception as exc:
   state["market_diagnostic"]={"venue":"Polymarket US","error":str(exc)[:300],"lookup_errors":errors[-3:]}
  return None
+async def market_15m(client):
+ # Only accept a real Polymarket US contract returned for the current 15m event.
+ from datetime import timedelta
+ now=datetime.now(timezone.utc)
+ start=now.replace(minute=(now.minute//15)*15,second=0,microsecond=0)
+ event_slug="btc-updown-15m-"+start.strftime("%Y-%m-%d-%H%Mz").lower()
+ try:
+  response=await client.get("https://gateway.polymarket.us/v1/events/slug/"+event_slug,timeout=8)
+  if response.status_code!=200: return None,"event_http_"+str(response.status_code)
+  body=response.json()
+  event=body.get("event",body) if isinstance(body,dict) else {}
+  markets=event.get("markets",[]) if isinstance(event,dict) else []
+  if not markets and isinstance(body,dict): markets=body.get("markets",[])
+  for market in markets if isinstance(markets,list) else []:
+   if not isinstance(market,dict): continue
+   slug=market.get("slug") or market.get("marketSlug")
+   if not isinstance(slug,str) or "btc-updown-15m-" not in slug: continue
+   return {"slug":slug,"end":(start+timedelta(minutes=15)).timestamp()},None
+  return None,"event_has_no_matching_15m_contract"
+ except Exception as exc: return None,type(exc).__name__
+
 async def spot_data(client):
  errors=[]
  # Coinbase public BTC-USD candles: [timestamp, low, high, open, close, volume].
@@ -264,12 +285,12 @@ async def settle(client):
    # The US slug embeds the start time, e.g. cpc-btc-updown-5m-2026-10-25-0525z.
    stamp=slug.split("btc-updown-5m-",1)[-1]
    start=datetime.strptime(stamp,"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc)
-   if datetime.now(timezone.utc)<start+timedelta(minutes=6):
+   if datetime.now(timezone.utc)<start+timedelta(minutes=16 if "btc-updown-15m-" in slug else 6):
     unresolved("round_not_yet_settled")
     continue
    diagnostic["checked"]+=1
    gateway="https://gateway.polymarket.us"
-   event_slug="btc-updown-5m-"+stamp
+   event_slug=("btc-updown-15m-" if "btc-updown-15m-" in slug else "btc-updown-5m-")+stamp
    market=None
    # Event lookup is the same discovery path used to find the live contract.
    er=await client.get(gateway+"/v1/events/slug/"+event_slug,timeout=10)
@@ -338,6 +359,15 @@ async def loop():
       execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":FINAL",slug,"FINAL",direction,flip,score,now))
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(remaining),market=slug,external=d,updated=now,error=None)
      await confirm(client,slug,phase,direction,flip,score,d)
+    # Dedicated 15m FINAL call at 7:30 remaining, independent of 5m FINAL.
+    fifteen,reason15=await market_15m(client)
+    if fifteen:
+     left15=fifteen["end"]-time.time()
+     state["final_15m"]={"market":fifteen["slug"],"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
+     if 0<left15<=450:
+      execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(fifteen["slug"]+":FINAL_15M",fifteen["slug"],"FINAL_15M",direction,flip,score,now))
+    else:
+     state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
     await settle(client)
    except Exception as e:
     for key in ("phase","seconds_left","score"): state.pop(key,None)
