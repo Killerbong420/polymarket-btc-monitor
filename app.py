@@ -196,21 +196,67 @@ def winner(m):
  if sorted(p)!=[0.0,1.0]: return None
  w=str(outcomes[p.index(1.0)]).upper()
  return w if w in ("UP","DOWN") else None
+def settlement_price(data):
+ # Polymarket US settlement is a YES-side payout (0 or 1), not an UP/DOWN label.
+ if isinstance(data,(int,float)) and not isinstance(data,bool): return float(data)
+ if not isinstance(data,dict): return None
+ for obj in (data,data.get("settlement"),data.get("data")):
+  if not isinstance(obj,dict): continue
+  for key in ("settlementPrice","settlement_price","price","value"):
+   if key in obj and obj[key] is not None:
+    try: return float(obj[key])
+    except (TypeError,ValueError): pass
+ return None
+
+def verified_winner(m,settlement):
+ # Only resolve if the contract explicitly identifies the long/YES outcome as UP or DOWN.
+ # Never align outcomePrices with outcomes by array index.
+ if not isinstance(m,dict): return None
+ status=str(m.get("status") or m.get("marketStatus") or "").upper()
+ if "RESOLVED" not in status: return None
+ sides=m.get("marketSides") or m.get("market_sides")
+ if not isinstance(sides,list): return None
+ yes=None
+ for side in sides:
+  if not isinstance(side,dict): continue
+  position=str(side.get("side") or side.get("position") or side.get("type") or "").upper()
+  label=str(side.get("outcome") or side.get("name") or side.get("label") or "").upper()
+  if position in ("LONG","YES","MARKET_SIDE_LONG") and label in ("UP","DOWN"):
+   yes=label
+ if yes is None: return None
+ p=settlement_price(settlement)
+ if p==1.0: return yes
+ if p==0.0: return "DOWN" if yes=="UP" else "UP"
+ return None
+
 async def settle(client):
- rows=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING'",fetch=True)
- for (slug,) in rows[:30]:
+ pending=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING'",fetch=True)
+ diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[]}
+ for (slug,) in pending[:20]:
   try:
-   r=await client.get("https://gateway.polymarket.us/v1/markets/"+slug+"/settlement",timeout=8)
-   if r.status_code in (404,409): continue
+   base="https://gateway.polymarket.us/v1/markets/"+slug
+   r=await client.get(base+"/settlement",timeout=8)
+   diagnostic["checked"]+=1
+   if r.status_code in (404,409):
+    diagnostic["unresolved"]+=1
+    continue
    r.raise_for_status()
-   data=r.json()
-   if not isinstance(data,dict): continue
-   winning=str(data.get("winningOutcome") or data.get("winner") or "").upper()
-   if winning not in ("UP","DOWN"): continue
-   execute("UPDATE signals SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(winning,slug))
-  except Exception: continue
- # US contracts must never be resolved using international Gamma outcomes.
- # Keep unknown results PENDING until the US gateway supplies explicit settlement.
+   settlement=r.json()
+   mr=await client.get(base,timeout=8)
+   if mr.status_code!=200:
+    diagnostic["unresolved"]+=1
+    continue
+   payload=mr.json()
+   market=payload.get("market",payload) if isinstance(payload,dict) else None
+   win=verified_winner(market,settlement)
+   if win is None:
+    diagnostic["unresolved"]+=1
+    continue
+   execute("UPDATE signals SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
+   diagnostic["verified"]+=1
+  except Exception as exc:
+   diagnostic["errors"].append(type(exc).__name__)
+ state["settlement_diagnostic"]=diagnostic
 async def loop():
  setup()
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
