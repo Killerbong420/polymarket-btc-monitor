@@ -47,6 +47,20 @@ function renderPaper(d){
      cents(x.best_exit_bid),pct(x.max_roi_pct),x.status==='MISSED_QUOTED_PROFIT'?'MISSED QUOTED TARGET':x.status==='MATCHED_PAPER_TRADE'?'PAPER TRADE ENTERED':'TARGET NOT OBSERVED']),
    'No measured missed opportunities yet. The tracker needs new Polymarket quote observations and later price movement.');
  $('paperMissedNote').textContent=d.missed_opportunity_note||'Missed-quote scenarios are not actual filled trades.';
+ const learn=d.missed_profit_learning||{},segments=learn.segments||[],counts=learn.outcomes||{};
+ const eligible=segments.filter(x=>x.eligible_for_bounded_relaxation).length;
+ $('paperLearningSummary').textContent='Prospective sample outcomes: '+(counts.TARGET||0)+' target hits · '+(counts.STOP||0)+' stop-losses · '+(counts.TIME||0)+' timed exits · '+(counts.UNOBSERVED||0)+' unobserved · '+(counts.WATCHING||0)+' watching · '+eligible+' qualified price bands'+(learn.enabled?' · adaptive paper rules enabled':' · adaptive changes disabled')+' · Missed executable paper exits: '+(learn.missed_actual_exit_count||0)+' ('+usd((learn.missed_actual_exit_profit_cents||0)/100)+' hypothetical regret)';
+ table('paperLearningSegments',['Side','Entry odds','Separate markets','5% target rate','Average net result','Adaptive evidence'],
+   segments.map(x=>[x.direction,x.price_band,x.distinct_markets+' / '+(learn.minimum_independent_markets||40),pct(x.hit_rate_pct),pct(x.average_modelled_return_pct),x.eligible_for_bounded_relaxation?'QUALIFIED':'COLLECTING / NOT QUALIFIED']),
+   'Waiting for forward observations.');
+ table('paperLearningOutcomes',['Market','Side / band','Entry ask','Outcome','Modelled ROI','Peak / trough'],
+   (learn.recent||[]).map(x=>[x.market,x.direction+' / '+x.price_band,cents(x.entry_ask),x.status,pct(x.modelled_return_pct),pct(x.best_observed_roi_pct)+' / '+pct(x.worst_observed_roi_pct)]),
+   'Outcomes appear as quotes progress after an observed entry.');
+ table('paperLearningExitRegrets',['Market','Best simulated full sell','Final value','Missed gain','Why'],
+   (learn.missed_actual_exits||[]).map(x=>[x.market,usd(x.peak_net_cents/100),usd(x.actual_net_cents/100),usd(x.missed_profit_cents/100),x.reason]),
+   'No prior executable profit above final paper sale has been recorded.');
+ $('paperLearningNote').textContent=learn.note||'Learning depends on enough forward observations and never sends live orders.';
+
  const diag=d.trading_diagnostics||{};
  if(diag.skipped_by_reason?.length){
    const most=diag.skipped_by_reason[0];
