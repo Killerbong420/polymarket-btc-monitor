@@ -12,6 +12,8 @@ RISK={'max_trade_cents':1000,'daily_loss_cents':2500,'max_open_cents':5000,
       'take_profit_pct':.05,'stop_loss_pct':.08,'max_hold_seconds':180,'exit_before_expiry_seconds':180,
       'min_confidence':'LOW','low_confidence_max_trade_cents':500,'checkpoint':'LIVE_ANYTIME','daily_timezone':'America/Chicago'}
 _last_mark=0.0
+_last_entry_scan=0.0
+_last_settlement_scan=0.0
 
 def risk_settings(stored):
     risk={**RISK,**stored}
@@ -456,14 +458,18 @@ async def update_marks(client,execute,connect,postgres):
             run(cur,postgres,"SELECT COALESCE(SUM(mark_cents),0) FROM paper_positions WHERE status='OPEN'")
             total_mark=int(cur.fetchone()[0]);cash=account[1];equity=cash+total_mark;high=max(account[5],equity);draw=max(account[6],high-equity)
             run(cur,postgres,'UPDATE paper_account SET high_water_cents=?,max_drawdown_cents=? WHERE id=\'main\'',(high,draw))
-            run(cur,postgres,'INSERT INTO paper_equity (id,created_at,equity_cents,cash_cents,open_mark_cents) VALUES (?,?,?,?,?)',(str(uuid.uuid4()),stamp(),equity,cash,total_mark))
-        finally:cur.close()
-
-async def cycle(client,execute,connect,postgres,live_signal=None):
-    global _last_mark
-    learning.expire_unobserved(execute)
+            run(cur,postgres,'INSERT INTO paper_equity (id,created_at,equity_cents,cash_cents,open_mark_cents) VALUES (?,?,?,?,?)',(str(uuid.uuid4()),stamp(),equity,async def cycle(client,execute,connect,postgres,live_signal=None):
+    global _last_mark, _last_entry_scan, _last_settlement_scan
+    now_mono=time.monotonic()
+    # Maintain fast protective exits without hammering PostgreSQL on every tick.
     await manage_exits(client,execute,connect,postgres,live_signal)
-    settle_positions(connect,postgres)
+    if now_mono-_last_settlement_scan>=15:
+        settle_positions(connect,postgres)
+        learning.expire_unobserved(execute)
+        _last_settlement_scan=now_mono
+    if now_mono-_last_entry_scan<5:
+        return
+    _last_entry_scan=now_mono
     signal=live_signal or {};key=signal.get('paper_signal_id')
     if signal.get('status')=='ready' and key and 0<=time.time()-signal.get('captured_epoch',0)<=60:
         market=signal.get('market');opp=signal.get('profit_opportunity') or {}
@@ -484,6 +490,7 @@ async def cycle(client,execute,connect,postgres,live_signal=None):
         execute('UPDATE paper_live_calls SET processed=1 WHERE id=?',(row[1],))
     if time.monotonic()-_last_mark>=30:
         await update_marks(client,execute,connect,postgres);_last_mark=time.monotonic()
+,connect,postgres);_last_mark=time.monotonic()
 
 def missed_profit_learning(execute):
     """Retrospective, fee-aware analysis of skipped paper entries; never self-modifies live trading rules."""
