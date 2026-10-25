@@ -51,7 +51,11 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
     if not key:
         _cache = public_state()
         return _cache
-    if signal not in ("UP", "DOWN") or not market or not external:
+    if signal not in ("UP", "DOWN") and external:
+        fast = float(external.get("momentum_pct") or 0)
+        slow = float(external.get("long_momentum_pct") or 0)
+        signal = "UP" if fast * 2 + slow >= 0 else "DOWN"
+    if not market or not external:
         if _cache.get("status") in ("ready", "error"):
             return _cache
         _cache = {"status": "waiting_for_signal", "verdict": "WAIT", "reason": "No eligible directional signal yet.", "model": MODEL}
