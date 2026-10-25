@@ -164,7 +164,7 @@ async def market_15m(client):
    if not isinstance(market,dict): continue
    slug=market.get("slug") or market.get("marketSlug")
    if not isinstance(slug,str) or "btc-updown-15m-" not in slug: continue
-   return {"slug":slug,"end":(start+timedelta(minutes=15)).timestamp()},None
+   return {**market,"slug":slug,"end":(start+timedelta(minutes=15)).timestamp()},None
   return None,"event_has_no_matching_15m_contract"
  except Exception as exc: return None,type(exc).__name__
 
@@ -312,6 +312,7 @@ async def spot_data(client):
   # Exclude the current incomplete minute.
   candles=[x for x in candles if float(x[0])+60<=time.time()]
   if len(candles)<35: raise ValueError("Coinbase insufficient completed candles")
+  if time.time()-float(candles[-1][0])-60>90: raise ValueError("Coinbase latest completed candle stale")
   candles=candles[-40:]
   chart=chart_indicators(candles,5)
   pattern=classify_chart(candles)
@@ -331,6 +332,7 @@ async def spot_data(client):
   key=next(k for k in payload["result"] if k!="last")
   candles=sorted(payload["result"][key],key=lambda x:float(x[0]))[:-1]
   if len(candles)<35: raise ValueError("Kraken insufficient candles")
+  if time.time()-float(candles[-1][0])-60>90: raise ValueError("Kraken latest completed candle stale")
   candles=candles[-40:]
   chart=chart_indicators(candles,6)
   pattern=classify_chart([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles])
@@ -566,8 +568,11 @@ async def loop():
    try:
     await check_auth(client)
     m=await market_data(client)
-    d=await spot_data(client)
-    direction,flip,score=judge(d)
+    try:
+     d=await spot_data(client)
+    except Exception as feed_exc:
+     d={"source":"unavailable","candle_age_seconds":None,"signal_quality":{"status":"INSUFFICIENT_DATA","reason":"No fresh verified BTC candles"},"feed_error":str(feed_exc)[:300]}
+    direction,flip,score=judge(d) if d.get("price") is not None else ("WAIT","WAIT",0.0)
     now=datetime.now(timezone.utc).isoformat()
     if not m:
      for key in ("phase","seconds_left","score"): state.pop(key,None)
@@ -582,7 +587,7 @@ async def loop():
       log_signal(slug,phase,direction,flip,score,now,d)
      # One independent, immutable FINAL call per 5m round, at the first poll
      # reaching 2:30 remaining. Force a research prediction even when trend confirmation is weak.
-     if remaining<=150 and remaining>0:
+     if remaining<=150 and remaining>0 and d.get("price") is not None:
       await record_halfway(client,slug,"FINAL",d,direction,flip,score,now,m)
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(remaining),market=slug,external=d,updated=now,error=None)
      await confirm(client,slug,phase,direction,flip,score,d)
@@ -591,10 +596,11 @@ async def loop():
     if fifteen:
      left15=fifteen["end"]-time.time()
      state["final_15m"]={"market":fifteen["slug"],"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
-     if 0<left15<=450:
+     if 0<left15<=450 and d.get("price") is not None:
       await record_halfway(client,fifteen["slug"],"FINAL_15M",d,direction,flip,score,now,fifteen)
     else:
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
+    state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     await settle(client)
    except Exception as e:
     for key in ("phase","seconds_left","score"): state.pop(key,None)
