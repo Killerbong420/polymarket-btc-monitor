@@ -455,6 +455,27 @@ let current={points:[],status:'unavailable'},loading=false;
 const money=n=>Number.isFinite(n)?'</html>
 +n.toLocaleString('en-US',{maximumFractionDigits:2,minimumFractionDigits:2}):'—';
 const finite=n=>typeof n==='number'&&Number.isFinite(n);
+function detectPattern(values){
+ // Approximate price-formation heuristic, not a calibrated signal.
+ if(values.length<12)return {name:'INSUFFICIENT DATA',confirmation:'Need 12+ observations'};
+ const n=values.length,third=Math.max(4,Math.floor(n/3));
+ const early=values.slice(0,third),middle=values.slice(third,2*third),late=values.slice(-third);
+ const avg=a=>a.reduce((x,y)=>x+y,0)/a.length;
+ const a=avg(early),b=avg(middle),c=avg(late);
+ const range=Math.max(...values)-Math.min(...values);
+ if(range<.006)return {name:'SIDEWAYS / RANGE',confirmation:'Low movement'};
+ const impulse=b-a,pullback=c-b,net=c-a;
+ const threshold=Math.max(.008,range*.20);
+ if(impulse< -threshold&&pullback>threshold*.25&&pullback<Math.abs(impulse)*.75)
+  return {name:'BEARISH FLAG · POSSIBLE',confirmation:'Downward impulse + partial rebound'};
+ if(impulse>threshold&&pullback< -threshold*.25&&Math.abs(pullback)<impulse*.75)
+  return {name:'BULLISH FLAG · POSSIBLE',confirmation:'Upward impulse + partial pullback'};
+ if(net>threshold&&c>b&&b>a)return {name:'UPTREND',confirmation:'Higher interval averages'};
+ if(net< -threshold&&c<b&&b<a)return {name:'DOWNTREND',confirmation:'Lower interval averages'};
+ if(Math.abs(net)<threshold)return {name:'CONSOLIDATION',confirmation:'No confirmed breakout'};
+ return {name:net>0?'RECOVERY / REVERSAL WATCH':'WEAKENING / REVERSAL WATCH',confirmation:'Requires follow-through'};
+}
+
 function detectBRTIPattern(points){
  const values=points.filter(p=>Array.isArray(p)&&Number.isFinite(p[1])).slice(-90).map(p=>p[1]);
  if(values.length<12)return {name:'INSUFFICIENT DATA',confirmation:'Need 12+ ticks'};
