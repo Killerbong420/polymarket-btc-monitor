@@ -1,5 +1,6 @@
 import asyncio, json, os, sqlite3, time
 from pathlib import Path
+from ai_confirmation import confirm, public_state
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import httpx
@@ -219,6 +220,7 @@ async def loop():
      if phase in ("EARLY","LATE") and direction!="WAIT":
       execute("INSERT INTO signals (id,market,phase,direction,flip,score,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(slug+":"+phase,slug,phase,direction,flip,score,now))
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(remaining),market=slug,external=d,updated=now,error=None)
+     await confirm(client,slug,phase,direction,flip,score,d)
     await settle(client)
    except Exception as e:
     for key in ("phase","seconds_left","score"): state.pop(key,None)
@@ -237,8 +239,8 @@ def status():
  try:
   rows=execute("SELECT result,COUNT(*) FROM signals GROUP BY result",fetch=True)
   recent=execute("SELECT market,phase,direction,flip,score,created_at,result FROM signals ORDER BY created_at DESC LIMIT 50",fetch=True)
-  return {**state,"counts":dict(rows),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result"),r)) for r in recent]}
- except Exception as e: return {**state,"database_error":str(e),"history":[]}
+  return {**state,"ai_confirmation":public_state(),"counts":dict(rows),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result"),r)) for r in recent]}
+ except Exception as e: return {**state,"ai_confirmation":public_state(),"database_error":str(e),"history":[]}
 @app.get("/",response_class=HTMLResponse)
 def home():
  return Path(__file__).with_name("terminal.html").read_text(encoding="utf-8")
