@@ -12,7 +12,7 @@ try:
 except ImportError:
  psycopg = None
 
-POLL = max(10, int(os.getenv("POLL_SECONDS", "15")))
+POLL = max(5, int(os.getenv("POLL_SECONDS", "5")))
 DB = os.getenv("DATABASE_URL", "")
 state = {"status":"starting","signal":"WAIT","flip":"WAIT","market":None,"updated":None,"error":None}
 def connect():
@@ -567,6 +567,7 @@ async def loop():
  setup()
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
   while True:
+   cycle_started=time.monotonic()
    try:
     await check_auth(client)
     m=await market_data(client)
@@ -607,7 +608,7 @@ async def loop():
    except Exception as e:
     for key in ("phase","seconds_left","score"): state.pop(key,None)
     state.update(status="feed error",signal="WAIT",flip="WAIT",error=str(e),updated=datetime.now(timezone.utc).isoformat())
-   await asyncio.sleep(POLL)
+   await asyncio.sleep(max(0, POLL - (time.monotonic() - cycle_started)))
 @asynccontextmanager
 async def lifespan(app):
  task=asyncio.create_task(loop())
