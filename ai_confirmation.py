@@ -10,6 +10,36 @@ _last_request = 0.0
 _cache = {"status": "not_configured", "verdict": "WAIT", "reason": "Add OPENAI_API_KEY in Render environment settings.", "model": MODEL}
 _lock = None
 
+_auth_cache = {"status": "pending", "reason": "Authentication check has not run."}
+_auth_last = 0.0
+
+def auth_state():
+    if not os.getenv("OPENAI_API_KEY"):
+        return {"status": "not_configured", "reason": "Set OPENAI_API_KEY in Render."}
+    return dict(_auth_cache)
+
+async def check_auth(client):
+    """Check model access without inference or exposing secrets."""
+    global _auth_last, _auth_cache
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        return auth_state()
+    if time.monotonic() - _auth_last < 1800:
+        return auth_state()
+    _auth_last = time.monotonic()
+    try:
+        r = await client.get("https://api.openai.com/v1/models/" + MODEL,
+            headers={"Authorization": "Bearer " + key}, timeout=12)
+        if r.status_code == 200:
+            _auth_cache = {"status": "authenticated", "reason": "Key accepted; inference and billing not yet verified."}
+        else:
+            category = {401:"invalid_api_key",403:"permission_denied",404:"model_not_found",429:"rate_limit_or_quota"}.get(r.status_code,"http_error")
+            _auth_cache = {"status": "error", "http_status": r.status_code, "reason": category}
+    except Exception as exc:
+        _auth_cache = {"status": "error", "reason": "Connection failed: " + type(exc).__name__}
+    return auth_state()
+
+
 def public_state():
     if not os.getenv("OPENAI_API_KEY"):
         return {"status": "not_configured", "verdict": "WAIT", "reason": "Set OPENAI_API_KEY securely in Render to activate AI confirmation.", "model": MODEL}
@@ -22,7 +52,9 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         _cache = public_state()
         return _cache
     if signal not in ("UP", "DOWN") or not market or not external:
-        _cache = {"status": "waiting_for_signal", "verdict": "WAIT", "reason": "No verified live market and directional indicator signal.", "model": MODEL}
+        if _cache.get("status") in ("ready", "error"):
+            return _cache
+        _cache = {"status": "waiting_for_signal", "verdict": "WAIT", "reason": "No eligible directional signal yet.", "model": MODEL}
         return _cache
     now = time.monotonic()
     if now - _last_request < MIN_INTERVAL:
