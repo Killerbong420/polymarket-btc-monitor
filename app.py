@@ -591,6 +591,16 @@ async def loop():
      ptb=terms.get("priceToBeat") or {}
      target=ptb.get("value") if isinstance(ptb,dict) else None
      reference,quote=await asyncio.gather(reference_prices(client,fifteen),market_quote(client,slug))
+     # Display-only BRTI reference series from the Polymarket US reference API.
+     # Keep raw index ticks in process memory; no CF Benchmarks site scraping.
+     ref_points=reference.get("points") or []
+     if reference.get("status") in ("fresh","stale") and ref_points:
+      state["brti_chart"]={"market":slug,"source":reference.get("source"),
+       "points":[[int(t),round(float(p),2)] for t,p in ref_points if t>=time.time()-16*60][::3],
+       "sample_age_seconds":reference.get("age_seconds"),
+       "observed_epoch":time.time()}
+     else:state["brti_chart"]={"market":slug,"source":"Polymarket US reference API",
+       "points":[],"status":"unavailable","reason":reference.get("reason","No verified BRTI observations")}
      ref_public={k:v for k,v in reference.items() if k!="points"}
      behavior=target_behavior(d,target,slug,reference)
      d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote)
@@ -736,6 +746,21 @@ def historical_csv():
  p=Path("historical_15m_7d.csv")
  if not p.exists(): return JSONResponse({"status":historical_state},status_code=202)
  return FileResponse(str(p),media_type="text/csv",filename="polymarket_us_btc_15m_7d.csv")
+@app.get("/api/brti-chart")
+def brti_chart():
+  """BRTI reference observations from Polymarket US asset-prices API, not CF site scraping."""
+  chart=state.get("brti_chart") or {}
+  market=state.get("market")
+  if not market or chart.get("market")!=market:
+   return {"status":"unavailable","points":[],"reason":"No current 15-minute BRTI reference observations"}
+  age=time.time()-float(chart.get("observed_epoch") or 0)
+  points=chart.get("points") or []
+  return {"status":"fresh" if points and age<=20 and float(chart.get("sample_age_seconds") or 999)<=15 else "stale" if points else "unavailable",
+          "market":market,"points":points,"source":"Polymarket US BTC reference / BRTI",
+          "official_target":number((state.get("target_behavior") or {}).get("target")),
+          "observed_age_seconds":round(age,1),
+          "note":"BRTI reference index values supplied by Polymarket US. Not a direct CF Benchmarks feed, nor an embedded CF Benchmarks chart. Original site: https://www.cfbenchmarks.com/data/indices/BRTI."}
+
 @app.get("/api/polymarket-chart")
 def polymarket_chart():
   """Return Polymarket BBO quoted UP/DOWN asks only, not external BTC/USD prices."""
