@@ -81,7 +81,39 @@ async def market_data(client):
      candidates.append((abs(remaining-150),m))
    except ValueError: continue
   if candidates: return min(candidates,key=lambda x:x[0])[1]
-  state["market_diagnostic"]={"venue":"Polymarket US","gateway_status":r.status_code,"markets_scanned":len(items),"sample_slugs":[str(m.get("slug") or m.get("marketSlug")) for m in items[:3] if isinstance(m,dict)],"lookup_errors":errors[-3:]}
+  # The first page is often unrelated sports markets. Search the US catalog
+  # rather than assuming 500 generic results represent all available markets.
+  search_details=[]
+  for term in ("btc-updown-5m","bitcoin"):
+   try:
+    sr=await client.get(base+"/v1/search",params={"query":term},timeout=12)
+    sr.raise_for_status()
+    body=sr.json()
+    found=[]
+    def scan(node,depth=0):
+     if depth>5: return
+     if isinstance(node,dict):
+      slug=str(node.get("slug") or node.get("marketSlug") or "")
+      if slug.startswith("btc-updown-5m-"): found.append(node)
+      for v in node.values():
+       if isinstance(v,(dict,list)): scan(v,depth+1)
+     elif isinstance(node,list):
+      for v in node[:200]: scan(v,depth+1)
+    scan(body)
+    search_details.append({"query":term,"status":sr.status_code,"btc_matches":len(found)})
+    for m in found:
+     slug=str(m.get("slug") or m.get("marketSlug"))
+     try:
+      t=datetime.strptime(slug[len("btc-updown-5m-"):],"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc)
+      remaining=t.timestamp()+300-time.time()
+      if 0<remaining<=600:
+       m["slug"]=slug
+       m["_round_start"]=t.timestamp()
+       m["_round_end"]=t.timestamp()+300
+       return m
+     except ValueError: continue
+   except Exception as exc: search_details.append({"query":term,"error":str(exc)[:160]})
+  state["market_diagnostic"]={"venue":"Polymarket US","gateway_status":r.status_code,"markets_scanned":len(items),"sample_slugs":[str(m.get("slug") or m.get("marketSlug")) for m in items[:3] if isinstance(m,dict)],"search":search_details,"lookup_errors":errors[-3:]}
  except Exception as exc:
   state["market_diagnostic"]={"venue":"Polymarket US","error":str(exc)[:300],"lookup_errors":errors[-3:]}
  return None
