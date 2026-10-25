@@ -14,14 +14,17 @@ const sandbox={console,AbortController,Date:class extends Date{static now(){retu
 async function flush(){for(let i=0;i<8;i++)await Promise.resolve()}
 (async()=>{
  vm.runInNewContext(script,sandbox);await flush();
- assert.match(element('minuteForecast').textContent,/NEXT MINUTE CLOSE/);
+ assert.match(element('minuteForecast').textContent,/NEXT 60 SECONDS/);
  assert.match(element('patternDetails').textContent,/Polymarket/);
- assert.ok(storage.has('btcReferenceMinuteCallsV1'));
+ assert.ok(storage.has('btcReferenceMinuteCallsV2'));
+ const call=JSON.parse(storage.get('btcReferenceMinuteCallsV2'))[0];
+ assert.equal(call.target-call.created,60000);
+ assert.equal(call.entry,candles.at(-1)[4]);
  failed=true;intervals[0]();await flush();
  assert.match(element('minuteForecast').textContent,/inactive/);
  assert.equal(element('patternName').textContent,'REFERENCE FEED UNAVAILABLE');
  failed=false;listeners.visibilitychange();await flush();
- assert.match(element('minuteForecast').textContent,/NEXT MINUTE CLOSE/);
+ assert.match(element('minuteForecast').textContent,/NEXT 60 SECONDS/);
  assert.equal(requests,3);
  console.log('PASS: all inline JS parses; chart render, forecast, feed failure, resume/recovery');
 })().catch(e=>{console.error(e);process.exitCode=1});

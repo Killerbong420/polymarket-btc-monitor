@@ -44,6 +44,13 @@ class CandleTests(unittest.IsolatedAsyncioTestCase):
   payload,_=await self.request([self.candle()])
   cached,client=await self.request(error=RuntimeError('should not request'))
   self.assertEqual(cached,payload);client.get.assert_not_called()
+ def test_reference_age_includes_elapsed_cache_time(self):
+  with patch.dict(app.state,{'market':'m','brti_chart':{'market':'m','points':[[self.now-33,100]],'sample_age_seconds':14,'observed_epoch':self.now-19}},clear=True),patch('app.time.time',return_value=self.now):
+   self.assertEqual(app.brti_chart()['status'],'stale')
+ async def test_cache_refreshes_across_minute_boundary(self):
+  app._reference_candle_cache.update(at=app.time.monotonic(),minute=self.now//60-1,payload={'status':'fresh','candles':[[self.now-60,1,1,1,1,0]]})
+  payload,client=await self.request([self.candle()])
+  client.get.assert_awaited_once()
  def test_zero_second_reference_age_is_fresh(self):
   with patch.dict(app.state,{'market':'m','brti_chart':{'market':'m','points':[[self.now,100]],'sample_age_seconds':0,'observed_epoch':self.now}},clear=True),patch('app.time.time',return_value=self.now):
    self.assertEqual(app.brti_chart()['status'],'fresh')

@@ -370,27 +370,31 @@ async function getBars(){
   {
    const now=Date.now();
    const completed=state.bars.filter(b=>b.t+60000<=now);
-   let calls=[];try{const saved=JSON.parse(sessionStorage.getItem('btcReferenceMinuteCallsV1')||'[]');if(Array.isArray(saved))calls=saved}catch(e){}
-   // Score only the exact forecast candle, from the same exchange.
+   let calls=[];try{const saved=JSON.parse(sessionStorage.getItem('btcReferenceMinuteCallsV2')||'[]');if(Array.isArray(saved))calls=saved}catch(e){}
+   // Use observed prices at issuance and after a full 60-second horizon.
+   const observed=state.bars.at(-1);
+   const live=observed&&observed.t<=now&&now-observed.t<60000;
    for(const call of calls){
     if(call.actual!=null||call.expired||now<call.target)continue;
-    const actual=completed.find(b=>b.t+60000===call.target);
-    if(actual&&call.source===payload.source){call.actual=actual.c;const move=actual.c-call.entry;call.correct=call.direction==='SIDEWAYS'?Math.abs(move)<=call.band:call.direction==='UP'?move>call.band:move< -call.band}
-    else if(now>call.target+120000)call.expired=true;
+    if(live&&now-call.target<=10000&&call.source===payload.source){
+     call.actual=observed.c;call.actualAt=now;
+     const move=call.actual-call.entry;
+     call.correct=call.direction==='SIDEWAYS'?Math.abs(move)<=call.band:call.direction==='UP'?move>call.band:move< -call.band;
+    }else if(now>call.target+10000)call.expired=true;
    }
    const forecast=minuteModel(completed,now);
-   if(forecast&&now-forecast.origin<=15000&&!calls.some(c=>c.target===forecast.target)){
-    calls.push({...forecast,created:now,source:payload.source});
+   if(forecast&&live&&(!calls.length||now-calls.at(-1).created>=60000)){
+    calls.push({...forecast,created:now,target:now+60000,entry:observed.c,source:payload.source});
    }
    calls=calls.slice(-100);
    const call=calls.at(-1),active=call&&call.target>now&&forecast&&call.source===payload.source;
    const done=calls.filter(c=>c.actual!=null),wins=done.filter(c=>c.correct).length;
-   $('minuteForecast').textContent=active?'NEXT MINUTE CLOSE · '+call.direction+' · '+Math.ceil((call.target-now)/1000)+'s remaining · Estimated move '+(call.projection>=0?'+':'')+call.projection.toFixed(2)+' USD · Polymarket reference · Experimental':forecast?'NEXT MINUTE · Waiting for the next candle close':'NEXT MINUTE · Insufficient, stale or gapped candles';
-   $('minuteAccuracy').textContent='Exact candle-close results: '+wins+'/'+done.length+' correct · '+calls.filter(c=>c.expired).length+' unscored · Polymarket reference · local session only';
+   $('minuteForecast').textContent=active?'NEXT 60 SECONDS · '+call.direction+' · '+Math.ceil((call.target-now)/1000)+'s remaining · Estimated move '+(call.projection>=0?'+':'')+call.projection.toFixed(2)+' USD · Polymarket reference · Experimental':forecast?'NEXT MINUTE · Waiting for the next candle close':'NEXT MINUTE · Insufficient, stale or gapped candles';
+   $('minuteAccuracy').textContent='60-second observation results: '+wins+'/'+done.length+' correct · '+calls.filter(c=>c.expired).length+' unscored · Polymarket reference · local session only';
    $('minuteReversal').textContent=active?'REVERSAL WATCH · '+(call.reversal?call.reversal+' POSSIBLE':'NO CONFIRMED REVERSAL')+' · '+call.reasons.join(', '):'REVERSAL WATCH · Awaiting fresh forecast';
    const reversals=done.filter(c=>c.reversal);
    $('minuteReversalStats').textContent='Reversal calls: '+reversals.filter(c=>c.correct).length+'/'+reversals.length+' correct · not calibrated probabilities';
-   try{sessionStorage.setItem('btcReferenceMinuteCallsV1',JSON.stringify(calls))}catch(e){}
+   try{sessionStorage.setItem('btcReferenceMinuteCallsV2',JSON.stringify(calls))}catch(e){}
 
   }
   draw();

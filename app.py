@@ -555,8 +555,19 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  _research_cache["updated_epoch"]=0
  state["last_checkpoint"]={"market":slug,"checkpoint":checkpoint,"captured_at":captured,"seconds_left":left,"calls":calls}
 
+_prediction_tasks=set()
+def track_prediction(task):
+ _prediction_tasks.add(task)
+ def finished(t):
+  _prediction_tasks.discard(t)
+  if not t.cancelled():t.exception()
+ task.add_done_callback(finished)
+ return task
+
 async def loop():
  setup()
+ ai_task=None
+ checkpoints={}
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
   while True:
    cycle_started=time.monotonic()
@@ -618,9 +629,14 @@ async def loop():
      state["missed_checkpoints"]=plan["missed"]
      for name in plan["due"]:
       if d.get("price") is not None:
-       await capture_checkpoint(client,slug,name,round(left15),d,direction,flip,score,fifteen)
+       key=(slug,name)
+       if key not in checkpoints or checkpoints[key].done():
+        checkpoints[key]=track_prediction(asyncio.create_task(capture_checkpoint(client,slug,name,round(left15),json.loads(json.dumps(d)),direction,flip,score,fifteen)))
+     checkpoints={k:v for k,v in checkpoints.items() if not v.done()}
      d["paper_position"]=paper.position_context(execute,slug)
-     await confirm(client,slug,phase,direction,flip,score,d,price_to_beat=target,seconds_left=round(left15))
+     if ai_task is None or ai_task.done():
+      ai_task=asyncio.create_task(confirm(client,slug,phase,direction,flip,score,json.loads(json.dumps(d)),price_to_beat=target,seconds_left=round(left15)))
+      track_prediction(ai_task)
     else:
      for key in ("phase","seconds_left","score"): state.pop(key,None)
      state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No verified Polymarket US 15-minute market: "+str(reason15))
@@ -640,7 +656,11 @@ async def loop():
     state["alerts"]=health_checks(state,public_state(),DB,db_error=db_error)
    state["last_cycle_duration_seconds"]=round(time.monotonic()-cycle_started,2)
    state["updated"]=datetime.now(timezone.utc).isoformat()
-   await asyncio.sleep(max(0, POLL - (time.monotonic() - cycle_started)))
+   try:await asyncio.sleep(max(0, POLL - (time.monotonic() - cycle_started)))
+   except asyncio.CancelledError:
+    if ai_task is not None:
+     ai_task.cancel()
+    raise
 async def paper_worker():
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchPaperSandbox/1.0"}) as client:
   while True:
@@ -669,7 +689,9 @@ async def lifespan(app):
  task.cancel()
  history_task.cancel()
  context_task.cancel()
- for running in (task,history_task,context_task):
+ pending_predictions=list(_prediction_tasks)
+ for pending in pending_predictions:pending.cancel()
+ for running in (task,history_task,context_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
@@ -795,7 +817,7 @@ def brti_chart():
    return {"status":"unavailable","points":[],"reason":"No current 15-minute BRTI reference observations"}
   age=time.time()-float(chart.get("observed_epoch") or 0)
   points=chart.get("points") or []
-  return {"status":"fresh" if points and age<=20 and float(chart.get("sample_age_seconds") if chart.get("sample_age_seconds") is not None else 999)<=15 else "stale" if points else "unavailable",
+  return {"status":"fresh" if points and age>=0 and age+float(chart.get("sample_age_seconds") if chart.get("sample_age_seconds") is not None else 999)<=15 else "stale" if points else "unavailable",
           "market":market,"points":points,"source":"Polymarket US BTC reference / BRTI",
           "official_target":number((state.get("target_behavior") or {}).get("target")),
           "observed_age_seconds":round(age,1),
@@ -828,7 +850,7 @@ _reference_candle_lock = asyncio.Lock()
 async def candle_proxy():
  """Polymarket US reference OHLC; no exchange fallback or fabricated volume."""
  async with _reference_candle_lock:
-  if time.monotonic()-_reference_candle_cache["at"]<5 and _reference_candle_cache["payload"]:
+  if time.monotonic()-_reference_candle_cache["at"]<5 and _reference_candle_cache["payload"] and int(time.time()//60)==_reference_candle_cache.get("minute"):
    return _reference_candle_cache["payload"]
   source="Polymarket US BTC reference"
   try:
@@ -865,7 +887,7 @@ async def candle_proxy():
    else:code="INVALID_FEED_DATA"
    payload={"source":source,"candles":[],"status":"unavailable","volume_available":False,
     "error_code":code,"error":"Polymarket reference feed: "+code}
-  _reference_candle_cache.update(at=time.monotonic(),payload=payload)
+  _reference_candle_cache.update(at=time.monotonic(),payload=payload,minute=int(time.time()//60))
   return payload
 
 @app.get("/api/status")
