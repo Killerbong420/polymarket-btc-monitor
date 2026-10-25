@@ -110,6 +110,7 @@ h1{font-size:20px;margin:6px 0}
 .research-table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}.research-table th,.research-table td{padding:9px 8px;text-align:left;border-bottom:1px solid #2a3e55}.research-scroll{overflow-x:auto;margin-top:10px}.research-alert{padding:9px 0;border-bottom:1px solid #2a3e55}.research-headline{padding:8px 0}.research-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0}.research-controls label{font-size:12px;color:#aab8d1}.research-controls input,.research-controls select{width:100%;min-width:0;background:#0d1526;color:white;border:1px solid #354764;border-radius:8px;padding:10px;margin-top:5px}#researchRecent details{padding:9px 0;border-bottom:1px solid #2a3e55}
 
 .pm-trend-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:10px}.pm-trend-grid>div{background:#0a192a;border:1px solid #2b435a;border-radius:10px;padding:10px 8px}.pm-trend-grid span{display:block;color:#9fb2c7;font-size:10px}.pm-trend-grid strong{display:block;margin-top:4px;font-size:12px}.pm-trend-up{color:#59e3a3}.pm-trend-down{color:#ff929c}.pm-trend-flat{color:#e7c16f}@media(max-width:520px){.pm-trend-grid strong{font-size:11px}}
+.pm-patterns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}.pm-patterns>div{background:#0b1c2d;border:1px solid #38536c;border-radius:11px;padding:10px}.pm-patterns span{font-size:10px;color:#9db5cc;display:block}.pm-patterns strong{font-size:12px;color:#e3f0ff;display:block;margin-top:5px}
 #pmChartCard{border-color:#345e6f;background:#101d2e;margin-top:9px}
 #pmOddsCanvas{width:100%;height:300px;display:block;background:#0c1727;border:1px solid #2b435a;border-radius:10px;margin:10px 0 6px}
 #pmChartCard .grid{margin-top:9px}
@@ -144,6 +145,7 @@ body{max-width:940px}
 <section class="card" id="brtiHero" aria-label="Bitcoin BRTI reference index chart">
 <div class="brti-head"><div><div class="brti-eyebrow">BITCOIN REFERENCE · BRTI</div><h2>BTC / USD <span class="brti-source">Reference index</span></h2></div><span class="status" id="brtiStatus">CONNECTING</span></div>
 <div class="brti-current"><strong id="brtiPrice">—</strong><span id="brtiTrendTag" class="status">AWAITING INDEX DATA</span></div>
+<div class="pm-patterns"><div><span>BTC chart formation</span><strong id="brtiPattern">Collecting reference ticks</strong></div><div><span>Pattern confirmation</span><strong id="brtiPatternConfirm">Not confirmed</strong></div></div>
 <div class="brti-stats"><div><span>Short-term trend</span><strong id="brtiTrend">—</strong></div><div><span>Observed support</span><strong id="brtiSupport">—</strong></div><div><span>Observed resistance</span><strong id="brtiResistance">—</strong></div></div>
 <canvas id="brtiCanvas" role="img" aria-label="BRTI Bitcoin reference-price trend, recent observations and official price-to-beat line"></canvas>
 <div class="brti-legend"><span><i class="brti-key" style="background:#67c5ff"></i>BRTI reference</span><span><i class="brti-key" style="background:#a7f0cc"></i>Smoothed trend</span><span><i class="brti-key" style="background:#f5c36d"></i>Price to beat</span></div>
@@ -159,7 +161,8 @@ body{max-width:940px}
   <div class="card"><div class="label">UP · buy ask</div><div class="value up" id="pmUpQuote">—</div></div>
   <div class="card"><div class="label">DOWN · buy ask</div><div class="value down" id="pmDownQuote">—</div></div>
  </div>
- <div class="pm-trend-grid"><div><span>UP odds trend</span><strong id="pmUpTrend">—</strong></div><div><span>DOWN odds trend</span><strong id="pmDownTrend">—</strong></div><div><span>Trend window</span><strong>Last 60 seconds</strong></div></div>
+ <div class="pm-patterns"><div><span>UP contract pattern</span><strong id="pmUpPattern">Collecting quotes</strong></div><div><span>DOWN contract pattern</span><strong id="pmDownPattern">Collecting quotes</strong></div></div>
+<div class="pm-trend-grid"><div><span>UP odds trend</span><strong id="pmUpTrend">—</strong></div><div><span>DOWN odds trend</span><strong id="pmDownTrend">—</strong></div><div><span>Trend window</span><strong>Last 60 seconds</strong></div></div>
 <canvas id="pmOddsCanvas" aria-label="Polymarket 15-minute UP and DOWN contract ask prices only" role="img"></canvas>
 <div class="row small" style="gap:13px;flex-wrap:wrap"><span style="color:#9df5d0">━━ UP trend average</span><span style="color:#ffbbc3">━━ DOWN trend average</span><span style="color:#e7c16f">- - trend support / resistance</span></div>
  <div class="row small" style="gap:15px"><span class="up">● UP contract ask</span><span class="down">● DOWN contract ask</span></div>
@@ -328,6 +331,27 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
 const $=id=>document.getElementById(id),canvas=$('pmOddsCanvas');
 let latest=null,busy=false;
 const fmt=p=>Number.isFinite(Number(p))?(Number(p)*100).toFixed(1)+'¢':'—';
+function detectPattern(values){
+ // Approximate price-formation heuristic, not a calibrated signal.
+ if(values.length<12)return {name:'INSUFFICIENT DATA',confirmation:'Need 12+ observations'};
+ const n=values.length,third=Math.max(4,Math.floor(n/3));
+ const early=values.slice(0,third),middle=values.slice(third,2*third),late=values.slice(-third);
+ const avg=a=>a.reduce((x,y)=>x+y,0)/a.length;
+ const a=avg(early),b=avg(middle),c=avg(late);
+ const range=Math.max(...values)-Math.min(...values);
+ if(range<.006)return {name:'SIDEWAYS / RANGE',confirmation:'Low movement'};
+ const impulse=b-a,pullback=c-b,net=c-a;
+ const threshold=Math.max(.008,range*.20);
+ if(impulse< -threshold&&pullback>threshold*.25&&pullback<Math.abs(impulse)*.75)
+  return {name:'BEARISH FLAG · POSSIBLE',confirmation:'Downward impulse + partial rebound'};
+ if(impulse>threshold&&pullback< -threshold*.25&&Math.abs(pullback)<impulse*.75)
+  return {name:'BULLISH FLAG · POSSIBLE',confirmation:'Upward impulse + partial pullback'};
+ if(net>threshold&&c>b&&b>a)return {name:'UPTREND',confirmation:'Higher interval averages'};
+ if(net< -threshold&&c<b&&b<a)return {name:'DOWNTREND',confirmation:'Lower interval averages'};
+ if(Math.abs(net)<threshold)return {name:'CONSOLIDATION',confirmation:'No confirmed breakout'};
+ return {name:net>0?'RECOVERY / REVERSAL WATCH':'WEAKENING / REVERSAL WATCH',confirmation:'Requires follow-through'};
+}
+
 function plot(){
  const rect=canvas.getBoundingClientRect(),w=rect.width,h=rect.height;
  if(w<50)return;
@@ -340,6 +364,7 @@ function plot(){
  ctx.font='11px system-ui';
  if(points.length<2){
   $('pmUpTrend').textContent='COLLECTING';$('pmDownTrend').textContent='COLLECTING';
+  $('pmUpPattern').textContent='COLLECTING';$('pmDownPattern').textContent='COLLECTING';
   ctx.fillStyle='#a9bdd5';ctx.fillText(d.status==='unavailable'?'No verified 15-minute market yet':'Waiting for Polymarket contract-price samples…',15,h/2);
   return;
  }
@@ -389,6 +414,12 @@ function plot(){
   for(const level of [support,resistance]){ctx.beginPath();ctx.moveTo(x(values[0].epoch),y(level));ctx.lineTo(x(values[values.length-1].epoch),y(level));ctx.stroke()}
   ctx.setLineDash([]);ctx.globalAlpha=1;
  }
+ for(const side of [{key:'up_ask',id:'pmUpPattern'},{key:'down_ask',id:'pmDownPattern'}]){
+  const series=points.filter(p=>Number.isFinite(p[side.key])).slice(-90);
+  const result=detectPattern(series.map(p=>p[side.key]));
+  $(side.id).textContent=result.name;
+  $(side.id).title=result.confirmation;
+ }
  const last=points[points.length-1],age=Math.round(Date.now()/1000-last.epoch);
  $('pmChartInfo').textContent=points.length+' Polymarket quote samples · latest '+age+'s ago · last UP '+fmt(last.up_ask)+' · DOWN '+fmt(last.down_ask)+' · 15-minute market only';
 }
@@ -424,6 +455,12 @@ let current={points:[],status:'unavailable'},loading=false;
 const money=n=>Number.isFinite(n)?'</html>
 +n.toLocaleString('en-US',{maximumFractionDigits:2,minimumFractionDigits:2}):'—';
 const finite=n=>typeof n==='number'&&Number.isFinite(n);
+function detectBRTIPattern(points){
+ const values=points.filter(p=>Array.isArray(p)&&Number.isFinite(p[1])).slice(-90).map(p=>p[1]);
+ if(values.length<12)return {name:'INSUFFICIENT DATA',confirmation:'Need 12+ ticks'};
+ const scaled=values.map(v=>v/values[0]);
+ return detectPattern(scaled);
+}
 function calculate(points){
  const prices=points.map(x=>x[1]);
  if(prices.length<3)return null;
@@ -443,6 +480,9 @@ function paint(){
  canvas.width=Math.round(w*sc);canvas.height=Math.round(h*sc);ctx.setTransform(sc,0,0,sc,0,0);
  ctx.fillStyle='#0c1829';ctx.fillRect(0,0,w,h);
  const points=(current.points||[]).filter(x=>Array.isArray(x)&&finite(x[0])&&finite(x[1])&&x[1]>0);
+ const formation=detectBRTIPattern(points);
+ el('brtiPattern').textContent=formation.name;
+ el('brtiPatternConfirm').textContent=formation.confirmation;
  const trend=calculate(points);
  el('brtiTrend').textContent=trend?trend.trend:'—';
  el('brtiSupport').textContent=trend?money(trend.support):'—';
