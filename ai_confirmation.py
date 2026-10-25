@@ -131,15 +131,48 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     """One bounded AI review at the halfway FINAL checkpoint; never invent missing observations."""
     fallback={"direction":indicator_direction,"source":"INDICATORS_FALLBACK","reason":"AI unavailable; indicator decision retained"}
     key=os.getenv("OPENAI_API_KEY")
-    if not key: return {**fallback,"reason":"OPENAI_API_KEY not configured"}
-    snapshot={"market":market,"duration_minutes":duration,"indicator_direction":indicator_direction,
-        "score":score,"price_to_beat":price_to_beat,
-        "spot_price":external.get("price"),"momentum_pct":external.get("momentum_pct"),
-        "long_momentum_pct":external.get("long_momentum_pct"),"volume_ratio":external.get("volume_ratio"),
-        "chart":external.get("chart"),"chart_pattern":external.get("chart_pattern"),
-        "signal_quality":external.get("signal_quality"),
+    if not key: return {**fallback,"reason":"OPENAI_API_KEY not configured","evidence_available":False}
+    try:
+        target=float(price_to_beat) if price_to_beat is not None else None
+        if target is not None and target<=0: target=None
+    except (TypeError,ValueError): target=None
+    spot=external.get("price")
+    try:
+        spot_delta_pct=round((float(spot)/target-1)*100,5) if target and spot is not None else None
+    except (ValueError,TypeError,ZeroDivisionError): spot_delta_pct=None
+    chart=external.get("chart") or {}
+    pattern=external.get("chart_pattern") or {}
+    quality=external.get("signal_quality") or {}
+    missing=[]
+    if target is None: missing.append("official_price_to_beat")
+    if spot is None: missing.append("spot_price")
+    if not chart: missing.append("technical_chart_indicators")
+    if not pattern: missing.append("chart_pattern")
+    if not external.get("pressure_available"): missing.append("verified_buy_sell_pressure")
+    if external.get("volume_ratio") is None: missing.append("volume_ratio")
+    if external.get("candle_age_seconds") is None: missing.append("candle_freshness")
+    snapshot={
+        "market":market,"duration_minutes":duration,
+        "indicator_direction":indicator_direction,"indicator_score":score,
+        "official_polymarket_price_to_beat":target,
+        "official_settlement_index":"BRTI (not Coinbase/Kraken spot)",
+        "spot_price":spot,"spot_source":external.get("source"),
+        "spot_vs_official_target_pct_proxy_only":spot_delta_pct,
+        "fast_momentum_pct":external.get("momentum_pct"),
+        "long_momentum_pct":external.get("long_momentum_pct"),
+        "volume_ratio":external.get("volume_ratio"),
+        "buy_sell_pressure":external.get("pressure") if external.get("pressure_available") else None,
+        "chart":{"ema9":chart.get("ema9"),"ema21":chart.get("ema21"),
+                 "ema_trend":chart.get("ema_trend"),"rsi14":chart.get("rsi14"),
+                 "atr14_pct":chart.get("atr14_pct")},
+        "pattern":{"type":pattern.get("pattern"),"bias":pattern.get("bias"),
+                   "support":pattern.get("support"),"resistance":pattern.get("resistance"),
+                   "range_pct":pattern.get("range_pct"),
+                   "volume_spike":pattern.get("volume_spike"),
+                   "note":pattern.get("note")},
+        "signal_quality":quality,
         "candle_age_seconds":external.get("candle_age_seconds"),
-        "source":external.get("source")}
+        "missing_evidence":missing}
     schema={"type":"object","properties":{"direction":{"type":"string","enum":["UP","DOWN"]},
         "reason":{"type":"string"},"confidence":{"type":"string","enum":["LOW","MEDIUM","HIGH"]}},
         "required":["direction","reason","confidence"],"additionalProperties":False}
@@ -148,6 +181,10 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "You may disagree with the indicator direction when concrete evidence supports it. "
         "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. "
         "When evidence is weak or conflicting, still choose the more supported direction and set confidence LOW; explicitly explain the uncertainty. This is a research forecast, not a trade instruction. "
+        "Consider every supplied evidence field, contradictions, proximity to the official target, "
+        "freshness and missing evidence. Spot vs BRTI target is a proxy, not the settlement index. "
+        "Do not claim unavailable buy/sell pressure or other missing data. "
+        "Choose UP or DOWN even when uncertain, marking confidence LOW and explaining the most important factors. "
         "Keep the reason under 160 characters."),
         "input":json.dumps(snapshot,default=str,separators=(",",":")),
         "text":{"format":{"type":"json_schema","name":"btc_halfway_final","strict":True,"schema":schema}},
@@ -164,6 +201,8 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         if decision.get("direction") not in ("UP","DOWN"): raise ValueError("Invalid direction")
         return {"direction":decision["direction"],"source":"AI_REVIEW",
             "reason":str(decision.get("reason",""))[:160],
-            "ai_direction":decision["direction"],"ai_confidence":decision.get("confidence","LOW")}
+            "ai_direction":decision["direction"],"ai_confidence":decision.get("confidence","LOW"),
+            "evidence":snapshot}
     except Exception as exc:
-        return {**fallback,"reason":"AI request unavailable ("+type(exc).__name__+")"}
+        return {**fallback,"reason":"AI request unavailable ("+type(exc).__name__+")",
+                "evidence":snapshot}
