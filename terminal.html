@@ -206,11 +206,12 @@ for(const [id,key] of [['candleToggle','candles'],['emaToggle','ema'],['bbToggle
 const fmt=v=>'$'+Math.round(v).toLocaleString('en-US');
 function draw(){
 const rect=canvas.parentElement.getBoundingClientRect();if(rect.width<50)return;
-const w=rect.width,h=rect.height,scale=Math.min(devicePixelRatio||1,2);canvas.width=w*scale;canvas.height=h*scale;const c=canvas.getContext('2d');c.scale(scale,scale);
+const w=rect.width,h=rect.height,scale=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(w*scale);canvas.height=Math.round(h*scale);const c=canvas.getContext('2d');if(!c)return;c.setTransform(scale,0,0,scale,0,0);
 c.fillStyle='#0d1320';c.fillRect(0,0,w,h);
 const mins=Number(document.querySelector('#chart15.active')?'15':document.querySelector('#chart30.active')?'30':'60');
 const end=Date.now(),start=end-mins*60000;
-const bars=state.bars.filter(b=>b.t>=start-60000&&b.t<=end+60000).slice(-65).map(b=>({...b}));
+let bars=state.bars.filter(b=>b.t>=start-60000&&b.t<=end+60000).slice(-65).map(b=>({...b}));
+if(!bars.length&&state.bars.length)bars=state.bars.slice(-Math.min(mins,state.bars.length)).map(b=>({...b}));
 if(state.live&&bars.length){let last=bars[bars.length-1];if(end-last.t<120000){last.h=Math.max(last.h,state.live);last.l=Math.min(last.l,state.live);last.c=state.live}}
 if(!bars.length){c.fillStyle='#a4b6cb';c.font='14px system-ui';c.fillText('Loading 1-minute candlesticks…',18,h/2);return}
 const left=10,right=76,top=22,bottom=30,volH=state.volume?Math.min(80,h*.21):0,chartH=h-top-bottom-volH-8,chartW=w-left-right;
@@ -239,7 +240,7 @@ async function getBars(){
   if(!state.bars.length){
    const rect=canvas.parentElement.getBoundingClientRect(),scale=Math.min(window.devicePixelRatio||1,2);
    canvas.width=Math.max(1,Math.floor(rect.width*scale));canvas.height=Math.max(1,Math.floor(rect.height*scale));
-   const ctx=canvas.getContext('2d');ctx.scale(scale,scale);ctx.fillStyle='#0d1320';ctx.fillRect(0,0,rect.width,rect.height);
+   const ctx=canvas.getContext('2d');if(!ctx)return;ctx.setTransform(scale,0,0,scale,0,0);ctx.fillStyle='#0d1320';ctx.fillRect(0,0,rect.width,rect.height);
    ctx.fillStyle='#e6b365';ctx.font='13px system-ui';ctx.fillText('Candles unavailable: '+String(e.message).slice(0,65),12,55);
   }
  }
