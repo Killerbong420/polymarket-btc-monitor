@@ -412,7 +412,7 @@ async def settle(client):
       "title":str(market.get("title") or "")[:160],
       "subtitle":str(market.get("subtitle") or "")[:160],
       "outcomes":str(market.get("outcomes") or "")[:160],
-      "asset_price_terms":str(market.get("assetPriceTerms") or "")[:350]}})
+      "asset_price_terms":str(market.get("assetPriceTerms") or "")[:350]})
     unresolved("official_winner_mapping_unverified")
     continue
    execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
