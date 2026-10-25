@@ -140,14 +140,14 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "signal_quality":external.get("signal_quality"),
         "candle_age_seconds":external.get("candle_age_seconds"),
         "source":external.get("source")}
-    schema={"type":"object","properties":{"direction":{"type":"string","enum":["UP","DOWN","WAIT"]},
+    schema={"type":"object","properties":{"direction":{"type":"string","enum":["UP","DOWN"]},
         "reason":{"type":"string"},"confidence":{"type":"string","enum":["LOW","MEDIUM","HIGH"]}},
         "required":["direction","reason","confidence"],"additionalProperties":False}
     payload={"model":MODEL,"store":False,"instructions":(
-        "At the halfway checkpoint, review the provided BTC market observations and suggest UP, DOWN or WAIT. "
+        "At the halfway checkpoint, review the provided BTC market observations and make exactly one binary research forecast: UP or DOWN. Never output WAIT.  "
         "You may disagree with the indicator direction when concrete evidence supports it. "
         "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. "
-        "Treat stale, thin or conflicting data cautiously. This is a research forecast, not a trade instruction. "
+        "When evidence is weak or conflicting, still choose the more supported direction and set confidence LOW; explicitly explain the uncertainty. This is a research forecast, not a trade instruction. "
         "Keep the reason under 160 characters."),
         "input":json.dumps(snapshot,default=str,separators=(",",":")),
         "text":{"format":{"type":"json_schema","name":"btc_halfway_final","strict":True,"schema":schema}},
@@ -161,10 +161,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         chunks=[p.get("text","") for x in body.get("output",[]) if x.get("type")=="message"
                 for p in x.get("content",[]) if p.get("type")=="output_text"]
         decision=json.loads("".join(chunks))
-        if decision.get("direction") not in ("UP","DOWN","WAIT"): raise ValueError("Invalid direction")
-        if decision["direction"]=="WAIT":
-            return {**fallback,"reason":"AI abstained: "+str(decision.get("reason",""))[:140],
-                "ai_direction":"WAIT","ai_confidence":decision.get("confidence","LOW")}
+        if decision.get("direction") not in ("UP","DOWN"): raise ValueError("Invalid direction")
         return {"direction":decision["direction"],"source":"AI_REVIEW",
             "reason":str(decision.get("reason",""))[:160],
             "ai_direction":decision["direction"],"ai_confidence":decision.get("confidence","LOW")}
