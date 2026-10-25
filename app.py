@@ -820,28 +820,46 @@ def polymarket_chart():
           "round_end_epoch":start+900,"latest_quote":quote if fresh else None,
           "note":"Quoted UP ask and complementary DOWN ask (1 - UP bid), NOT BTC/USD. Top-of-book indications, not guaranteed executable fills."}
 
+_reference_candle_cache = {"at": 0.0, "payload": None}
+_reference_candle_lock = asyncio.Lock()
+
 @app.get("/api/candles")
 async def candle_proxy():
- """Same-origin 1m BTC candles for Safari when exchange CORS is blocked."""
- async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"},timeout=10) as client:
-  errors=[]
+ """Polymarket US reference OHLC; no exchange fallback or fabricated volume."""
+ async with _reference_candle_lock:
+  if time.monotonic()-_reference_candle_cache["at"]<5 and _reference_candle_cache["payload"]:
+   return _reference_candle_cache["payload"]
+  source="Polymarket US BTC reference"
   try:
-   r=await client.get("https://api.exchange.coinbase.com/products/BTC-USD/candles",params={"granularity":60})
-   r.raise_for_status()
-   raw=r.json()
-   bars=[[float(x[0]),float(x[1]),float(x[2]),float(x[3]),float(x[4]),float(x[5])] for x in raw if isinstance(x,list) and len(x)>=6]
-   if bars:return {"source":"Coinbase","candles":bars}
-  except Exception as e: errors.append("Coinbase: "+str(e)[:120])
-  try:
-   r=await client.get("https://api.kraken.com/0/public/OHLC",params={"pair":"XBTUSD","interval":1})
-   r.raise_for_status()
-   raw=r.json()
-   if raw.get("error"):raise ValueError(str(raw["error"]))
-   key=next(k for k in raw["result"] if k!="last")
-   bars=[[float(x[0]),float(x[3]),float(x[2]),float(x[1]),float(x[4]),float(x[6])] for x in raw["result"][key]]
-   if bars:return {"source":"Kraken","candles":bars}
-  except Exception as e:errors.append("Kraken: "+str(e)[:120])
-  return {"source":"unavailable","candles":[],"error":"; ".join(errors)}
+   async with httpx.AsyncClient(timeout=8) as client:
+    r=await client.get("https://gateway.polymarket.us/v1/asset-prices/history",params={
+     "assets":"crypto:btc","from":int(time.time())-7200,"to":0,"bucket":"ASSET_PRICE_BUCKET_1M"})
+    r.raise_for_status()
+    series=next(x for x in r.json().get("series",[]) if
+     x.get("asset",{}).get("symbol")=="btc" and
+     x.get("asset",{}).get("assetClass")=="ASSET_CLASS_CRYPTO" and x.get("currency")=="USD")
+    import math
+    bars={}
+    for x in series.get("candles",[]):
+     if int(x.get("tickCount") or 0)<=0:continue
+     try:
+      t,lo,hi,op,cl=[float(x[k]) for k in ("timestamp","low","high","open","close")]
+     except (KeyError,ValueError,TypeError):continue
+     if not all(math.isfinite(v) for v in (t,lo,hi,op,cl)):continue
+     if t%60 or t>time.time() or min(lo,hi,op,cl)<=0 or lo>min(op,cl) or hi<max(op,cl):continue
+     bars[t]=[t,lo,hi,op,cl,0]
+    candles=[bars[t] for t in sorted(bars)]
+    if not candles:raise ValueError("No published reference candles")
+    # Candle bucket timestamps bound freshness; the API has no last-tick timestamp.
+    age=max(0,time.time()-(candles[-1][0]+60))
+    payload={"source":source,"candles":candles,"status":"fresh" if age<=15 else "stale",
+     "volume_available":False,"bucket_age_seconds":round(age,1),
+     "note":"Published reference OHLC. No trading volume; zero-tick buckets omitted."}
+  except Exception as e:
+   payload={"source":source,"candles":[],"status":"unavailable","volume_available":False,
+    "error":"Reference candles unavailable: "+type(e).__name__}
+  _reference_candle_cache.update(at=time.monotonic(),payload=payload)
+  return payload
 
 @app.get("/api/status")
 def status():
@@ -855,4 +873,5 @@ def status():
 @app.get("/",response_class=HTMLResponse)
 def home():
  return Path(__file__).with_name("terminal.html").read_text(encoding="utf-8")
+
 
