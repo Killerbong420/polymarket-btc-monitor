@@ -231,35 +231,60 @@ def verified_winner(m,settlement):
  return None
 
 async def settle(client):
+ # Resolve the original event when the market-slug endpoint is unavailable.
+ # Never infer official outcomes from Coinbase spot candles.
+ from datetime import timedelta
  pending=execute("SELECT DISTINCT market FROM signals WHERE result='PENDING'",fetch=True)
  diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[],"reasons":{}}
  def unresolved(reason):
   diagnostic["unresolved"]+=1
   diagnostic["reasons"][reason]=diagnostic["reasons"].get(reason,0)+1
- for (slug,) in pending[:20]:
+ for (slug,) in pending[:30]:
   try:
-   base="https://gateway.polymarket.us/v1/markets/"+slug
-   diagnostic["checked"]+=1
-   mr=await client.get(base,timeout=8)
-   if mr.status_code!=200:
-    unresolved("market_http_"+str(mr.status_code))
+   # The US slug embeds the start time, e.g. cpc-btc-updown-5m-2026-10-25-0525z.
+   stamp=slug.split("btc-updown-5m-",1)[-1]
+   start=datetime.strptime(stamp,"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc)
+   if datetime.now(timezone.utc)<start+timedelta(minutes=6):
+    unresolved("round_not_yet_settled")
     continue
-   payload=mr.json()
-   market=payload.get("market",payload) if isinstance(payload,dict) else None
-   if not isinstance(market,dict):
-    unresolved("market_payload_invalid")
+   diagnostic["checked"]+=1
+   gateway="https://gateway.polymarket.us"
+   event_slug="btc-updown-5m-"+stamp
+   market=None
+   # Event lookup is the same discovery path used to find the live contract.
+   er=await client.get(gateway+"/v1/events/slug/"+event_slug,timeout=10)
+   if er.status_code==200:
+    ep=er.json()
+    ev=ep.get("event",ep) if isinstance(ep,dict) else {}
+    contracts=ev.get("markets",[]) if isinstance(ev,dict) else []
+    if not contracts and isinstance(ep,dict): contracts=ep.get("markets",[])
+    for candidate in contracts if isinstance(contracts,list) else []:
+     if isinstance(candidate,dict) and str(candidate.get("slug") or candidate.get("marketSlug") or "")==slug:
+      market=candidate
+      break
+   if market is None:
+    for path in ("/v1/markets/"+slug,"/v1/market/slug/"+slug):
+     mr=await client.get(gateway+path,timeout=10)
+     if mr.status_code==200:
+      mp=mr.json()
+      candidate=mp.get("market",mp) if isinstance(mp,dict) else None
+      if isinstance(candidate,dict) and str(candidate.get("slug") or candidate.get("marketSlug") or "")==slug:
+       market=candidate
+       break
+   if market is None:
+    unresolved("official_market_unavailable_event_"+str(er.status_code))
     continue
    status=str(market.get("status") or market.get("marketStatus") or "").upper()
    if "RESOLVED" not in status:
-    unresolved("market_not_resolved_"+(status or "unknown")[:35])
+    unresolved("official_market_not_resolved_"+(status or "unknown")[:30])
     continue
-   sr=await client.get(base+"/settlement",timeout=8)
+   sr=await client.get(gateway+"/v1/markets/"+slug+"/settlement",timeout=10)
    if sr.status_code!=200:
-    unresolved("settlement_http_"+str(sr.status_code))
+    unresolved("official_settlement_http_"+str(sr.status_code))
     continue
    win=verified_winner(market,sr.json())
    if win is None:
-    unresolved("resolved_but_winner_mapping_unverified")
+    unresolved("official_winner_mapping_unverified")
     continue
    execute("UPDATE signals SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    diagnostic["verified"]+=1
