@@ -408,6 +408,26 @@ def position_context(execute,market):
             'last_exit_mark_cents':mark,'net_liquidation_return_pct':round(100*(mark-cost)/cost,2),
             'mark_age_seconds':round(time.time()-epoch,1) if epoch else None,'opened_at':created}
 
+def favorable_trend_strength(signal,direction):
+    """Conservative evidence score, not a calibrated probability.
+    Only recent, independently observed market data can extend a paper winner."""
+    if not signal or signal.get('status')!='ready':return 0
+    age=time.time()-float(signal.get('captured_epoch') or 0)
+    if age<0 or age>60 or signal.get('verdict')!=direction:return 0
+    snapshot=signal.get('snapshot') or {}
+    if (snapshot.get('reference_price') or {}).get('status')!='fresh':return 0
+    chart=snapshot.get('chart_pattern') or {}
+    pattern=str(chart.get('pattern') or chart.get('trend') or chart.get('label') or '').upper()
+    if 'DOWNTREND' in pattern or 'DOWN' in pattern:chart_direction='DOWN'
+    elif 'UPTREND' in pattern or 'UP' in pattern:chart_direction='UP'
+    else:chart_direction=None
+    if chart_direction!=direction:return 0
+    score=1
+    if signal.get('confidence')=='HIGH':score+=1
+    if signal.get('confidence')=='MEDIUM':score+=1
+    return score
+
+
 async def manage_exits(client,execute,connect,postgres,live_signal=None):
     # Keep the minimum 8% net target on existing paper positions.
     execute("UPDATE paper_orders SET threshold=? WHERE kind='TAKE_PROFIT' AND position_id IN (SELECT id FROM paper_positions WHERE status='OPEN') AND threshold<?",
@@ -430,18 +450,23 @@ async def manage_exits(client,execute,connect,postgres,live_signal=None):
         # Aim for 15% only while an 8%-plus winning position continues improving.
         # Protect profits by selling after a 2.5 percentage-point retracement.
         # All comparisons use full-exit proceeds net of modeled fees and slippage.
+        live_signal=live_signal or {}
+        trend_score=favorable_trend_strength(live_signal,direction)
+        # At 8% net, only stretch to 15% with a fresh matching chart trend
+        # and AI directional forecast. Otherwise take the observed profit.
+        stretch_allowed=trend_score>=2
         stretch_hit=roi is not None and roi>=RISK['stretch_profit_pct']
+        floor_exit=roi is not None and roi>=RISK['take_profit_pct'] and not stretch_allowed
         trailing_exit=(roi is not None and peak>=RISK['take_profit_pct'] and
                        roi<=peak-RISK['profit_trail_pct'])
-        # A quick gain without ongoing momentum is still banked at the 8% floor.
         short_time_exit=(roi is not None and roi>=RISK['take_profit_pct'] and
                          time.time()>=market_start(market)+900-RISK['exit_before_expiry_seconds']-30)
 
-        live_signal=live_signal or {};position=(live_signal.get('snapshot') or {}).get('paper_position') or {}
+        position=(live_signal.get('snapshot') or {}).get('paper_position') or {}
         opp=live_signal.get('profit_opportunity') or {};fresh=live_signal.get('status')=='ready' and 0<=time.time()-live_signal.get('captured_epoch',0)<=60 and position.get('position_id')==ident
         ai_profit=fresh and opp.get('position_action')=='TAKE_PROFIT' and roi is not None and roi>0
         ai_risk=fresh and opp.get('position_action')=='EXIT_RISK'
-        kind='TIME_EXIT' if forced else 'STOP_LOSS' if ai_risk or stop_working or (roi is not None and roi<=-terms.get('STOP_LOSS',(RISK['stop_loss_pct'],''))[0]) else 'TAKE_PROFIT' if ai_profit or stretch_hit or trailing_exit or short_time_exit else None
+        kind='TIME_EXIT' if forced else 'STOP_LOSS' if ai_risk or stop_working or (roi is not None and roi<=-terms.get('STOP_LOSS',(RISK['stop_loss_pct'],''))[0]) else 'TAKE_PROFIT' if ai_profit or floor_exit or stretch_hit or trailing_exit or short_time_exit else None
         if kind is None:continue
         with connect() as c:
             cur,account=locked_account(c,postgres)
