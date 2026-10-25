@@ -119,30 +119,46 @@ async def market_data(client):
  return None
 async def spot_data(client):
  errors=[]
- for host in ("https://api.binance.com","https://api.binance.us"):
-  try:
-   r=await client.get(host+"/api/v3/klines",params={"symbol":"BTCUSDT","interval":"1m","limit":30},timeout=10)
-   r.raise_for_status()
-   candles=r.json()
-   if len(candles)<20: raise ValueError("insufficient candles")
-   candles=candles[:-1] # Ignore incomplete candle
-   closes=[float(x[4]) for x in candles]
-   vols=[float(x[5]) for x in candles]
-   buy=[float(x[9]) for x in candles]
-   recent=sum(vols[-5:])
-   if recent<0.05: raise ValueError("BTC volume too thin")
-   pressure=(2*sum(buy[-5:])/recent-1) if recent else 0
-   momentum=(closes[-1]/closes[-6]-1)*100
-   long_momentum=(closes[-1]/closes[-16]-1)*100
-   baseline=sum(vols[-20:-5])/3
-   if baseline<0.05: raise ValueError("BTC baseline volume too thin")
-   volume_ratio=min(10.0,recent/baseline)
-   return {"price":closes[-1],"momentum_pct":round(momentum,4),"long_momentum_pct":round(long_momentum,4),"pressure":round(pressure,3),"volume_ratio":round(volume_ratio,2),"source":host}
-  except Exception as e: errors.append(str(e))
+ # Coinbase public BTC-USD candles: [timestamp, low, high, open, close, volume].
+ # No taker-buy breakdown: pressure is neutral, not fabricated.
+ try:
+  r=await client.get("https://api.exchange.coinbase.com/products/BTC-USD/candles",params={"granularity":60},timeout=12)
+  r.raise_for_status()
+  raw=r.json()
+  candles=sorted([x for x in raw if isinstance(x,list) and len(x)>=6],key=lambda x:x[0])
+  # Exclude the current incomplete minute.
+  candles=[x for x in candles if float(x[0])+60<=time.time()]
+  if len(candles)<21: raise ValueError("Coinbase insufficient completed candles")
+  candles=candles[-30:]
+  closes=[float(x[4]) for x in candles]
+  vols=[float(x[5]) for x in candles]
+  recent=sum(vols[-5:])
+  baseline=sum(vols[-20:-5])/3
+  if recent<0.05 or baseline<0.05: raise ValueError("Coinbase BTC volume too thin")
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+ except Exception as e: errors.append("Coinbase: "+str(e)[:150])
+ # Kraken OHLC uses BTC/USD minute candles; last candle is incomplete.
+ try:
+  r=await client.get("https://api.kraken.com/0/public/OHLC",params={"pair":"XBTUSD","interval":1},timeout=12)
+  r.raise_for_status()
+  payload=r.json()
+  if payload.get("error"): raise ValueError(str(payload["error"]))
+  key=next(k for k in payload["result"] if k!="last")
+  candles=sorted(payload["result"][key],key=lambda x:float(x[0]))[:-1]
+  if len(candles)<21: raise ValueError("Kraken insufficient candles")
+  candles=candles[-30:]
+  closes=[float(x[4]) for x in candles]
+  vols=[float(x[6]) for x in candles]
+  recent=sum(vols[-5:])
+  baseline=sum(vols[-20:-5])/3
+  if recent<0.05 or baseline<0.05: raise ValueError("Kraken BTC volume too thin")
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+ except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
- score=max(-2,min(2,d["momentum_pct"]*12))+max(-1,min(1,d["pressure"]*2))
+ score=max(-2,min(2,d["momentum_pct"]*12))+(max(-1,min(1,d["pressure"]*2)) if d.get("pressure_available",True) else 0)
  if d["volume_ratio"]>1.3: score*=1.15
+ if d.get("candle_age_seconds",0)>180: return "WAIT","WAIT",0.0
  direction="UP" if score>0.6 else "DOWN" if score< -0.6 else "WAIT"
  flip="POSSIBLE UP FLIP" if d["long_momentum_pct"]< -0.06 and d["momentum_pct"]>0.025 and d["pressure"]>0.08 else "POSSIBLE DOWN FLIP" if d["long_momentum_pct"]>0.06 and d["momentum_pct"]< -0.025 and d["pressure"]< -0.08 else "WAIT"
  return direction,flip,round(score,3)
