@@ -641,6 +641,29 @@ def historical_csv():
  p=Path("historical_15m_7d.csv")
  if not p.exists(): return JSONResponse({"status":historical_state},status_code=202)
  return FileResponse(str(p),media_type="text/csv",filename="polymarket_us_btc_15m_7d.csv")
+@app.get("/api/candles")
+async def candle_proxy():
+ """Same-origin 1m BTC candles for Safari when exchange CORS is blocked."""
+ async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"},timeout=10) as client:
+  errors=[]
+  try:
+   r=await client.get("https://api.exchange.coinbase.com/products/BTC-USD/candles",params={"granularity":60})
+   r.raise_for_status()
+   raw=r.json()
+   bars=[[float(x[0]),float(x[1]),float(x[2]),float(x[3]),float(x[4]),float(x[5])] for x in raw if isinstance(x,list) and len(x)>=6]
+   if bars:return {"source":"Coinbase","candles":bars}
+  except Exception as e: errors.append("Coinbase: "+str(e)[:120])
+  try:
+   r=await client.get("https://api.kraken.com/0/public/OHLC",params={"pair":"XBTUSD","interval":1})
+   r.raise_for_status()
+   raw=r.json()
+   if raw.get("error"):raise ValueError(str(raw["error"]))
+   key=next(k for k in raw["result"] if k!="last")
+   bars=[[float(x[0]),float(x[3]),float(x[2]),float(x[1]),float(x[4]),float(x[6])] for x in raw["result"][key]]
+   if bars:return {"source":"Kraken","candles":bars}
+  except Exception as e:errors.append("Kraken: "+str(e)[:120])
+  return {"source":"unavailable","candles":[],"error":"; ".join(errors)}
+
 @app.get("/api/status")
 def status():
  try:
