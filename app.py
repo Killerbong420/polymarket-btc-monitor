@@ -164,6 +164,26 @@ async def market_15m(client):
   return None,"event_has_no_matching_15m_contract"
  except Exception as exc: return None,type(exc).__name__
 
+def chart_indicators(candles, volume_idx):
+ closes=[float(x[4]) for x in candles]
+ highs=[float(x[2]) for x in candles]
+ lows=[float(x[1]) for x in candles]
+ def ema(values,n):
+  result=values[0]
+  for v in values[1:]: result+=(2/(n+1))*(v-result)
+  return result
+ def rsi(values,n=14):
+  changes=[values[i]-values[i-1] for i in range(1,len(values))]
+  gains=sum(max(0,x) for x in changes[-n:])/n
+  losses=sum(max(0,-x) for x in changes[-n:])/n
+  return 100 if losses==0 and gains>0 else 50 if losses==0 else 100-100/(1+gains/losses)
+ e9=ema(closes[-25:],9)
+ e21=ema(closes[-35:],21)
+ last=closes[-1]
+ ranges=[max(highs[i]-lows[i],abs(highs[i]-closes[i-1]),abs(lows[i]-closes[i-1])) for i in range(1,len(closes))]
+ atr=sum(ranges[-14:])/14
+ return {"ema9":round(e9,2),"ema21":round(e21,2),"rsi14":round(rsi(closes),1),"atr14_pct":round(100*atr/last,4),"ema_trend":"UP" if e9>e21 else "DOWN"}
+
 async def spot_data(client):
  errors=[]
  # Coinbase public BTC-USD candles: [timestamp, low, high, open, close, volume].
@@ -175,14 +195,14 @@ async def spot_data(client):
   candles=sorted([x for x in raw if isinstance(x,list) and len(x)>=6],key=lambda x:x[0])
   # Exclude the current incomplete minute.
   candles=[x for x in candles if float(x[0])+60<=time.time()]
-  if len(candles)<21: raise ValueError("Coinbase insufficient completed candles")
-  candles=candles[-30:]
+  if len(candles)<35: raise ValueError("Coinbase insufficient completed candles")
+  candles=candles[-40:]
   closes=[float(x[4]) for x in candles]
   vols=[float(x[5]) for x in candles]
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Coinbase BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Coinbase: "+str(e)[:150])
  # Kraken OHLC uses BTC/USD minute candles; last candle is incomplete.
  try:
@@ -192,14 +212,14 @@ async def spot_data(client):
   if payload.get("error"): raise ValueError(str(payload["error"]))
   key=next(k for k in payload["result"] if k!="last")
   candles=sorted(payload["result"][key],key=lambda x:float(x[0]))[:-1]
-  if len(candles)<21: raise ValueError("Kraken insufficient candles")
-  candles=candles[-30:]
+  if len(candles)<35: raise ValueError("Kraken insufficient candles")
+  candles=candles[-40:]
   closes=[float(x[4]) for x in candles]
   vols=[float(x[6]) for x in candles]
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Kraken BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-6]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
@@ -217,6 +237,12 @@ def judge(d):
  slow_vote=max(-1.0,min(1.0,slow*5))
  score=fast_vote+slow_vote
  if volume>=1.2: score*=1.10
+ chart=d.get("chart") or {}
+ if chart:
+  trend=chart.get("ema_trend")
+  rsi=float(chart.get("rsi14",50))
+  score+=(0.35 if trend=="UP" else -0.35)+(0.25 if rsi>=55 else -0.25 if rsi<=45 else 0)
+  if (fast>0 and trend=="DOWN") or (fast<0 and trend=="UP"): score*=0.65
  # No fabricated buy/sell pressure: Coinbase candles provide no taker-side split.
  if d.get("pressure_available"):
   score+=max(-0.5,min(0.5,float(d.get("pressure",0))*1.5))
