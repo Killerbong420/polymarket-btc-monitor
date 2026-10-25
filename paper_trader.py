@@ -256,7 +256,7 @@ def polymarket_dip_signal(execute,signal):
     if market_start(market) is None or market_start(market)+900-time.time()<RISK['exit_before_expiry_seconds']+30:return None
     confidence=signal.get('confidence')
     if confidence not in ('LOW','MEDIUM','HIGH'):return None
-    if confidence=='LOW' and number(quote.get('up_entry' if direction=='UP' else 'down_entry')) is not None and quote.get('up_entry' if direction=='UP' else 'down_entry')>0.4:return None
+    if confidence=='LOW' and number(quote.get('up_entry' if direction=='UP' else 'down_entry')) is not None and number(quote.get('up_entry' if direction=='UP' else 'down_entry'))>0.4:return None
     rows=execute("SELECT sampled_epoch,up_ask,down_ask FROM polymarket_quote_samples "
                  "WHERE market=? AND sampled_epoch>=? ORDER BY sampled_epoch DESC LIMIT 25",
                  (market,time.time()-150),fetch=True)
@@ -471,6 +471,9 @@ async def cycle(client,execute,connect,postgres,live_signal=None):
         learning.expire_unobserved(execute)
         _last_settlement_scan=now_mono
     if now_mono-_last_entry_scan<5:
+        if now_mono-_last_mark>=30:
+            await update_marks(client,execute,connect,postgres)
+            _last_mark=time.monotonic()
         return
     _last_entry_scan=now_mono
     signal=live_signal or {};key=signal.get('paper_signal_id')
@@ -573,7 +576,7 @@ def report(execute):
             'positions':[dict(zip(('market','direction','quantity','cost_cents','fee_cents','status','created_at','settled_at','winner','payout_cents','pnl_cents','mark_cents','mark_epoch','exit_reason','exit_fee_cents','closed_at'),x)) for x in positions],
             'attempts':[{'market':m,'created_at':t,'status':s,'reason':why,'details':json.loads(detail)} for m,t,s,why,detail in events],
             'trading_diagnostics':diagnostic,
-             'missed_profit_learning':missed_profit_learning(execute),
+             'retrospective_missed_profit_analysis':missed_profit_learning(execute),
             'missed_profit_learning':learning_report,
             'missed_opportunity_counts':shadow_counts,
             'missed_opportunities':[dict(zip(('market','direction','observed_epoch','entry_ask','quantity','entry_cost_cents',
