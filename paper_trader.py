@@ -484,6 +484,41 @@ async def cycle(client,execute,connect,postgres,live_signal=None):
     if time.monotonic()-_last_mark>=30:
         await update_marks(client,execute,connect,postgres);_last_mark=time.monotonic()
 
+def missed_profit_learning(execute):
+    """Retrospective, fee-aware analysis of skipped paper entries; never self-modifies live trading rules."""
+    attempts=execute("SELECT market,created_at,reason,detail_json FROM paper_attempts WHERE status='SKIPPED' ORDER BY created_at DESC LIMIT 200",fetch=True)
+    outcomes=[]
+    for market,at,reason,raw in attempts:
+        # No historical executable order book is persisted for skipped trades yet.
+        # Therefore these are learning candidates, not proven missed profits.
+        calls=execute("SELECT calls_json,snapshot_json FROM paper_live_calls WHERE market=? ORDER BY created_at DESC LIMIT 1",(market,),fetch=True)
+        if not calls:continue
+        try:
+            call=json.loads(calls[0][0]).get('AI') or {}
+            snapshot=json.loads(calls[0][1])
+        except (TypeError,ValueError):continue
+        direction=call.get('direction')
+        if direction not in ('UP','DOWN'):continue
+        resolved=execute("SELECT winner FROM research_calls WHERE market=? AND winner IS NOT NULL LIMIT 1",(market,),fetch=True)
+        outcome=resolved[0][0] if resolved else None
+        outcomes.append({'market':market,'at':at,'direction':direction,'reason':reason,
+                         'confidence':call.get('confidence'),'pattern':(snapshot.get('chart_pattern') or {}).get('pattern'),
+                         'outcome':outcome,'direction_won':direction==outcome if outcome in ('UP','DOWN') else None,
+                         'classification':'UNVERIFIED_MISSED_PROFIT',
+                         'note':'Winning direction does not establish a profitable, executable entry and exit.'})
+    by_reason={}
+    for item in outcomes:
+        if item['direction_won'] is None:continue
+        group=by_reason.setdefault(item['reason'],{'resolved':0,'direction_wins':0})
+        group['resolved']+=1
+        group['direction_wins']+=int(item['direction_won'])
+    for group in by_reason.values():
+        group['direction_win_rate_pct']=round(100*group['direction_wins']/group['resolved'],1)
+    return {'candidates':outcomes[:50],'patterns_by_skip_reason':by_reason,
+            'verified_missed_profit_count':0,
+            'status':'OBSERVATION_ONLY',
+            'note':'Learning observations are retrospective and not executable-profit proof. Trading parameters remain unchanged until historical order-book capture and out-of-sample validation exist.'}
+
 def control(connect,postgres,action):
     if action not in ('pause','resume','stop'):raise ValueError('Unsupported paper action')
     with connect() as c:
@@ -528,6 +563,7 @@ def report(execute):
             'positions':[dict(zip(('market','direction','quantity','cost_cents','fee_cents','status','created_at','settled_at','winner','payout_cents','pnl_cents','mark_cents','mark_epoch','exit_reason','exit_fee_cents','closed_at'),x)) for x in positions],
             'attempts':[{'market':m,'created_at':t,'status':s,'reason':why,'details':json.loads(detail)} for m,t,s,why,detail in events],
             'trading_diagnostics':diagnostic,
+             'missed_profit_learning':missed_profit_learning(execute),
             'missed_profit_learning':learning_report,
             'missed_opportunity_counts':shadow_counts,
             'missed_opportunities':[dict(zip(('market','direction','observed_epoch','entry_ask','quantity','entry_cost_cents',
