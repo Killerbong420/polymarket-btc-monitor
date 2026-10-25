@@ -215,7 +215,9 @@ if(!bars.length&&state.bars.length)bars=state.bars.slice(-Math.min(mins,state.ba
 if(state.live&&bars.length){let last=bars[bars.length-1];if(end-last.t<120000){last.h=Math.max(last.h,state.live);last.l=Math.min(last.l,state.live);last.c=state.live}}
 if(!bars.length){c.fillStyle='#a4b6cb';c.font='14px system-ui';c.fillText('Loading 1-minute candlesticks…',18,h/2);return}
 const left=10,right=76,top=22,bottom=30,volH=state.volume?Math.min(80,h*.21):0,chartH=h-top-bottom-volH-8,chartW=w-left-right;
-let lo=Math.min(...bars.map(b=>b.l)),hi=Math.max(...bars.map(b=>b.h));const target=hasTarget()?Number(targetBySlug[slug(roundStart())]):0;if(target>0&&target>lo-(hi-lo)*.3&&target<hi+(hi-lo)*.3){lo=Math.min(lo,target);hi=Math.max(hi,target)}const pad=Math.max(2,(hi-lo)*.12);lo-=pad;hi+=pad;
+let lo=Math.min(...bars.map(b=>b.l)),hi=Math.max(...bars.map(b=>b.h));const targetText=document.getElementById('targetInfo')?.textContent||'';
+const targetMatch=targetText.match(/Polymarket target:\\s*\\$([\\d,]+(?:\\.\\d+)?)/);
+const target=targetMatch?Number(targetMatch[1].replaceAll(',','')):0;if(target>0&&target>lo-(hi-lo)*.3&&target<hi+(hi-lo)*.3){lo=Math.min(lo,target);hi=Math.max(hi,target)}const pad=Math.max(2,(hi-lo)*.12);lo-=pad;hi+=pad;
 const y=v=>top+(hi-v)/(hi-lo)*chartH;const x=i=>left+(i+.5)*chartW/bars.length;const bw=Math.max(2,Math.min(13,chartW/bars.length*.65));
 c.font='11px system-ui';for(let i=0;i<=5;i++){const p=lo+(hi-lo)*i/5,yy=y(p);c.strokeStyle='#273247';c.lineWidth=1;c.beginPath();c.moveTo(left,yy);c.lineTo(w-right+3,yy);c.stroke();c.fillStyle='#9aa9bd';c.fillText(fmt(p),w-right+7,yy+3)}
 const maxVol=Math.max(1,...bars.map(b=>b.v));
