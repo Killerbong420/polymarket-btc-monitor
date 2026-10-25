@@ -32,12 +32,27 @@ function renderPaper(d){
  if(d.error){$('paperStatus').textContent='UNAVAILABLE';$('paperNote').textContent=d.error;return}
  $('paperStatus').textContent='PAPER '+(d.status||'UNKNOWN').toUpperCase();$('paperCash').textContent=usd(d.cash_cents/100);$('paperProfit').textContent=usd(d.net_liquidation_pnl_cents/100);$('paperProfit').className='value '+(d.net_liquidation_pnl_cents>0?'up':d.net_liquidation_pnl_cents<0?'down':'');
  $('paperMetrics').textContent='Equity '+usd(d.conservative_equity_cents/100)+' · realized net '+usd(d.realized_pnl_cents/100)+' · fees '+usd((d.total_fees_cents??d.entry_fees_cents)/100)+' · max drawdown '+usd(d.max_drawdown_cents/100)+' · '+d.winning_trades+' wins / '+d.losing_trades+' losses · '+pct(d.win_rate_pct)+' · '+d.sample_label;
- const r=d.risk||{};$('paperLimits').textContent='Max '+usd(r.max_trade_cents/100)+' per trade · daily loss budget '+usd(d.daily_loss_risk_used_cents/100)+' / '+usd(r.daily_loss_cents/100)+' used · max open risk '+usd(r.max_open_cents/100)+' · fresh MEDIUM/HIGH live profit opportunities · entries '+pct(r.min_price*100)+'–'+pct(r.max_price*100)+' · 0.5¢ adverse slippage · take profit +10%, stop loss −8%, max hold 3 minutes, mandatory pre-expiry exit.';
+ const r=d.risk||{};$('paperLimits').textContent='Max '+usd(r.max_trade_cents/100)+' per trade · daily loss budget '+usd(d.daily_loss_risk_used_cents/100)+' / '+usd(r.daily_loss_cents/100)+' used · max open risk '+usd(r.max_open_cents/100)+' · live AI signals + paper-only odds dip/rebound watch · entries '+pct(r.min_price*100)+'–'+pct(r.max_price*100)+' · 0.5¢ adverse slippage · take profit +5% net, stop loss −8% net, max hold 3 minutes, mandatory pre-expiry exit.';
  const latest=d.latest_live_signal?.[0];$('paperOpportunity').textContent=latest?'Latest live check: '+(latest.call?.profit_action||'WAIT')+' · '+(latest.call?.confidence||'UNRATED')+' · '+(latest.call?.reason||'')+' · '+new Date(latest.captured_at).toLocaleTimeString():'Waiting for a fresh live AI profit assessment.';
  $('paperNote').textContent=(d.monitor_error?'Engine warning: '+d.monitor_error+' · ':'')+d.note;
  table('paperPositions',['Market / time','Direction','Contracts','Entry cost / fee','Status','Net result / mark'],(d.positions||[]).map(p=>[p.market+' · '+new Date(p.created_at).toLocaleTimeString(),p.direction,p.quantity,usd(p.cost_cents/100)+' / '+usd(p.fee_cents/100),p.status,p.status!=='OPEN'?usd(p.pnl_cents/100)+' · '+(p.exit_reason||'settlement fallback'):'Exit mark '+usd(p.mark_cents/100)]),'No fake positions yet. Waiting for a fresh live AI profit opportunity.');
  table('paperOrders',['Market','Sell instruction','Status','Last update'],(d.orders||[]).map(o=>[o.market,o.kind,o.status,new Date(o.updated_at).toLocaleTimeString()]),'Protective simulated sell orders appear when a fake entry fills.');
  table('paperAttempts',['Time','Result','Reason'],(d.attempts||[]).map(a=>[new Date(a.created_at).toLocaleTimeString(),a.status,a.reason]),'Watching fresh live AI opportunities throughout the round; old calls are not backfilled.');
+ const missed=d.missed_opportunity_counts||{},m=d.missed_opportunities||[];
+ const missingCount=missed.MISSED_QUOTED_PROFIT||0, matchedCount=missed.MATCHED_PAPER_TRADE||0,pendingCount=missed.WATCHING||0,expiredCount=missed.EXPIRED_NO_TARGET||0;
+ $('paperMissedStats').textContent='Missed quoted target: '+missingCount+' · Matched by paper trade: '+matchedCount+' · Watching: '+pendingCount+' · No target observed: '+expiredCount+' · Quotes sampled forward only';
+ const cents=n=>n==null?'—':(Number(n)*100).toFixed(1)+'¢';
+ table('paperMissed',['Observed','Side','Hypothetical buy','Later quoted sell','Peak net ROI','Classification'],
+   m.map(x=>[new Date(x.observed_epoch*1000).toLocaleTimeString(),x.direction,cents(x.entry_ask),
+     cents(x.best_exit_bid),pct(x.max_roi_pct),x.status==='MISSED_QUOTED_PROFIT'?'MISSED QUOTED TARGET':x.status==='MATCHED_PAPER_TRADE'?'PAPER TRADE ENTERED':'TARGET NOT OBSERVED']),
+   'No measured missed opportunities yet. The tracker needs new Polymarket quote observations and later price movement.');
+ $('paperMissedNote').textContent=d.missed_opportunity_note||'Missed-quote scenarios are not actual filled trades.';
+ const diag=d.trading_diagnostics||{};
+ if(diag.skipped_by_reason?.length){
+   const most=diag.skipped_by_reason[0];
+   $('paperOpportunity').textContent+=' · Top recorded entry blocker: '+most.reason+' ('+most.count+')';
+ }
+
  const box=$('paperEquityChart');box.replaceChildren();const points=d.equity_history||[];
  if(points.length>1){const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 360 135');svg.setAttribute('role','img');svg.setAttribute('aria-label','Recent fake-money equity including conservative liquidation estimates');svg.style.width='100%';let low=Math.min(d.initial_cents,...points.map(p=>p.equity_cents)),high=Math.max(d.initial_cents,...points.map(p=>p.equity_cents));const pad=Math.max(100,(high-low)*.1);low-=pad;high+=pad;const line=document.createElementNS(ns,'polyline');line.setAttribute('fill','none');line.setAttribute('stroke','#55aaff');line.setAttribute('stroke-width','2');line.setAttribute('points',points.map((p,i)=>(8+i*344/(points.length-1))+','+(10+(high-p.equity_cents)/(high-low)*100)).join(' '));svg.append(line);const label=document.createElementNS(ns,'text');label.setAttribute('x','8');label.setAttribute('y','130');label.setAttribute('fill','#aab8d1');label.setAttribute('font-size','10');label.textContent='Recent equity · '+usd(low/100)+' to '+usd(high/100);svg.append(label);box.append(svg)}else box.append(el('div','Equity history starts as the fake-money test runs.','small'));
 }
