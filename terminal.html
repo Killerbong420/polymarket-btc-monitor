@@ -115,8 +115,40 @@ h1{font-size:20px;margin:6px 0}
 #pmChartCard .grid .card{margin:0}
 #pmQuoteStatus{font-size:11px}
 @media(max-width:520px){#pmOddsCanvas{height:265px}}
+
+/* Mobile-first BRTI terminal: lightweight native canvas, no chart framework. */
+body{max-width:940px}
+#brtiHero{margin:12px 0 15px;padding:16px!important;border:1px solid #355779;border-radius:19px;background:linear-gradient(165deg,#182941,#101b2e 70%);box-shadow:0 14px 36px #0003}
+.brti-head,.brti-current{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.brti-head h2{font-size:20px;margin:4px 0;color:#eff6ff;letter-spacing:-.5px}
+.brti-eyebrow{color:#78b8ee;font-size:10px;font-weight:800;letter-spacing:.13em}
+.brti-source{font-size:11px;color:#a9bdd2;font-weight:500;letter-spacing:0}
+.brti-current{margin:13px 0}
+#brtiPrice{font-size:clamp(25px,6vw,34px);font-weight:800;letter-spacing:-.05em;color:#f6fbff}
+#brtiTrendTag{font-size:11px}
+.brti-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0}
+.brti-stats>div{min-width:0;background:#0b1828;border:1px solid #253e58;border-radius:12px;padding:10px 8px}
+.brti-stats span{display:block;color:#a4b8cd;font-size:10px;margin-bottom:5px}
+.brti-stats strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#brtiCanvas{display:block;width:100%;height:300px;background:#0c1829;border:1px solid #263f59;border-radius:12px;margin:12px 0 9px}
+.brti-legend{display:flex;gap:13px;flex-wrap:wrap;color:#b8cbdc;font-size:10px;margin:7px 0 11px}
+.brti-key{display:inline-block;width:10px;height:4px;border-radius:3px;margin-right:5px;vertical-align:middle}
+.brti-footer{font-size:11px;color:#9bacbf;line-height:1.55;margin-top:10px}
+#pmChartCard{border-radius:17px!important}
+#monitorHealth{border-color:#2b4358}
+#healthAlerts{max-height:190px;overflow-y:auto}
+@media(max-width:520px){#brtiHero{padding:12px!important}#brtiCanvas{height:245px}.brti-stats strong{font-size:12px}.brti-head h2{font-size:18px}}
 </style></head><body><div id='accuracyNote' style='background:#162a36;color:#c7e8f3;padding:9px 13px;border-bottom:1px solid #31546a;font:12px -apple-system,Arial'>FAST + CONFIRMED SIGNALS · FAST is the primary early signal. Slower indicators add confirmation or warnings; WAIT means missing or inconclusive direction. No verified BRTI feed; predictions are experimental.</div><h1>₿ BTC · 15-MINUTE MARKET</h1><p>15-minute Polymarket prices and UP/DOWN contract odds only · External exchange data used privately for analysis</p><section class="card" id="monitorHealth"><div class="row" style="justify-content:space-between"><div class="label">MONITOR ALERTS</div><span class="status" id="healthLabel">CHECKING</span></div><div id="healthAlerts" aria-live="polite"></div><details><summary class="small">Alert history</summary><div id="healthHistory"></div></details></section>
 <section class="card" id="targetResearch"><div class="row" style="justify-content:space-between"><div class="label">REFERENCE PRICE &amp; TARGET BEHAVIOR · 15-MINUTE ROUND</div><span class="status" id="referenceStatus">CONNECTING</span></div><div class="grid" style="margin-top:12px"><div><div class="label">BTC reference price</div><div class="value" id="referencePrice">—</div><div class="small" id="referenceMeta"></div></div><div><div class="label">Lead against official target</div><div class="value" id="behaviorGap">—</div><div class="small" id="behaviorDetails"></div></div></div><p class="small" id="behaviorOccupancy"></p><p class="small" id="settlementAverage"></p><div class="small" id="targetValidation"></div><p class="small">BTC settles against the final-minute reference average, not a single spot tick. Gaps and spot fallbacks are labeled.</p><div class="small" id="checkpointStatus">Checkpoints: early at 12:00 left · halfway at 7:30 left · late at 3:00 left. Missed checkpoints are not backfilled.</div></section>
+<section class="card" id="brtiHero" aria-label="Bitcoin BRTI reference index chart">
+<div class="brti-head"><div><div class="brti-eyebrow">BITCOIN REFERENCE · BRTI</div><h2>BTC / USD <span class="brti-source">Reference index</span></h2></div><span class="status" id="brtiStatus">CONNECTING</span></div>
+<div class="brti-current"><strong id="brtiPrice">—</strong><span id="brtiTrendTag" class="status">AWAITING INDEX DATA</span></div>
+<div class="brti-stats"><div><span>Short-term trend</span><strong id="brtiTrend">—</strong></div><div><span>Observed support</span><strong id="brtiSupport">—</strong></div><div><span>Observed resistance</span><strong id="brtiResistance">—</strong></div></div>
+<canvas id="brtiCanvas" role="img" aria-label="BRTI Bitcoin reference-price trend, recent observations and official price-to-beat line"></canvas>
+<div class="brti-legend"><span><i class="brti-key" style="background:#67c5ff"></i>BRTI reference</span><span><i class="brti-key" style="background:#a7f0cc"></i>Smoothed trend</span><span><i class="brti-key" style="background:#f5c36d"></i>Price to beat</span></div>
+<div class="small" id="brtiMessage">Waiting for Polymarket US BRTI reference observations.</div>
+<div class="brti-footer">BRTI observations are provided by the Polymarket US reference API—not a direct CF Benchmarks feed or embedded chart. <a target="_blank" rel="noopener noreferrer" href="https://www.cfbenchmarks.com/data/indices/BRTI">View original CF Benchmarks BRTI chart</a>. Index and contract odds are different markets.</div>
+</section>
 <section class="card" id="pmChartCard">
  <div class="row" style="justify-content:space-between">
   <div class="label">POLYMARKET US · BTC 15-MINUTE CONTRACT PRICES</div>
@@ -360,5 +392,81 @@ async function refresh(){
 window.addEventListener('resize',plot);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
 refresh();setInterval(refresh,5000);
+})();
+</script><script>
+(()=>{
+'use strict';
+const el=id=>document.getElementById(id),canvas=el('brtiCanvas');
+let current={points:[],status:'unavailable'},loading=false;
+const money=n=>Number.isFinite(n)?'</html>
++n.toLocaleString('en-US',{maximumFractionDigits:2,minimumFractionDigits:2}):'—';
+const finite=n=>typeof n==='number'&&Number.isFinite(n);
+function calculate(points){
+ const prices=points.map(x=>x[1]);
+ if(prices.length<3)return null;
+ const window=Math.min(20,prices.length-1);
+ const average=arr=>arr.reduce((a,b)=>a+b,0)/arr.length;
+ const first=average(prices.slice(-window,-Math.max(1,Math.floor(window/3))));
+ const last=average(prices.slice(-Math.max(1,Math.floor(window/3))));
+ const drift=last-first;
+ const trend=Math.abs(drift)<Math.max(3,last*.000045)?'SIDEWAYS':drift>0?'UPTREND':'DOWNTREND';
+ return {trend,change:drift,support:Math.min(...prices.slice(-Math.min(120,prices.length))),
+ resistance:Math.max(...prices.slice(-Math.min(120,prices.length)))};
+}
+function paint(){
+ const rect=canvas.getBoundingClientRect(),w=rect.width,h=rect.height;
+ if(w<60)return;
+ const sc=Math.min(window.devicePixelRatio||1,2),ctx=canvas.getContext('2d');
+ canvas.width=Math.round(w*sc);canvas.height=Math.round(h*sc);ctx.setTransform(sc,0,0,sc,0,0);
+ ctx.fillStyle='#0c1829';ctx.fillRect(0,0,w,h);
+ const points=(current.points||[]).filter(x=>Array.isArray(x)&&finite(x[0])&&finite(x[1])&&x[1]>0);
+ const trend=calculate(points);
+ el('brtiTrend').textContent=trend?trend.trend:'—';
+ el('brtiSupport').textContent=trend?money(trend.support):'—';
+ el('brtiResistance').textContent=trend?money(trend.resistance):'—';
+ el('brtiTrendTag').textContent=trend?trend.trend:'AWAITING INDEX DATA';
+ el('brtiTrendTag').className='status '+(trend?.trend==='UPTREND'?'up':trend?.trend==='DOWNTREND'?'down':'wait');
+ el('brtiPrice').textContent=points.length?money(points[points.length-1][1]):'—';
+ if(points.length<2){ctx.fillStyle='#afc4da';ctx.font='13px system-ui';ctx.fillText('Waiting for verified BRTI reference ticks…',13,h/2);return;}
+ const left=12,right=78,top=20,bottom=30,pw=w-left-right,ph=h-top-bottom;
+ const t0=points[0][0],t1=points[points.length-1][0]||t0+1;
+ const target=finite(current.official_target)?current.official_target:null;
+ const vals=points.map(x=>x[1]);let lo=Math.min(...vals),hi=Math.max(...vals);
+ if(target!==null&&target>lo-(hi-lo)*.25&&target<hi+(hi-lo)*.25){lo=Math.min(lo,target);hi=Math.max(hi,target)}
+ const pad=Math.max(5,(hi-lo)*.12);lo-=pad;hi+=pad;
+ const x=t=>left+(t-t0)/Math.max(1,t1-t0)*pw,y=p=>top+(hi-p)/(hi-lo)*ph;
+ ctx.font='10px system-ui';
+ for(let i=0;i<5;i++){const v=lo+(hi-lo)*i/4,yy=y(v);ctx.strokeStyle='#294055';ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(w-right+3,yy);ctx.stroke();ctx.fillStyle='#adbed3';ctx.fillText('</html>
++Math.round(v).toLocaleString(),w-right+5,yy+4)}
+ for(let i=0;i<4;i++){const time=t0+(t1-t0)*i/3;ctx.fillStyle='#93a9bd';ctx.fillText(new Date(time*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),Math.min(w-78,x(time)),h-8)}
+ if(target!==null){ctx.setLineDash([5,5]);ctx.strokeStyle='#f5c36d';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(left,y(target));ctx.lineTo(w-right+3,y(target));ctx.stroke();ctx.setLineDash([])}
+ function stroke(series,color,width){ctx.beginPath();series.forEach((p,i)=>{const xx=x(p[0]),yy=y(p[1]);if(!i)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy)});ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineJoin='round';ctx.stroke()}
+ stroke(points,'#67c5ff',2);
+ let avg=points[0][1];const smooth=points.map(p=>{avg+=.16*(p[1]-avg);return [p[0],avg]});
+ stroke(smooth,'#a7f0cc',1.6);
+ const latest=points.at(-1);ctx.beginPath();ctx.arc(x(latest[0]),y(latest[1]),3.6,0,Math.PI*2);ctx.fillStyle='#67c5ff';ctx.fill();
+}
+async function refresh(){
+ if(loading||document.hidden)return;loading=true;
+ try{
+  const resp=await fetch('/api/brti-chart',{cache:'no-store'});
+  if(!resp.ok)throw Error('HTTP '+resp.status);
+  const data=await resp.json();current=data;
+  const age=data.observed_age_seconds??null;
+  const fresh=data.status==='fresh';
+  el('brtiStatus').textContent=fresh?'REFERENCE LIVE':data.status==='stale'?'REFERENCE STALE':'REFERENCE UNAVAILABLE';
+  el('brtiStatus').className='status '+(fresh?'up':'wait');
+  el('brtiMessage').textContent=(data.points?.length||0)+' observed BRTI ticks · '+(age===null?'unknown':Math.round(age)+'s')+' since refresh · '+(data.note||'');
+  paint();
+ }catch(err){
+  current={points:[],status:'unavailable'};
+  el('brtiStatus').textContent='REFERENCE UNAVAILABLE';
+  el('brtiMessage').textContent='BRTI chart unavailable: '+err.message;
+  paint();
+ }finally{loading=false}
+}
+window.addEventListener('resize',paint);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+refresh();setInterval(refresh,6000);
 })();
 </script></body></html>
