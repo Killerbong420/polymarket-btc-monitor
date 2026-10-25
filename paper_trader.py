@@ -149,6 +149,35 @@ def gross_daily_losses(cur,postgres):
 def record_attempt(cur,postgres,market,status,reason,detail):
     run(cur,postgres,'INSERT INTO paper_attempts (market,created_at,status,reason,detail_json) VALUES (?,?,?,?,?) ON CONFLICT(market) DO UPDATE SET created_at=excluded.created_at,status=excluded.status,reason=excluded.reason,detail_json=excluded.detail_json',(market,stamp(),status,reason,json.dumps(detail)))
 
+def dip_rebound_check(snapshot, call):
+    """Paper-only UP dip entries: require observed pullback AND early rebound.
+    This is a heuristic, not a forecast or a claim of profitable execution."""
+    if call.get('direction')!='UP':
+        return True, 'Not an UP dip entry'
+    chart=snapshot.get('chart_pattern') or {}
+    graph=snapshot.get('graph_evidence') or {}
+    candles=graph.get('candles_ohlcv') or []
+    if len(candles)<8:
+        return False, 'Dip watch: insufficient recent candles'
+    try:
+        closes=[float(x[4]) for x in candles[-12:]]
+        highs=[float(x[2]) for x in candles[-12:]]
+        lows=[float(x[3]) for x in candles[-12:]]
+        if min(closes)<=0:return False,'Dip watch: invalid candle prices'
+        # Pullback must have occurred recently, not just a continually rising price.
+        recent_peak=max(highs[:-2])
+        drawdown=(recent_peak-min(lows[-6:]))/recent_peak
+        rebound=(closes[-1]-min(lows[-4:]))/min(lows[-4:])
+        higher_close=closes[-1]>closes[-2]
+        if drawdown<0.00025:return False,'Dip watch: no meaningful recent pullback'
+        if not higher_close or rebound<0.00008:
+            return False,'Dip watch: waiting for price to start rebounding'
+        if drawdown>0.006:
+            return False,'Dip watch: unusually large drop; avoid catching a falling knife'
+        return True,'Observed pullback and initial rebound'
+    except (TypeError,ValueError,IndexError,ZeroDivisionError):
+        return False,'Dip watch: malformed candle evidence'
+
 async def try_entry(client,execute,connect,postgres,row):
     market,call_id,created,snapshot_json,calls_json=row
     snapshot=json.loads(snapshot_json);call=(json.loads(calls_json).get('AI') or {})
@@ -158,10 +187,13 @@ async def try_entry(client,execute,connect,postgres,row):
     elif call.get('source_mode')=='LIVE' and call.get('profit_action') not in ('ENTER_UP','ENTER_DOWN'):reason='Live AI sees no near-term profit opportunity'
     elif direction not in ('UP','DOWN'):reason='No actionable directional call'
     elif call.get('confidence') not in ('MEDIUM','HIGH') and not (call.get('source_mode')=='LIVE' and call.get('confidence')=='LOW'):reason='AI confidence below paper-test minimum'
-    elif not 0<=age<=60:reason='Saved call is too old for a new paper entry'
-    elif (snapshot.get('reference_price') or {}).get('status')!='fresh':reason='No fresh reference-price evidence at decision time'
-    elif number(snapshot.get('official_target')) is None:reason='Official target unavailable'
-    elif market_start(market) is None or market_start(market)+900-time.time()<RISK['exit_before_expiry_seconds']+30:reason='Too close to contract expiry'
+    elif call.get('source_mode')=='LIVE' and direction=='UP':
+        dip_ok,dip_reason=dip_rebound_check(snapshot,call)
+        if not dip_ok:reason=dip_reason
+    if reason is None and not 0<=age<=60:reason='Saved call is too old for a new paper entry'
+    if reason is None and (snapshot.get('reference_price') or {}).get('status')!='fresh':reason='No fresh reference-price evidence at decision time'
+    if reason is None and number(snapshot.get('official_target')) is None:reason='Official target unavailable'
+    if reason is None and (market_start(market) is None or market_start(market)+900-time.time()<RISK['exit_before_expiry_seconds']+30):reason='Too close to contract expiry'
     if reason is None:
         try:book=await fetch_book(client,market)
         except Exception as exc:reason='Book unavailable: '+type(exc).__name__+': '+str(exc)[:90]
