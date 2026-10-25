@@ -223,7 +223,58 @@ def classify_chart(bars):
   pattern,bias="DOWNTREND","DOWN"
  else:
   pattern,bias="RANGE","UP" if last>(recent_high+recent_low)/2 else "DOWN"
- return {"pattern":pattern,"bias":bias,"support":round(recent_low,2),"resistance":round(recent_high,2),"range_pct":round(range_pct,4),"volume_spike":volume_spike,"note":"Heuristic classification; predictive value not yet validated"}
+ # Describe current price behavior, not just directional bias.
+ def change(n):
+  return 100*(last/closes[-1-n]-1) if closes[-1-n] else 0
+ move3=change(3)
+ move5=change(5)
+ move10=change(10)
+ prior5=100*(closes[-6]/closes[-11]-1) if closes[-11] else 0
+ acceleration=move5-prior5
+ body=last-float(bars[-1][3])
+ upper_wick=highs[-1]-max(last,float(bars[-1][3]))
+ lower_wick=min(last,float(bars[-1][3]))-lows[-1]
+ width=max(highs[-1]-lows[-1],0.000001)
+ location=(last-recent_low)/max(recent_high-recent_low,0.000001)
+ threshold=max(0.008,range_pct*0.15)
+ if pattern in ("BULLISH_BREAKOUT","BEARISH_BREAKOUT"):
+  behavior="BREAKOUT_WITH_VOLUME"
+ elif pattern=="FAILED_UP_BREAKOUT":
+  behavior="RESISTANCE_REJECTION"
+ elif pattern=="FAILED_DOWN_BREAKOUT":
+  behavior="SUPPORT_REJECTION"
+ elif abs(move5)<threshold and range_pct<0.10:
+  behavior="TIGHT_CONSOLIDATION"
+ elif bullish_structure and move3< -threshold:
+  behavior="PULLBACK_IN_UPTREND"
+ elif bearish_structure and move3>threshold:
+  behavior="BOUNCE_IN_DOWNTREND"
+ elif abs(move5)>threshold and move5*acceleration>0 and abs(acceleration)>threshold:
+  behavior="MOMENTUM_ACCELERATING"
+ elif abs(move5)>threshold and move5*acceleration<0 and abs(acceleration)>threshold:
+  behavior="MOMENTUM_FADING"
+ elif abs(move5)<=threshold:
+  behavior="SIDEWAYS_CHOP"
+ else:
+  behavior="TREND_CONTINUATION" if (bullish_structure and move5>0) or (bearish_structure and move5<0) else "MIXED_PRICE_ACTION"
+ if upper_wick/width>0.55 and last<highs[-1] and behavior not in ("BREAKOUT_WITH_VOLUME","RESISTANCE_REJECTION"):
+  behavior="UPPER_WICK_REJECTION"
+ elif lower_wick/width>0.55 and behavior not in ("BREAKOUT_WITH_VOLUME","SUPPORT_REJECTION"):
+  behavior="LOWER_WICK_REJECTION"
+ return {"pattern":pattern,"bias":bias,"current_behavior":behavior,
+  "structure":"HIGHER_HIGHS_HIGHER_LOWS" if bullish_structure else "LOWER_HIGHS_LOWER_LOWS" if bearish_structure else "MIXED_OR_RANGE",
+  "momentum_3m_pct":round(move3,5),"momentum_5m_pct":round(move5,5),
+  "momentum_10m_pct":round(move10,5),"prior_5m_pct":round(prior5,5),
+  "momentum_acceleration_5m_pct":round(acceleration,5),
+  "range_position_pct":round(100*location,1),
+  "distance_to_support_pct":round(100*(last/recent_low-1),5) if recent_low else None,
+  "distance_to_resistance_pct":round(100*(recent_high/last-1),5) if last else None,
+  "last_candle_body_direction":"UP" if body>0 else "DOWN" if body<0 else "DOJI",
+  "last_candle_upper_wick_ratio":round(upper_wick/width,3),
+  "last_candle_lower_wick_ratio":round(lower_wick/width,3),
+  "support":round(recent_low,2),"resistance":round(recent_high,2),
+  "range_pct":round(range_pct,4),"volume_spike":volume_spike,
+  "note":"Heuristic descriptions of completed 1m candles, not confirmed future direction"}
 
 def graph_evidence(candles, volume_idx):
  """Compact chronological completed candles and price-structure measurements."""
