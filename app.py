@@ -5,6 +5,7 @@ from ai_confirmation import confirm, public_state, check_auth, auth_state, halfw
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import httpx
+from market_intelligence import intelligence_loop, public_intelligence
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 try:
@@ -478,6 +479,14 @@ async def loop():
      d=await spot_data(client)
     except Exception as feed_exc:
      d={"source":"unavailable","candle_age_seconds":None,"signal_quality":{"status":"INSUFFICIENT_DATA","reason":"No fresh verified BTC candles"},"feed_error":str(feed_exc)[:300]}
+    intel=public_intelligence()
+    d["external_intelligence"]=intel
+    fresh_flow=[x for x in intel["trade_flow"].get("exchanges",[]) if x.get("status")=="fresh"] if intel["trade_flow"].get("status")!="stale" else []
+    buy=sum(x.get("buy_usd",0) for x in fresh_flow)
+    sell=sum(x.get("sell_usd",0) for x in fresh_flow)
+    d["pressure_available"]=buy+sell>0
+    d["pressure"]=(buy-sell)/(buy+sell) if buy+sell>0 else 0.0
+    d["pressure_source"]=" + ".join(x["source"] for x in fresh_flow) or "unavailable"
     direction,flip,score=judge(d) if d.get("price") is not None else ("WAIT","WAIT",0.0)
     now=datetime.now(timezone.utc).isoformat()
     fifteen,reason15=await market_15m(client)
@@ -507,6 +516,7 @@ async def loop():
 @asynccontextmanager
 async def lifespan(app):
  task=asyncio.create_task(loop())
+ context_task=asyncio.create_task(intelligence_loop())
  async def historical_job():
   try:
    historical_state.update(status="running",started=datetime.now(timezone.utc).isoformat())
@@ -518,7 +528,8 @@ async def lifespan(app):
  yield
  task.cancel()
  history_task.cancel()
- for running in (task,history_task):
+ context_task.cancel()
+ for running in (task,history_task,context_task):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}

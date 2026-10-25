@@ -16,3 +16,7 @@ The Safari terminal tracks only verified Polymarket US 15-minute contracts. Live
 Without a key, the panel safely says NOT CONFIGURED and no OpenAI requests are made. Responses use a strict JSON schema and `store:false`. Errors do not disclose API keys. Calls cost money under the OpenAI API account separately from ChatGPT subscriptions. AI analysis receives current BTC chart evidence, the official target when published, and versioned historical research context. One final decision is recorded at 7:30 remaining. WIN/LOSS uses official settlement; historical frequencies are not calibrated live probabilities.
 
 Render free instances may sleep, and their local SQLite files are ephemeral.
+
+## Outside context
+
+Both live AI reviews and locked 15-minute decisions receive sampled Coinbase/Kraken initiating buy/sell trade notional, Kraken top-20 book imbalance, and selected CoinDesk/Cointelegraph/Federal Reserve RSS headlines from the last 24 hours. Exchange samples refresh about every 15 seconds; news refreshes about every 120 seconds. Source failures and staleness are explicit. This is partial public coverage, not all trades, a verified on-chain flow feed, or guaranteed breaking-news detection. Locked decision evidence retains the context seen at call time.
