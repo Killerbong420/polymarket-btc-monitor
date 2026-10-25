@@ -339,7 +339,7 @@ async def spot_data(client):
   if len(candles)<35: raise ValueError("Kraken insufficient candles")
   if time.time()-float(candles[-1][0])-60>90: raise ValueError("Kraken latest completed candle stale")
   candles=candles[-40:]
-  chart=chart_indicators(candles,6)
+  chart=chart_indicators([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5)
   pattern=classify_chart([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles])
   closes=[float(x[4]) for x in candles]
   vols=[float(x[6]) for x in candles]
