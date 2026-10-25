@@ -53,3 +53,32 @@ The paper engine checks entries and protective sells on its own approximately fi
 The more active paper strategy requires a projected +5% net profit after fees and slippage (previously +10%), allowing smaller opportunities and earlier profit-taking. Existing accounts use the new threshold for new entries without resetting cash or history; already-open positions retain their recorded protective orders. The $10 trade cap, $25 daily risk budget, explicit AI confidence, strict 85-cent ceiling and expiry exits still apply.
 
 More aggressive buys: explicit LOW-confidence live AI ENTER_UP/ENTER_DOWN opportunities can now enter with at most $5 fake-money cost, including fees. MEDIUM/HIGH entries retain the $10 cap. WAIT, missing/invalid confidence, stale signals, insufficient liquidity, fee-unprofitable targets and the existing loss/expiry limits still block entries. Existing saved accounts receive this policy without a balance reset. More entries may also mean more losses; profitability is not established.
+
+## Missed-profit learning (paper only)
+
+The server stores prospective, 15-minute Polymarket US quote scenarios in the persistent
+paper ledger. A candidate is saved **before** a future quote is observed. Each scenario
+uses 10 hypothetical contracts and fee/slippage estimates. The first subsequent event
+to occur is classified as a +5% take-profit target, an -8% stop, or a timeout.
+Missing future quotes become `UNOBSERVED`, not invented losses or wins.
+
+`GET /api/paper` includes `missed_profit_learning` with segment summaries
+(UP/DOWN and LOW/MID/HIGH entry odds), recent hypothetical outcomes, and
+`missed_actual_exits`. Those separate exit-regret records compare the best
+*previously observed full-depth simulated exit* on a real paper position with
+its eventual sale or settlement. All dollar amounts are **simulated**.
+
+The bounded learning rule starts disabled for each direction/odds segment until it
+has at least 40 separate 15-minute markets with complete observations.
+It requires a >=68% hypothetical take-profit hit rate, >=1.5% mean modelled
+net return, and >=60% hit rates in both the older and more recent halves of
+the sample. Only then may it slightly relax the paper-only Polymarket dip
+entry filters. It never lifts the 85% all-in cap or other hard risk limits.
+Disable automatic paper-policy adjustments with `PAPER_LEARNING_ENABLED=false`;
+data collection and reporting continue.
+
+Quote-level hypothetical outcomes are **not proof of available order-book depth,
+a profitable real strategy, or a trained predictive AI model**. The learning
+system cannot guarantee better results and does not place live orders.
+
+Validation: `python -m unittest discover -p 'test_*.py' -v`.
