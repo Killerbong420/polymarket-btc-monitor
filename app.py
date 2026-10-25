@@ -182,11 +182,31 @@ async def spot_data(client):
  except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
- score=max(-2,min(2,d["momentum_pct"]*12))+(max(-1,min(1,d["pressure"]*2)) if d.get("pressure_available",True) else 0)
- if d["volume_ratio"]>1.3: score*=1.15
- if d.get("candle_age_seconds",0)>180: return "WAIT","WAIT",0.0
- direction="UP" if score>0.6 else "DOWN" if score< -0.6 else "WAIT"
- flip="POSSIBLE UP FLIP" if d["long_momentum_pct"]< -0.06 and d["momentum_pct"]>0.025 and d["pressure"]>0.08 else "POSSIBLE DOWN FLIP" if d["long_momentum_pct"]>0.06 and d["momentum_pct"]< -0.025 and d["pressure"]< -0.08 else "WAIT"
+ # Conservative multi-horizon confluence. Scores are evidence, not probabilities.
+ fast=float(d["momentum_pct"])
+ slow=float(d["long_momentum_pct"])
+ volume=float(d["volume_ratio"])
+ age=float(d.get("candle_age_seconds",999))
+ if age>120 or volume<0.20:
+  d["signal_quality"]={"status":"INSUFFICIENT_DATA","reason":"stale_or_thin_candles","confidence":"UNRATED"}
+  return "WAIT","WAIT",0.0
+ # Both 5-minute and 15-minute trends must agree for a directional call.
+ aligned=(fast>0.045 and slow>0.075) or (fast< -0.045 and slow< -0.075)
+ fast_vote=max(-1.5,min(1.5,fast*12))
+ slow_vote=max(-1.0,min(1.0,slow*5))
+ score=fast_vote+slow_vote
+ if volume>=1.2: score*=1.10
+ # No fabricated buy/sell pressure: Coinbase candles provide no taker-side split.
+ if d.get("pressure_available"):
+  score+=max(-0.5,min(0.5,float(d.get("pressure",0))*1.5))
+ direction=("UP" if score>0.95 else "DOWN" if score< -0.95 else "WAIT") if aligned else "WAIT"
+ # A flip watch is a *watch*, not a confirmed reversal or calibrated probability.
+ flip="WAIT"
+ if slow< -0.09 and fast>0.035 and volume>=0.8:
+  flip="POSSIBLE UP FLIP"
+ elif slow>0.09 and fast< -0.035 and volume>=0.8:
+  flip="POSSIBLE DOWN FLIP"
+ d["signal_quality"]={"status":"CONFIRMED_TREND" if direction!="WAIT" else "MIXED_OR_WEAK","fast_5m_pct":fast,"slow_15m_pct":slow,"volume_ratio":volume,"trend_aligned":aligned,"confidence":"UNRATED","note":"Score is not a win probability; official Polymarket outcomes required for calibration"}
  return direction,flip,round(score,3)
 def winner(m):
  outcomes=parse_json(m.get("outcomes"))
