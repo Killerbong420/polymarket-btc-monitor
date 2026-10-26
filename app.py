@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 import httpx
 from market_intelligence import intelligence_loop, public_intelligence
-from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start
+from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from monitor_health import checks as health_checks, persist_alerts, alert_history
 from fastapi import FastAPI, Query, Request
 import paper_trader as paper
@@ -586,6 +586,9 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
   "INDICATORS":{"direction":primary,"source":"INDICATORS","confidence":quality,"reason":quality_reason},
   "INDICATOR_BINARY":{"direction":fallback,"source":"FORCED_INDICATORS","confidence":quality},
   "TARGET_SIDE":{"direction":behavior.get("side") if behavior.get("status")=="available" and behavior.get("side") in ("UP","DOWN") else "WAIT","source":behavior.get("source"),"confidence":"UNRATED"}}
+ # Shadow strategy: log abstentions as well as calls, on the same frozen forward checkpoint.
+ # Never overwrite the raw AI outcome, main 15m lock, or trading controls.
+ calls["CONFLUENCE"]=confluence_forecast(calls["AI"],behavior,frozen.get("reference_price"),frozen.get("chart"))
  for call in calls.values():
   direction=call.get("direction")
   px=quote.get("up_entry" if direction=="UP" else "down_entry") if direction in ("UP","DOWN") and quote.get("status")=="available" else None
