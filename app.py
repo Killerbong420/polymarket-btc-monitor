@@ -51,6 +51,9 @@ def setup():
  direction TEXT NOT NULL, confidence TEXT NOT NULL, source TEXT NOT NULL,
  reason TEXT NOT NULL, created_at TEXT NOT NULL,
  result TEXT NOT NULL DEFAULT 'PENDING')""")
+ execute("""CREATE INDEX IF NOT EXISTS ai_recent_settled_idx
+   ON ai_decisions(created_at DESC,id DESC)
+   WHERE phase='FINAL_15M' AND source='AI_REVIEW' AND result IN ('WIN','LOSS')""")
  for col in ("quality TEXT NOT NULL DEFAULT 'UNRATED'","quality_reason TEXT NOT NULL DEFAULT 'Legacy prediction; quality not captured'","decision_source TEXT NOT NULL DEFAULT 'LEGACY'","decision_reason TEXT NOT NULL DEFAULT ''","ai_confidence TEXT NOT NULL DEFAULT 'UNRATED'"):
   try: execute("ALTER TABLE signals ADD COLUMN "+col)
   except Exception as exc:
