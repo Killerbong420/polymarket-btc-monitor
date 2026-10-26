@@ -1,0 +1,69 @@
+"""Regression tests for the default BTC prediction dashboard.
+Runs in GitHub Actions with the existing Python tests. Node checks inline browser JS syntax.
+"""
+from html.parser import HTMLParser
+from pathlib import Path
+import shutil
+import subprocess
+import unittest
+
+HTML = Path(__file__).with_name("terminal.html")
+
+
+class InlineScripts(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.scripts = []
+        self.in_script = False
+        self.current = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script" and not any(key == "src" for key, _ in attrs):
+            self.in_script = True
+            self.current = []
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self.in_script:
+            self.scripts.append("".join(self.current))
+            self.in_script = False
+
+    def handle_data(self, data):
+        if self.in_script:
+            self.current.append(data)
+
+
+class TerminalUITest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.html = HTML.read_text(encoding="utf-8")
+
+    def test_style_blocks_balanced(self):
+        self.assertEqual(self.html.count("<style>"), self.html.count("</style>"))
+
+    def test_all_four_panels_are_moved_to_default_view(self):
+        for panel in ("fastPanel", "strongPanel", "final15Panel"):
+            self.assertIn("document.getElementById(id);if(panel)cards.append(panel)", self.html)
+            self.assertIn('id="' + panel + '"', self.html)
+        self.assertIn("primary.id='primaryPanel';cards.append(primary)", self.html)
+        self.assertIn("cards.id='terminalQuickCards'", self.html)
+
+    def test_live_feeds_are_started(self):
+        self.assertIn("connectStream('coinbase');connectStream('kraken');update()", self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},5000)", self.html)
+        self.assertIn("renderPersistentSignals(d)", self.html)
+        self.assertIn("window.btcPrimaryLocalLive=!!ok", self.html)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is required for browser JavaScript syntax checking")
+    def test_inline_javascript_syntax(self):
+        parser = InlineScripts()
+        parser.feed(self.html)
+        self.assertGreaterEqual(len(parser.scripts), 4)
+        for i, script in enumerate(parser.scripts):
+            result = subprocess.run(
+                ["node", "--check"], input=script, text=True, capture_output=True, timeout=15
+            )
+            self.assertEqual(result.returncode, 0, "Inline script %s: %s" % (i, result.stderr))
+
+
+if __name__ == "__main__":
+    unittest.main()
