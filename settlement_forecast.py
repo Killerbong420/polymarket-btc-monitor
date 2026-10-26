@@ -149,7 +149,7 @@ def forecast_settlement(reference, external, target, seconds_left, now=None):
             "forecast_final_mean_usd": round(price_mean,2),
             "forecast_delta_from_current_usd": round(price_mean-price,2),
             "expected_distance_to_target_usd": round(price_mean-target,2),
-            "projected_direction": "UP" if price_mean>target else "DOWN" if price_mean<target else "TIE",
+            "projected_direction": "UP" if price_mean>=target else "DOWN",
             "downside_scenario_usd": round(down,2),
             "upside_scenario_usd": round(up,2),
             "target_in_scenario_range": down<=target<=up,
