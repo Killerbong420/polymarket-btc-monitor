@@ -56,6 +56,14 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("d.ai_performance", self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},5000)", self.html)
 
+    def test_ai_scoreboard_explains_100_settled_calls(self):
+        self.assertIn("LAST 100 SETTLED PREDICTIONS", self.html)
+        self.assertIn("WINS · LAST 100", self.html)
+        self.assertIn("LOSSES · LAST 100", self.html)
+        self.assertIn("PENDING · ALL", self.html)
+        self.assertIn("performance.window_size||100", self.html)
+        self.assertIn("most recent settled", self.html.lower())
+
     def test_live_feeds_are_started(self):
         self.assertIn("connectStream('coinbase');connectStream('kraken');update()", self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},5000)", self.html)
