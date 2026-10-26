@@ -963,16 +963,24 @@ def status():
   rows=execute("SELECT result,COUNT(*) FROM signals WHERE phase='FINAL_15M' GROUP BY result",fetch=True)
   recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason,decision_source,decision_reason,ai_confidence FROM signals WHERE phase='FINAL_15M' ORDER BY created_at DESC LIMIT 50",fetch=True)
   ai_rows=execute("SELECT market,phase,direction,confidence,source,reason,created_at,result FROM ai_decisions WHERE phase='FINAL_15M' AND source='AI_REVIEW' ORDER BY created_at DESC LIMIT 50",fetch=True)
-  ai_counts=execute("SELECT result,COUNT(*) FROM ai_decisions WHERE phase='FINAL_15M' AND source='AI_REVIEW' GROUP BY result",fetch=True)
-  ai_verified_counts=ai_counts  # One authoritative set: genuine saved AI_REVIEW decisions.
-  verified_counts=dict(ai_counts)
-  wins=int(verified_counts.get("WIN",0));losses=int(verified_counts.get("LOSS",0))
-  pending=int(verified_counts.get("PENDING",0));graded=wins+losses
+  # Show only the 100 most recently settled genuine AI calls in the scoreboard.
+  # Older outcomes are retained intact for learning and longer-term research.
+  recent_settled=execute("""SELECT result FROM ai_decisions
+    WHERE phase='FINAL_15M' AND source='AI_REVIEW'
+      AND result IN ('WIN','LOSS')
+    ORDER BY created_at DESC, id DESC LIMIT 100""",fetch=True)
+  wins=sum(result=='WIN' for (result,) in recent_settled)
+  losses=sum(result=='LOSS' for (result,) in recent_settled)
+  graded=wins+losses
+  pending=execute("""SELECT COUNT(*) FROM ai_decisions
+    WHERE phase='FINAL_15M' AND source='AI_REVIEW' AND result='PENDING'""",fetch=True)[0][0]
+  verified_counts={"WIN":wins,"LOSS":losses,"PENDING":pending}
   ai_performance={"wins":wins,"losses":losses,"pending":pending,
-                  "graded":graded,"accuracy_pct":round(100*wins/graded,1) if graded else None,
+                  "graded":graded,"window_size":100,
+                  "accuracy_pct":round(100*wins/graded,1) if graded else None,
                   "win_loss_ratio":round(wins/losses,3) if losses else None,
                   "ratio_label":str(wins)+":"+str(losses),
-                  "basis":"Persisted, genuinely sourced AI_REVIEW FINAL_15M decisions; only official settlements are graded",
+                  "basis":"Most recent 100 settled genuine AI_REVIEW FINAL_15M predictions; pending calls excluded",
                   "unverified":pending}
   return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"ai_decision_counts":verified_counts,"ai_verified_counts":verified_counts,"ai_performance":ai_performance,"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
  except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
