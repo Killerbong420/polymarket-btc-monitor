@@ -512,6 +512,47 @@ def research_report():
   _research_cache.update(updated_epoch=time.time(),report=report)
  return {**_research_cache["report"],"updated_epoch":_research_cache["updated_epoch"]}
 
+def prediction_loss_review(rows):
+ """Bounded, same-checkpoint diagnostics from settled forward calls only."""
+ groups={};recent=[]
+ for market,checkpoint,created,snapshot_json,calls_json,winner in rows:
+  if winner not in ('UP','DOWN'):continue
+  try:
+   snapshot=json.loads(snapshot_json);calls=json.loads(calls_json)
+  except (TypeError,ValueError):continue
+  if not isinstance(snapshot,dict) or not isinstance(calls,dict):continue
+  ai=calls.get('AI') or {}
+  if not isinstance(ai,dict) or ai.get('source')!='AI_REVIEW' or ai.get('direction') not in ('UP','DOWN'):continue
+  behavior=snapshot.get('target_behavior') or {}
+  if not isinstance(behavior,dict):behavior={}
+  version=snapshot.get('version','UNKNOWN')
+  tags=['ALL_AI_CALLS']
+  if behavior.get('status')=='available':
+   side=behavior.get('side')
+   if side in ('UP','DOWN'):tags.append('WITH_TARGET_SIDE' if side==ai['direction'] else 'AGAINST_TARGET_SIDE')
+   if behavior.get('near_target') is True:tags.append('NEAR_TARGET')
+   crossings=number(behavior.get('observed_crossings'))
+   if crossings is not None and crossings>=3:tags.append('REPEATED_TARGET_CROSSINGS')
+   if behavior.get('lead_behavior')=='SHRINKING':tags.append('SHRINKING_LEAD')
+  correct=ai['direction']==winner
+  for tag in tags:
+   key=(checkpoint,version,tag)
+   group=groups.setdefault(key,{'checkpoint':checkpoint,'version':version,'condition':tag,'wins':0,'losses':0})
+   group['wins' if correct else 'losses']+=1
+  if not correct and len(recent)<12:
+   recent.append({'market':market,'checkpoint':checkpoint,'version':version,'captured_at':created,
+    'predicted':ai['direction'],'winner':winner,'confidence':ai.get('confidence'),
+    'conditions':tags,'target_gap_pct':behavior.get('target_gap_pct'),
+    'is_reference':behavior.get('is_reference'),'coverage_pct':behavior.get('coverage_pct'),
+    'reason':str(ai.get('reason') or '')[:500]})
+ cohorts=[]
+ for group in groups.values():
+  n=group['wins']+group['losses']
+  group.update(graded=n,accuracy_pct=round(100*group['wins']/n,1),sample_label='SMALL SAMPLE' if n<100 else 'OBSERVED SAMPLE')
+  cohorts.append(group)
+ return {'cohorts':cohorts,'recent_losses':recent,
+  'interpretation':'Conditions overlap; compare only within the same checkpoint and version. Loss examples are hindsight audits, not causal rules or calibrated probabilities. Missing target evidence is not classified. Validate any proposed rule on subsequent unseen rounds; do not override a forecast solely to fit these losses.'}
+
 _outcome_feedback_cache={}
 def outcome_feedback(market):
  cached=_outcome_feedback_cache.get(market)
@@ -521,6 +562,7 @@ def outcome_feedback(market):
  feedback={"source":"settled forward prediction log","excluded_market":market,
   "strategies":report.get("strategies",[]),"confidence":report.get("confidence",[]),
   "paired_comparisons":report.get("paired_comparisons",[]),
+  "loss_review":prediction_loss_review(rows),
   "limitations":"Small observational samples across multiple code versions. Repeated checkpoints share rounds. Confidence labels are not calibrated probabilities. Do not automatically select the highest historical accuracy or infer trading profitability. Official published target overrides reconstructed values."}
  _outcome_feedback_cache.clear();_outcome_feedback_cache[market]=(time.time(),feedback)
  return feedback
