@@ -969,7 +969,7 @@ def status():
                   "ratio_label":str(wins)+":"+str(losses),
                   "basis":"Persisted, genuinely sourced AI_REVIEW FINAL_15M decisions; only official settlements are graded",
                   "unverified":pending}
-  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":verified_counts,"ai_decision_counts":verified_counts,"ai_verified_counts":verified_counts,"ai_performance":ai_performance,"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
+  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"ai_decision_counts":verified_counts,"ai_verified_counts":verified_counts,"ai_performance":ai_performance,"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
  except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
 @app.get("/",response_class=HTMLResponse)
 def home():
