@@ -181,7 +181,7 @@ def summarize(rows):
                     label=call.get('confidence','UNRATED');c=confidence.setdefault((checkpoint,label),{'checkpoint':checkpoint,'confidence':label,'wins':0,'losses':0})
                     c[result]+=1
             if name=='AI' and winner and eligible:
-                for baseline in ('INDICATORS','INDICATOR_BINARY','TARGET_SIDE'):
+                for baseline in ('INDICATORS','INDICATOR_BINARY','TARGET_SIDE','PRICE_ACTION','CONFLUENCE','BOT_MACD','BOT_BOLLINGER','BOT_SUPERTREND','BOT_CONSENSUS'):
                     other=calls.get(baseline,{})
                     if other.get('direction') not in ('UP','DOWN'):continue
                     p=paired.setdefault((checkpoint,baseline),{'checkpoint':checkpoint,'baseline':baseline,'paired_rounds':0,'ai_wins':0,'baseline_wins':0,'ai_only_correct':0,'baseline_only_correct':0})
@@ -189,10 +189,10 @@ def summarize(rows):
                     p['paired_rounds']+=1;p['ai_wins']+=int(ai_ok);p['baseline_wins']+=int(other_ok);p['ai_only_correct']+=int(ai_ok and not other_ok);p['baseline_only_correct']+=int(other_ok and not ai_ok)
         if len(recent)<30:recent.append({'market':market,'checkpoint':checkpoint,'captured_at':created,'winner':winner,'calls':calls,'target_behavior':snapshot.get('target_behavior'), 'news_assessment':snapshot.get('news_assessment'),'version':snapshot.get('version')})
     def finish(g):
-        n=g['wins']+g['losses'];g.update(graded=n,accuracy_pct=round(100*g['wins']/n,1) if n else None,interval_95_pct=wilson(g['wins'],n),sample_label='SMALL SAMPLE' if n<100 else 'OBSERVED SAMPLE')
+        n=g['wins']+g['losses'];coverage=n+g.get('pending',0);total=coverage+g.get('no_call',0);g.update(graded=n,coverage_pct=round(100*coverage/total,1) if total else None,accuracy_pct=round(100*g['wins']/n,1) if n else None,interval_95_pct=wilson(g['wins'],n),sample_label='SMALL SAMPLE' if n<100 else 'OBSERVED SAMPLE')
         if 'paper_pnl_usd' in g:g['paper_pnl_usd']=round(g['paper_pnl_usd'],2)
         return g
     for p in paired.values():p['ai_advantage_percentage_points']=round(100*(p['ai_wins']-p['baseline_wins'])/p['paired_rounds'],1)
     return {'version':VERSION,'strategies':[finish(g) for g in groups.values()], 'confidence':[finish(c) for c in confidence.values()],
             'paired_comparisons':list(paired.values()),'recent':recent,
-            'note':'Forward observations since feature launch. Same-time paired comparisons only. Confidence labels are uncalibrated; intervals are descriptive binomial intervals and do not adjust for dependence between rounds. No retrospective AI backfill. Paper P&L is illustrative, not actual trading.'}
+            'note':'Forward observations only. Independent public-indicator bot candidates are unvalidated shadow strategies; compare accuracy AND coverage at the same checkpoint, with no lookahead, AI copying, live orders, or retrospective outcome fitting. Confidence labels are uncalibrated; intervals are descriptive and do not adjust for dependence between rounds. Paper P&L is illustrative only.'}
