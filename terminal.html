@@ -317,38 +317,45 @@ const last=bars[bars.length-1];c.fillStyle='#dce7f7';c.font='bold 12px system-ui
 }
 // Pure model: completed, contiguous candles only; one forecast per next-minute close.
 function minuteModel(input,now){
- const bars=input.filter(b=>b.t+60000<=now).slice(-30);
- if(bars.length<20)return null;
- if(bars.some((b,i)=>![b.t,b.o,b.h,b.l,b.c,b.v].every(Number.isFinite)||b.c<=0||b.v<0||b.h<Math.max(b.o,b.c)||b.l>Math.min(b.o,b.c)||(i&&b.t-bars[i-1].t!==60000)))return null;
- const last=bars.at(-1),origin=last.t+60000;
- if(now-origin>75000)return null;
- const mean=a=>a.reduce((s,v)=>s+v,0)/a.length;
- const changes=bars.slice(1).map((b,i)=>b.c-bars[i].c);
- const noise=Math.max(last.c*.00001,Math.sqrt(mean(changes.slice(-14).map(v=>v*v))));
- const atr=mean(bars.slice(-14).map((b,i)=>Math.max(b.h-b.l,Math.abs(b.h-bars[bars.length-15+i].c),Math.abs(b.l-bars[bars.length-15+i].c))));
- const fast=mean(changes.slice(-3)),slow=mean(changes.slice(-10));
- const travel=changes.slice(-10).reduce((s,v)=>s+Math.abs(v),0);
- const efficiency=travel?Math.abs(last.c-bars.at(-11).c)/travel:0;
- const prior=bars.slice(-12,-3),trend=prior.at(-1).c-prior[0].c;
- const trendSign=Math.abs(trend)>noise?Math.sign(trend):0,reverse=-trendSign;
- const support=Math.min(...prior.map(b=>b.l)),resistance=Math.max(...prior.map(b=>b.h));
- const width=Math.max(.01,last.h-last.l),body=Math.abs(last.c-last.o);
- const rejection=reverse>0?Math.min(last.o,last.c)-last.l>Math.max(body*1.4,width*.35)&&last.c>last.l+width*.6:reverse<0&&last.h-Math.max(last.o,last.c)>Math.max(body*1.4,width*.35)&&last.c<last.l+width*.4;
- const level=reverse>0?last.l<=support+atr*.25:reverse<0&&last.h>=resistance-atr*.25;
- const volume=false; // Reference prices have no traded-volume observations.
- const turn=reverse!==0&&fast*reverse>noise*.15&&changes.at(-1)*reverse>noise*.1;
- const reversal=turn&&((rejection&&level)||volume);
- const reasons=[];
- if(turn)reasons.push('opposing momentum');if(rejection)reasons.push('wick rejection');if(level)reasons.push('price level');if(volume)reasons.push('opposing volume');
- // Normalize multi-minute momentum to USD per minute; damp noisy sideways markets.
- let projection=(.7*fast+.3*slow)*(.3+.7*efficiency);
- if(reversal)projection=reverse*Math.min(noise,Math.max(Math.abs(fast),noise*.4));
- projection=Math.max(-noise*1.5,Math.min(noise*1.5,projection));
- const band=Math.max(last.c*.00002,noise*.25);
- const direction=Math.abs(projection)<=band?'SIDEWAYS':projection>0?'UP':'DOWN';
- if(!reasons.length)reasons.push(efficiency<.3?'choppy price action':'trend continuation');
- const quality=efficiency<.3?'CHOPPY':fast*slow<0?'CONFLICTING MOMENTUM':'ALIGNED MOMENTUM';
- return {quality,noise,origin,target:origin+60000,entry:last.c,direction,projection,band,reversal:reversal&&direction!=='SIDEWAYS'?(reverse>0?'BULLISH':'BEARISH'):null,reasons};
+  // Versioned, completed-candle inputs only. No peeking into the predicted minute.
+  const bars=input.filter(b=>b.t+60000<=now).slice(-30);
+  if(bars.length<21)return null;
+  if(bars.some((b,i)=>![b.t,b.o,b.h,b.l,b.c,b.v].every(Number.isFinite)||b.c<=0||b.v<0||b.h<Math.max(b.o,b.c)||b.l>Math.min(b.o,b.c)||(i&&b.t-bars[i-1].t!==60000)))return null;
+  const last=bars.at(-1),origin=last.t+60000;
+  if(now-origin>15000)return null;
+  const mean=a=>a.reduce((s,v)=>s+v,0)/a.length;
+  const changes=bars.slice(1).map((b,i)=>b.c-bars[i].c);
+  const noise=Math.max(last.c*.00001,Math.sqrt(mean(changes.slice(-14).map(v=>v*v))));
+  const atr=mean(bars.slice(-14).map((b,i)=>Math.max(b.h-b.l,Math.abs(b.h-bars[bars.length-15+i].c),Math.abs(b.l-bars[bars.length-15+i].c))));
+  const fast=mean(changes.slice(-3)),medium=mean(changes.slice(-5)),slow=mean(changes.slice(-10));
+  const travel=changes.slice(-10).reduce((s,v)=>s+Math.abs(v),0);
+  const efficiency=travel?Math.abs(last.c-bars.at(-11).c)/travel:0;
+  const ema=n=>{let value=bars[0].c;for(const b of bars.slice(1))value+=(b.c-value)*2/(n+1);return value};
+  const emaGap=ema(8)-ema(21);
+  const fastSign=Math.sign(fast);
+  const aligned=fastSign!==0&&fastSign===Math.sign(medium)&&fastSign===Math.sign(slow)&&fastSign===Math.sign(emaGap);
+  const prior=bars.slice(-12,-3),trend=prior.at(-1).c-prior[0].c;
+  const reverse=Math.abs(trend)>noise?-Math.sign(trend):0;
+  const support=Math.min(...prior.map(b=>b.l)),resistance=Math.max(...prior.map(b=>b.h));
+  const width=Math.max(.01,last.h-last.l),body=Math.abs(last.c-last.o);
+  const rejection=reverse>0?Math.min(last.o,last.c)-last.l>Math.max(body*1.4,width*.35)&&last.c>last.l+width*.6:reverse<0&&last.h-Math.max(last.o,last.c)>Math.max(body*1.4,width*.35)&&last.c<last.l+width*.4;
+  const level=reverse>0?last.l<=support+atr*.25:reverse<0&&last.h>=resistance-atr*.25;
+  const twoCandleTurn=reverse!==0&&changes.slice(-2).every(v=>Math.sign(v)===reverse&&Math.abs(v)>=noise*.1);
+  const reversal=twoCandleTurn&&fast*reverse>noise*.18&&rejection&&level;
+  const reasons=[];
+  if(aligned)reasons.push('3m/5m/10m momentum and EMA aligned');
+  if(efficiency<.38)reasons.push('choppy price action');
+  if(!aligned)reasons.push('trend confirmation missing');
+  if(reversal)reasons.push('two-candle reversal at level with wick rejection');
+  let projection=(.55*fast+.25*medium+.20*slow)*(.3+.7*efficiency);
+  if(reversal)projection=reverse*Math.min(noise*1.25,Math.max(Math.abs(fast),noise*.5));
+  projection=Math.max(-noise*1.5,Math.min(noise*1.5,projection));
+  const band=Math.max(last.c*.00002,noise*.25);
+  // Unconfirmed calls stay visible but count as SIDEWAYS, not directional winners.
+  const qualified=(aligned&&efficiency>=.38&&Math.abs(fast)>=noise*.24&&Math.abs(emaGap)>=noise*.25)||reversal;
+  const direction=!qualified||Math.abs(projection)<Math.max(band,noise*.33)?'SIDEWAYS':projection>0?'UP':'DOWN';
+  const quality=reversal?'CONFIRMED REVERSAL':qualified?'ALIGNED TREND':efficiency<.38?'CHOPPY':'CONFLICTING MOMENTUM';
+  return {model_version:'confluence-v3',quality,noise,origin,target:origin+60000,entry:last.c,direction,projection,band,reversal:reversal&&direction!=='SIDEWAYS'?(reverse>0?'BULLISH':'BEARISH'):null,reasons};
 }
 let barsBusy=false;
 async function getBars(){
@@ -393,11 +400,11 @@ async function getBars(){
    }
    calls=calls.slice(-100);
    const call=calls.at(-1),active=call&&call.target>now&&forecast&&call.source===payload.source;
-   const done=calls.filter(c=>c.actual!=null),wins=done.filter(c=>c.correct).length;
+   const done=calls.filter(c=>c.actual!=null),wins=done.filter(c=>c.correct).length;const upgraded=done.filter(c=>c.model_version==='confluence-v3'),newDirectional=upgraded.filter(c=>c.direction!=='SIDEWAYS'),newWins=newDirectional.filter(c=>c.correct).length;
    $('minuteForecast').textContent=active?'NEXT 60 SECONDS · '+call.direction+' · '+Math.ceil((call.target-now)/1000)+'s remaining · Estimated move '+(call.projection>=0?'+':'')+call.projection.toFixed(2)+' USD · '+(call.quality||'EXPERIMENTAL')+' · typical minute movement '+Number(call.noise||0).toFixed(2)+' USD · Experimental':forecast?'NEXT MINUTE · Waiting for the next candle close':'NEXT MINUTE · Insufficient, stale or gapped candles';
    const directional=done.filter(c=>c.direction!=='SIDEWAYS'),directionWins=directional.filter(c=>c.correct).length;
    const meanError=done.length?done.reduce((sum,c)=>sum+Math.abs((c.actual-c.entry)-c.projection),0)/done.length:null;
-   $('minuteAccuracy').textContent='Directional: '+directionWins+'/'+directional.length+' correct · Sideways: '+done.filter(c=>c.direction==='SIDEWAYS'&&c.correct).length+'/'+done.filter(c=>c.direction==='SIDEWAYS').length+' · Mean forecast error '+(meanError===null?'pending':meanError.toFixed(2)+' USD')+' · '+calls.filter(c=>c.expired).length+' unscored · local session';
+   $('minuteAccuracy').textContent='NEW v3 directional: '+newWins+'/'+newDirectional.length+' ('+(newDirectional.length?(100*newWins/newDirectional.length).toFixed(1)+'%':'pending')+') · coverage '+(upgraded.length?(100*newDirectional.length/upgraded.length).toFixed(0)+'%':'pending')+' · All-version directional: '+directionWins+'/'+directional.length+' · Sideways: '+done.filter(c=>c.direction==='SIDEWAYS'&&c.correct).length+'/'+done.filter(c=>c.direction==='SIDEWAYS').length+' · '+calls.filter(c=>c.expired).length+' unscored · local session';
    $('minuteReversal').textContent=active?'REVERSAL WATCH · '+(call.reversal?call.reversal+' POSSIBLE':'NO CONFIRMED REVERSAL')+' · '+call.reasons.join(', '):'REVERSAL WATCH · Awaiting fresh forecast';
    const reversals=done.filter(c=>c.reversal);
    $('minuteReversalStats').textContent='Reversal calls: '+reversals.filter(c=>c.correct).length+'/'+reversals.length+' correct · not calibrated probabilities';
