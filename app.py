@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import httpx
 from market_intelligence import intelligence_loop, public_intelligence
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
+from price_action import analyze_price_action, shadow_price_action
 from monitor_health import checks as health_checks, persist_alerts, alert_history
 from fastapi import FastAPI, Query, Request
 import paper_trader as paper
@@ -271,7 +272,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Coinbase BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"price_action":analyze_price_action(candles,"Coinbase Exchange BTC-USD"),"source":"Coinbase Exchange BTC-USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Coinbase: "+str(e)[:150])
  # Kraken OHLC uses BTC/USD minute candles; last candle is incomplete.
  try:
@@ -291,7 +292,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Kraken BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"price_action":analyze_price_action([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"source":"Kraken BTC/USD","candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
@@ -589,13 +590,14 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  # Shadow strategy: log abstentions as well as calls, on the same frozen forward checkpoint.
  # Never overwrite the raw AI outcome, main 15m lock, or trading controls.
  calls["CONFLUENCE"]=confluence_forecast(calls["AI"],behavior,frozen.get("reference_price"),frozen.get("chart"))
+ calls["PRICE_ACTION"]=shadow_price_action(frozen.get("price_action"),frozen.get("candle_age_seconds"))
  for call in calls.values():
   direction=call.get("direction")
   px=quote.get("up_entry" if direction=="UP" else "down_entry") if direction in ("UP","DOWN") and quote.get("status")=="available" else None
   call["entry_cost"]=entry_cost(px)
  snapshot={"version":VERSION,"captured_at":captured,"seconds_left":left,"checkpoint":checkpoint,
   "official_target":target,"target_behavior":behavior,"reference_price":frozen.get("reference_price"),
-  "market_quote":quote,"chart_pattern":frozen.get("chart_pattern"),"graph_evidence":frozen.get("graph_evidence"),
+  "market_quote":quote,"chart_pattern":frozen.get("chart_pattern"),"price_action":frozen.get("price_action"),"graph_evidence":frozen.get("graph_evidence"),
   "external_intelligence":frozen.get("external_intelligence"),"news_assessment":review.get("news_assessment"),
   "outcome_feedback":frozen.get("outcome_feedback"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
  # The checkpoint and its legacy halfway rows commit together or roll back together.
