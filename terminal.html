@@ -345,7 +345,8 @@ function minuteModel(input,now){
  const band=Math.max(last.c*.00002,noise*.25);
  const direction=Math.abs(projection)<=band?'SIDEWAYS':projection>0?'UP':'DOWN';
  if(!reasons.length)reasons.push(efficiency<.3?'choppy price action':'trend continuation');
- return {origin,target:origin+60000,entry:last.c,direction,projection,band,reversal:reversal&&direction!=='SIDEWAYS'?(reverse>0?'BULLISH':'BEARISH'):null,reasons};
+ const quality=efficiency<.3?'CHOPPY':fast*slow<0?'CONFLICTING MOMENTUM':'ALIGNED MOMENTUM';
+ return {quality,noise,origin,target:origin+60000,entry:last.c,direction,projection,band,reversal:reversal&&direction!=='SIDEWAYS'?(reverse>0?'BULLISH':'BEARISH'):null,reasons};
 }
 let barsBusy=false;
 async function getBars(){
@@ -358,7 +359,9 @@ async function getBars(){
   if(!Array.isArray(payload.candles)||!payload.candles.length||payload.status!=='fresh')throw Error(payload.error||'Polymarket reference feed stale or unavailable');
   state.bars=payload.candles.map(b=>({t:Number(b[0])*1000,l:Number(b[1]),h:Number(b[2]),o:Number(b[3]),c:Number(b[4]),v:Number(b[5])})).filter(b=>[b.t,b.l,b.h,b.o,b.c,b.v].every(Number.isFinite)&&b.c>0).sort((a,b)=>a.t-b.t);
   if(!state.bars.length)throw Error('No valid candles');
-  const recent=state.bars.slice(-Math.min(20,state.bars.length));
+  const closedBars=state.bars.filter(b=>b.t+60000<=Date.now());
+  const recent=closedBars.slice(-20);
+  if(!recent.length)throw Error('Waiting for completed reference candles');
   const first=recent[0],last=recent[recent.length-1];
   const change=last.c-first.o;
   const range=Math.max(...recent.map(b=>b.h))-Math.min(...recent.map(b=>b.l));
@@ -370,7 +373,7 @@ async function getBars(){
   {
    const now=Date.now();
    const completed=state.bars.filter(b=>b.t+60000<=now);
-   let calls=[];try{const saved=JSON.parse(sessionStorage.getItem('btcReferenceMinuteCallsV2')||'[]');if(Array.isArray(saved))calls=saved}catch(e){}
+   let calls=[];try{const saved=JSON.parse(sessionStorage.getItem('btcReferenceMinuteCallsV2')||'[]');if(Array.isArray(saved))calls=saved.filter(c=>c&&Number.isFinite(c.created)&&Number.isFinite(c.target)&&c.target-c.created===60000&&Number.isFinite(c.entry)&&c.entry>0&&Number.isFinite(c.band)&&c.band>=0&&Number.isFinite(c.projection)&&['UP','DOWN','SIDEWAYS'].includes(c.direction)&&Array.isArray(c.reasons)&&typeof c.source==='string')}catch(e){}
    // Use observed prices at issuance and after a full 60-second horizon.
    const observed=state.bars.at(-1);
    const live=observed&&observed.t<=now&&now-observed.t<60000;
@@ -389,8 +392,10 @@ async function getBars(){
    calls=calls.slice(-100);
    const call=calls.at(-1),active=call&&call.target>now&&forecast&&call.source===payload.source;
    const done=calls.filter(c=>c.actual!=null),wins=done.filter(c=>c.correct).length;
-   $('minuteForecast').textContent=active?'NEXT 60 SECONDS · '+call.direction+' · '+Math.ceil((call.target-now)/1000)+'s remaining · Estimated move '+(call.projection>=0?'+':'')+call.projection.toFixed(2)+' USD · Polymarket reference · Experimental':forecast?'NEXT MINUTE · Waiting for the next candle close':'NEXT MINUTE · Insufficient, stale or gapped candles';
-   $('minuteAccuracy').textContent='60-second observation results: '+wins+'/'+done.length+' correct · '+calls.filter(c=>c.expired).length+' unscored · Polymarket reference · local session only';
+   $('minuteForecast').textContent=active?'NEXT 60 SECONDS · '+call.direction+' · '+Math.ceil((call.target-now)/1000)+'s remaining · Estimated move '+(call.projection>=0?'+':'')+call.projection.toFixed(2)+' USD · '+(call.quality||'EXPERIMENTAL')+' · typical minute movement '+Number(call.noise||0).toFixed(2)+' USD · Experimental':forecast?'NEXT MINUTE · Waiting for the next candle close':'NEXT MINUTE · Insufficient, stale or gapped candles';
+   const directional=done.filter(c=>c.direction!=='SIDEWAYS'),directionWins=directional.filter(c=>c.correct).length;
+   const meanError=done.length?done.reduce((sum,c)=>sum+Math.abs((c.actual-c.entry)-c.projection),0)/done.length:null;
+   $('minuteAccuracy').textContent='Directional: '+directionWins+'/'+directional.length+' correct · Sideways: '+done.filter(c=>c.direction==='SIDEWAYS'&&c.correct).length+'/'+done.filter(c=>c.direction==='SIDEWAYS').length+' · Mean forecast error '+(meanError===null?'pending':meanError.toFixed(2)+' USD')+' · '+calls.filter(c=>c.expired).length+' unscored · local session';
    $('minuteReversal').textContent=active?'REVERSAL WATCH · '+(call.reversal?call.reversal+' POSSIBLE':'NO CONFIRMED REVERSAL')+' · '+call.reasons.join(', '):'REVERSAL WATCH · Awaiting fresh forecast';
    const reversals=done.filter(c=>c.reversal);
    $('minuteReversalStats').textContent='Reversal calls: '+reversals.filter(c=>c.correct).length+'/'+reversals.length+' correct · not calibrated probabilities';

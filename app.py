@@ -471,7 +471,7 @@ def signal_quality_snapshot(d, direction, score):
  fast=float(d.get("momentum_pct") or 0)
  slow=float(d.get("long_momentum_pct") or 0)
  aligned=fast*slow>0 and abs(fast)>=0.025 and abs(slow)>=0.045
- freshness=float(d.get("candle_age_seconds") or 9999)
+ freshness=float(d.get("candle_age_seconds") if d.get("candle_age_seconds") is not None else 9999)
  if q.get("status")=="INSUFFICIENT_DATA" or freshness>100 or volume<0.6:
   return "LOW","Thin/stale candles or low volume"
  if direction not in ("UP","DOWN"):
@@ -512,6 +512,19 @@ def research_report():
   _research_cache.update(updated_epoch=time.time(),report=report)
  return {**_research_cache["report"],"updated_epoch":_research_cache["updated_epoch"]}
 
+_outcome_feedback_cache={}
+def outcome_feedback(market):
+ cached=_outcome_feedback_cache.get(market)
+ if cached and time.time()-cached[0]<60:return cached[1]
+ rows=[row for row in research_rows() if row[0]!=market and row[5] in ('UP','DOWN')]
+ report=summarize(rows)
+ feedback={"source":"settled forward prediction log","excluded_market":market,
+  "strategies":report.get("strategies",[]),"confidence":report.get("confidence",[]),
+  "paired_comparisons":report.get("paired_comparisons",[]),
+  "limitations":"Small observational samples across multiple code versions. Repeated checkpoints share rounds. Confidence labels are not calibrated probabilities. Do not automatically select the highest historical accuracy or infer trading profitability. Official published target overrides reconstructed values."}
+ _outcome_feedback_cache.clear();_outcome_feedback_cache[market]=(time.time(),feedback)
+ return feedback
+
 async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,market):
  key=slug+":"+checkpoint
  if execute("SELECT id FROM research_calls WHERE id=?",(key,),fetch=True):return
@@ -539,7 +552,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
   "official_target":target,"target_behavior":behavior,"reference_price":frozen.get("reference_price"),
   "market_quote":quote,"chart_pattern":frozen.get("chart_pattern"),"graph_evidence":frozen.get("graph_evidence"),
   "external_intelligence":frozen.get("external_intelligence"),"news_assessment":review.get("news_assessment"),
-  "indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
+  "outcome_feedback":frozen.get("outcome_feedback"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
  # The checkpoint and its legacy halfway rows commit together or roll back together.
  with connect() as c:
   cur=c.cursor()
@@ -599,6 +612,8 @@ async def loop():
      phase="EARLY" if left15>450 else "LATE" if left15<=180 else "MID"
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(left15),market=slug,external=d,updated=now,error=None)
      state["final_15m"]={"market":slug,"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
+     try:d["outcome_feedback"]=outcome_feedback(slug)
+     except Exception:d["outcome_feedback"]={"status":"unavailable"}
      terms=fifteen.get("assetPriceTerms") or {}
      ptb=terms.get("priceToBeat") or {}
      target=ptb.get("value") if isinstance(ptb,dict) else None

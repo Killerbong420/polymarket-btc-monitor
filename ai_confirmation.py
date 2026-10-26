@@ -206,6 +206,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "target_behavior": external.get("target_behavior"), "reference_price": external.get("reference_price"),
         "market_quote": external.get("market_quote"),
         "external_intelligence": external.get("external_intelligence", {"status":"unavailable"}),
+        "outcome_feedback":external.get("outcome_feedback"),
         "historical_context": historical_context(external, price_to_beat, market),
         "market": str(market), "duration_minutes": 15, "seconds_left": seconds_left,
         "official_price_to_beat": price_to_beat, "settlement_index": "BRTI; spot price is only a proxy", "phase": str(phase), "indicator_signal": signal,
@@ -235,7 +236,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
     payload = {
         "model": MODEL, "store": False,
         "instructions": (
-            PROFIT_INSTRUCTIONS + ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
+            PROFIT_INSTRUCTIONS + "Use outcome_feedback to audit confidence and weigh baseline disagreement; small samples do not prove future accuracy. A HIGH label is not a measured win probability. Explain strong evidence before opposing the official target side. " + ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
             "in graph_evidence (oldest to newest), not just the precomputed indicator signal. "
             "Assess higher highs/lows, candle bodies and wicks, breakout or rejection near support/resistance, "
             "momentum acceleration/fading, EMA alignment, RSI and volume where provided. "
@@ -328,6 +329,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "target_behavior":external.get("target_behavior"), "reference_price":external.get("reference_price"),
         "market_quote":external.get("market_quote"),
         "external_intelligence":external.get("external_intelligence", {"status":"unavailable"}),
+        "outcome_feedback":external.get("outcome_feedback"),
         "historical_context":historical_context(external, target, market),
         "market":market,"duration_minutes":duration,"seconds_left":seconds_left,"checkpoint":checkpoint,
         "indicator_direction":indicator_direction,"indicator_score":score,
@@ -369,7 +371,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "news_effect":{"type":"string","enum":["UP","DOWN","MIXED","NONE","UNKNOWN"]}},
         "required":["direction","reason","confidence","news_ids","news_effect"],"additionalProperties":False}
     payload={"model":MODEL,"store":False,"instructions":(
-        ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "At the supplied current-round checkpoint (early, halfway or late), review the provided BTC market observations and make exactly one binary research forecast: UP or DOWN. Never output WAIT.  "
+        "Use outcome_feedback to audit confidence and weigh baseline disagreement; small samples do not prove future accuracy. A HIGH label is not a measured win probability. Explain strong evidence before opposing the official target side. " + ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "At the supplied current-round checkpoint (early, halfway or late), review the provided BTC market observations and make exactly one binary research forecast: UP or DOWN. Never output WAIT.  "
         "You may disagree with the indicator direction when concrete evidence supports it. "
         "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. "
         "When evidence is weak or conflicting, still choose the more supported direction and set confidence LOW; explicitly explain the uncertainty. This is a research forecast, not a trade instruction. "
@@ -399,5 +401,6 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     except Exception as exc:
         return {**fallback,"reason":"AI request unavailable ("+type(exc).__name__+")",
                 "evidence":snapshot}
+
 
 

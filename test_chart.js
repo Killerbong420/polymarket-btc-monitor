@@ -26,5 +26,10 @@ async function flush(){for(let i=0;i<8;i++)await Promise.resolve()}
  failed=false;listeners.visibilitychange();await flush();
  assert.match(element('minuteForecast').textContent,/NEXT 60 SECONDS/);
  assert.equal(requests,3);
+ assert.match(element('minuteAccuracy').textContent,/Directional:/);
+ storage.set('btcReferenceMinuteCallsV2',JSON.stringify([null,{created:'invalid'}]));
+ listeners.visibilitychange();await flush();
+ assert.match(element('minuteForecast').textContent,/NEXT 60 SECONDS/);
+ assert.equal(JSON.parse(storage.get('btcReferenceMinuteCallsV2')).length,1);
  console.log('PASS: all inline JS parses; chart render, forecast, feed failure, resume/recovery');
 })().catch(e=>{console.error(e);process.exitCode=1});
