@@ -378,7 +378,7 @@ async def settle(client):
  # Resolve the original event when the market-slug endpoint is unavailable.
  # Never infer official outcomes from Coinbase spot candles.
  from datetime import timedelta
- pending=execute("SELECT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE ? UNION SELECT market FROM research_calls WHERE winner IS NULL UNION SELECT market FROM paper_positions WHERE status='OPEN' ORDER BY market DESC",("%btc-updown-15m-%",),fetch=True)
+ pending=execute("SELECT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE ? UNION SELECT market FROM ai_decisions WHERE result='PENDING' AND phase='FINAL_15M' AND source='AI_REVIEW' UNION SELECT market FROM research_calls WHERE winner IS NULL UNION SELECT market FROM paper_positions WHERE status='OPEN' ORDER BY market DESC",("%btc-updown-15m-%",),fetch=True)
  diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[],"reasons":{}}
  def unresolved(reason):
   diagnostic["unresolved"]+=1
@@ -959,8 +959,17 @@ def status():
   recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason,decision_source,decision_reason,ai_confidence FROM signals WHERE phase='FINAL_15M' ORDER BY created_at DESC LIMIT 50",fetch=True)
   ai_rows=execute("SELECT market,phase,direction,confidence,source,reason,created_at,result FROM ai_decisions WHERE phase='FINAL_15M' AND source='AI_REVIEW' ORDER BY created_at DESC LIMIT 50",fetch=True)
   ai_counts=execute("SELECT result,COUNT(*) FROM ai_decisions WHERE phase='FINAL_15M' AND source='AI_REVIEW' GROUP BY result",fetch=True)
-  ai_verified_counts=execute("SELECT result,COUNT(*) FROM signals WHERE phase='FINAL_15M' AND decision_source='AI_REVIEW' GROUP BY result",fetch=True)
-  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"ai_decision_counts":dict(ai_counts),"ai_verified_counts":dict(ai_verified_counts),"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
+  ai_verified_counts=ai_counts  # One authoritative set: genuine saved AI_REVIEW decisions.
+  verified_counts=dict(ai_counts)
+  wins=int(verified_counts.get("WIN",0));losses=int(verified_counts.get("LOSS",0))
+  pending=int(verified_counts.get("PENDING",0));graded=wins+losses
+  ai_performance={"wins":wins,"losses":losses,"pending":pending,
+                  "graded":graded,"accuracy_pct":round(100*wins/graded,1) if graded else None,
+                  "win_loss_ratio":round(wins/losses,3) if losses else None,
+                  "ratio_label":str(wins)+":"+str(losses),
+                  "basis":"Persisted, genuinely sourced AI_REVIEW FINAL_15M decisions; only official settlements are graded",
+                  "unverified":pending}
+  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":verified_counts,"ai_decision_counts":verified_counts,"ai_verified_counts":verified_counts,"ai_performance":ai_performance,"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
  except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
 @app.get("/",response_class=HTMLResponse)
 def home():
