@@ -9,6 +9,7 @@ from market_intelligence import intelligence_loop, public_intelligence
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from price_action import analyze_price_action, shadow_price_action
 from bot_library import study_strategies, consensus
+from settlement_forecast import forecast_settlement
 from monitor_health import checks as health_checks, persist_alerts, alert_history
 from fastapi import FastAPI, Query, Request
 import paper_trader as paper
@@ -587,10 +588,14 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  confidence=review.get("ai_confidence","UNRATED")
  quality,quality_reason=signal_quality_snapshot(frozen,primary,score)
  calls={
-  "AI":{"direction":chosen if review.get("source")=="AI_REVIEW" else "WAIT","source":review.get("source"),"confidence":confidence,"reason":review.get("reason"),"news_assessment":review.get("news_assessment")},
+  "AI":{"direction":chosen if review.get("source")=="AI_REVIEW" else "WAIT","source":review.get("source"),"confidence":confidence,"reason":review.get("reason"),"forecast_final_mean_usd":review.get("forecast_final_mean_usd"),"forecast_rationale":review.get("forecast_rationale"),"news_assessment":review.get("news_assessment")},
   "INDICATORS":{"direction":primary,"source":"INDICATORS","confidence":quality,"reason":quality_reason},
   "INDICATOR_BINARY":{"direction":fallback,"source":"FORCED_INDICATORS","confidence":quality},
   "TARGET_SIDE":{"direction":behavior.get("side") if behavior.get("status")=="available" and behavior.get("side") in ("UP","DOWN") else "WAIT","source":behavior.get("source"),"confidence":"UNRATED"}}
+ path=frozen.get("settlement_forecast") or {}
+ calls["PRICE_PATH"]={"direction":path.get("projected_direction") if path.get("status")=="available" and path.get("projected_direction") in ("UP","DOWN") else "WAIT",
+  "source":path.get("version"),"confidence":"UNRATED","forecast_final_mean_usd":path.get("forecast_final_mean_usd"),
+  "reason":"Independent future BRTI final-minute projection, not the current target side"}
  # Shadow strategy: log abstentions as well as calls, on the same frozen forward checkpoint.
  # Never overwrite the raw AI outcome, main 15m lock, or trading controls.
  calls["CONFLUENCE"]=confluence_forecast(calls["AI"],behavior,frozen.get("reference_price"),frozen.get("chart"))
@@ -607,7 +612,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
   "official_target":target,"target_behavior":behavior,"reference_price":frozen.get("reference_price"),
   "market_quote":quote,"chart_pattern":frozen.get("chart_pattern"),"price_action":frozen.get("price_action"),"bot_research_signals":frozen.get("bot_research_signals"),"graph_evidence":frozen.get("graph_evidence"),
   "external_intelligence":frozen.get("external_intelligence"),"news_assessment":review.get("news_assessment"),
-  "outcome_feedback":frozen.get("outcome_feedback"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
+  "outcome_feedback":frozen.get("outcome_feedback"),"settlement_forecast":frozen.get("settlement_forecast"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
  # The checkpoint and its legacy halfway rows commit together or roll back together.
  with connect() as c:
   cur=c.cursor()
@@ -619,7 +624,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
     run("INSERT INTO signals (id,market,phase,direction,flip,score,created_at,quality,quality_reason,decision_source,decision_reason,ai_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,flip,score,captured,quality,quality_reason,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],confidence))
     run("INSERT INTO ai_decisions (id,market,phase,direction,confidence,source,reason,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,confidence,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],captured))
   finally:cur.close()
- if checkpoint=="HALFWAY":state["last_halfway_ai"]={"market":slug,"phase":"FINAL_15M","direction":chosen,"indicator_direction":fallback,"source":review.get("source"),"reason":review.get("reason"),"ai_confidence":confidence,"updated":captured,"news_assessment":review.get("news_assessment")}
+ if checkpoint=="HALFWAY":state["last_halfway_ai"]={"market":slug,"phase":"FINAL_15M","direction":chosen,"forecast_final_mean_usd":review.get("forecast_final_mean_usd"),"indicator_direction":fallback,"source":review.get("source"),"reason":review.get("reason"),"ai_confidence":confidence,"updated":captured,"news_assessment":review.get("news_assessment")}
  _research_cache["updated_epoch"]=0
  state["last_checkpoint"]={"market":slug,"checkpoint":checkpoint,"captured_at":captured,"seconds_left":left,"calls":calls}
 
@@ -687,8 +692,9 @@ async def loop():
        "points":[],"status":"unavailable","reason":reference.get("reason","No verified BRTI observations")}
      ref_public={k:v for k,v in reference.items() if k!="points"}
      behavior=target_behavior(d,target,slug,reference)
-     d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote)
-     state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote)
+     price_path=forecast_settlement(reference,d,target,left15,now=time.time())
+     d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path)
+     state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path)
      try:
       capture_polymarket_quote(quote)
       state["quote_storage_error"]=None
@@ -713,7 +719,7 @@ async def loop():
      for key in ("phase","seconds_left","score"): state.pop(key,None)
      state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No verified Polymarket US 15-minute market: "+str(reason15))
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
-     state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},missed_checkpoints=[])
+     state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},settlement_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},missed_checkpoints=[])
      await confirm(client,None,None,"WAIT","WAIT",0,d)
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     # Historical settlement can involve 30 remote rounds and must not
@@ -976,7 +982,7 @@ def lightweight_live():
          "market":state.get("market"),"signal":state.get("signal"),
          "error":state.get("error"),"external":state.get("external") or {},
          "brti_chart":state.get("brti_chart"),"reference_price":state.get("reference_price"),
-         "target_behavior":state.get("target_behavior"),
+         "target_behavior":state.get("target_behavior"),"settlement_forecast":state.get("settlement_forecast"),
          "final_15m":state.get("final_15m"),"last_halfway_ai":state.get("last_halfway_ai"),
          "last_checkpoint":state.get("last_checkpoint"),
          "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),
