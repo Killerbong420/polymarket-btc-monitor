@@ -635,6 +635,8 @@ def track_prediction(task):
 async def loop():
  setup()
  ai_task=None
+ settlement_task=None
+ last_settlement_check=0.0
  checkpoints={}
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
   while True:
@@ -714,7 +716,12 @@ async def loop():
      state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},missed_checkpoints=[])
      await confirm(client,None,None,"WAIT","WAIT",0,d)
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
-    await settle(client)
+    # Historical settlement can involve 30 remote rounds and must not
+    # prevent current 15-minute predictions from refreshing every cycle.
+    if (settlement_task is None or settlement_task.done()) and time.monotonic()-last_settlement_check>=30:
+     settlement_task=track_prediction(asyncio.create_task(settle(client)))
+     last_settlement_check=time.monotonic()
+    state["settlement_task_running"]=settlement_task is not None and not settlement_task.done()
     state["alerts"]=health_checks(state,public_state(),DB)
     persist_alerts(execute,state["alerts"])
    except Exception as e:
@@ -730,6 +737,8 @@ async def loop():
    except asyncio.CancelledError:
     if ai_task is not None:
      ai_task.cancel()
+    if settlement_task is not None:
+     settlement_task.cancel()
     raise
 async def paper_worker():
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchPaperSandbox/1.0"}) as client:
@@ -959,6 +968,19 @@ async def candle_proxy():
     "error_code":code,"error":"Polymarket reference feed: "+code}
   _reference_candle_cache.update(at=time.monotonic(),payload=payload,minute=int(time.time()//60))
   return payload
+
+@app.get("/api/live")
+def lightweight_live():
+ """Read-only in-memory live feed independent of historical SQL."""
+ return {"status":state.get("status"),"updated":state.get("updated"),
+         "market":state.get("market"),"signal":state.get("signal"),
+         "error":state.get("error"),"external":state.get("external") or {},
+         "brti_chart":state.get("brti_chart"),"reference_price":state.get("reference_price"),
+         "target_behavior":state.get("target_behavior"),
+         "final_15m":state.get("final_15m"),"last_halfway_ai":state.get("last_halfway_ai"),
+         "last_checkpoint":state.get("last_checkpoint"),
+         "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),
+         "server_epoch":time.time()}
 
 @app.get("/api/status")
 def status():
