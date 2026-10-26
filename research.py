@@ -117,6 +117,45 @@ def entry_cost(price,contracts=100,slippage=0.005,theta=FEE_THETA):
             'fee_theta':theta,'fee_schedule':'US standard taker, verified 2026-10-25; effective 2026-10-19 13:00 ET',
             'fee_source':FEE_SOURCE,'note':'Paper single-fill hold-to-settlement scenario, $1 payout. No rebates or actual executions; fill splitting, spread changes, size and fee updates can change costs.'}
 
+def confluence_forecast(ai_call, target_behavior, reference_price, chart_indicators):
+    """Forward-only, selective RESEARCH signal. Does not rewrite AI calls or trade.
+
+    Requirements are fixed before settlement, and abstentions remain countable.
+    This is a candidate filter, not a validated accuracy improvement.
+    """
+    def no(reason):
+        return {"direction":"WAIT","source":"CONFLUENCE_ABSTAIN",
+                "confidence":"UNRATED","reason":reason}
+    if not isinstance(ai_call,dict) or ai_call.get("source")!="AI_REVIEW" or ai_call.get("direction") not in ("UP","DOWN"):
+        return no("No verified live AI forecast")
+    if ai_call.get("confidence") not in ("MEDIUM","HIGH"):
+        return no("AI evidence confidence LOW or unavailable")
+    behavior=target_behavior if isinstance(target_behavior,dict) else {}
+    reference=reference_price if isinstance(reference_price,dict) else {}
+    chart=chart_indicators if isinstance(chart_indicators,dict) else {}
+    if reference.get("status")!="fresh" or behavior.get("status")!="available" or behavior.get("is_reference") is not True:
+        return no("No fresh official-index target evidence")
+    age=number(behavior.get("price_age_seconds"))
+    coverage=number(behavior.get("coverage_pct"))
+    gap=number(behavior.get("target_gap_pct"))
+    atr=number(chart.get("atr14_pct"))
+    duration=number(behavior.get("current_side_run_seconds"))
+    crossings=number(behavior.get("observed_crossings"))
+    if age is None or age>15 or coverage is None or coverage<45:
+        return no("Index observation too old or sparse")
+    if gap is None or atr is None or abs(gap)<max(.05,.40*atr):
+        return no("Target lead too small relative to volatility")
+    if behavior.get("near_target") is True or duration is None or duration<45:
+        return no("Near target or insufficient sustained lead")
+    if crossings is None or crossings>=4 or behavior.get("lead_behavior")=="SHRINKING":
+        return no("Repeated crossings or shrinking lead")
+    side="UP" if gap>0 else "DOWN"
+    if ai_call.get("direction")!=side or behavior.get("side")!=side:
+        return no("AI forecast opposes the current official-index side")
+    return {"direction":side,"source":"CONFLUENCE_FORWARD",
+            "confidence":ai_call["confidence"],
+            "reason":"Fresh index lead, sustained target side and AI agreement"}
+
 def wilson(w,n):
     if not n:return None
     z=1.96;p=w/n;den=1+z*z/n;mid=(p+z*z/(2*n))/den;half=z*math.sqrt(p*(1-p)/n+z*z/(4*n*n))/den
