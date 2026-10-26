@@ -1,5 +1,42 @@
 # Polymarket BTC Monitor
 
+
+## Forecast the FUTURE 15-minute settlement number, not the current winning side
+
+The live panel now forecasts the **future final 60-second BRTI mean** in USD alongside
+the separate official price-to-beat. It is not the current BRTI tick and it
+does not substitute Coinbase/Kraken spot or Polymarket contract odds.
+`settlement_forecast.py` uses only already-published one-second BRTI ticks,
+multi-horizon trend, momentum acceleration, realized reference volatility
+and a deliberately small adjustment from fresh exchange candles, sampled
+initiated-buy/sell pressure and Kraken order-book imbalance. The estimated
+movement decays with forecast horizon; there are downside/upside *scenarios*
+but no made-up confidence probabilities. Once the final minute begins, actual
+published BRTI seconds enter the predicted final mean, and unpublished
+seconds are forecast. Missing past ticks remain explicitly marked.
+
+Both live and checkpoint OpenAI calls see the quantified future baseline
+along with independent candles, chart patterns, time remaining, historical
+research, exchange trade pressure, book depth and news. Their strict outputs
+include the AI's **own numeric final BRTI estimate**, and the displayed/graded
+UP/DOWN decision derives from whether **that estimated FUTURE number**
+will be above or below the official price-to-beat. A current UP position
+can therefore legitimately produce a predicted DOWN settlement, or vice
+versa. If the BRTI feed is missing, no numeric BRTI price is manufactured.
+
+The forward checkpoint log also saves an independent `PRICE_PATH` candidate
+and the complete frozen forecast inputs without changing past results.
+`GET /api/price-forecast/accuracy` reports absolute forecast errors in USD
+for the AI, the projected path, and a naive unchanged-current-BRTI baseline,
+**only** if all 60 actual final-minute BRTI seconds are published when the
+market is officially settled. The default page shows the forecast and
+observed errors when available. A lower error or higher win rate is not
+guaranteed; measure improvement against unseen future rounds, and compare
+models on matched rounds rather than small selective subsets.
+
+Validation: `python -m unittest -v test_settlement_forecast`.
+
+
 BTC 15-minute prediction monitoring project.
 
 
