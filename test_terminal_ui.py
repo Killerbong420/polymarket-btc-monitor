@@ -47,6 +47,15 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("primary.id='primaryPanel';cards.append(primary)", self.html)
         self.assertIn("cards.id='terminalQuickCards'", self.html)
 
+    def test_ai_win_loss_panel_always_visible(self):
+        # A previous CSS selector hid this panel until the advanced toggle was opened.
+        self.assertNotIn("body:not(.show-advanced) #serverHistory", self.html)
+        self.assertIn('id="serverHistory"', self.html)
+        self.assertIn('id="winLossRatio"', self.html)
+        self.assertIn('id="winRate"', self.html)
+        self.assertIn("d.ai_performance", self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},5000)", self.html)
+
     def test_live_feeds_are_started(self):
         self.assertIn("connectStream('coinbase');connectStream('kraken');update()", self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},5000)", self.html)
