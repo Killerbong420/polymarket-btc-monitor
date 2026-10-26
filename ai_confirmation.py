@@ -178,7 +178,7 @@ def final_price_direction(parsed, external, target):
     if (not all(math.isfinite(x) and x>0 for x in (price,current,target))
             or abs(price/current-1) > .03):
         raise ValueError("Non-finite or implausible BRTI price forecast")
-    return round(price,2), ("UP" if price>target else "DOWN" if price<target else None)
+    return round(price,2), ("UP" if price>=target else "DOWN")
 
 
 def news_assessment(parsed,external):
