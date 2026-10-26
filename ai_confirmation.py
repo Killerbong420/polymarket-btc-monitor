@@ -168,6 +168,9 @@ def news_assessment(parsed,external):
             'note':'Model-reported influence, not verified causality. No headline selected means no stated news attribution.'}
 
 ANALYSIS_INSTRUCTIONS = (
+    "Review any peer_bot_studies and range_structure_study as hypothetical independent public-indicator comparisons, not verified expert calls, market makers' positions, proprietary signals or calibrated accuracy. "
+    "Weigh bot disagreements against the actual timestamped candles, official BRTI observations and fixed target; never blindly follow their consensus. "
+    "Study published forward-only outcome_feedback to identify candidate failure regimes, but do not manufacture win rates or call retroactively. "
     "Use target_behavior for observed lead size, time above/below target, crossing count, "
     "coverage and whether the lead is growing or shrinking. Prefer a fresh reference_price "
     "over exchange spot for target-side reasoning. BTC settlement compares the final-minute "
@@ -220,6 +223,8 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "candle_age_seconds": external.get("candle_age_seconds"),
         "chart_indicators": external.get("chart"),
         "chart_pattern": external.get("chart_pattern"),
+        "peer_bot_studies": external.get("bot_research_signals"),
+        "range_structure_study": external.get("price_action"),
         "signal_quality": external.get("signal_quality"),
         "graph_evidence": {**(external.get("graph_evidence") or {}),
             "candles_ohlcv": (external.get("graph_evidence") or {}).get("candles_ohlcv", [])[-20:]},
@@ -363,6 +368,8 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
                    "note":pattern.get("note")},
         "graph_evidence":external.get("graph_evidence"),
         "signal_quality":quality,
+        "peer_bot_studies":external.get("bot_research_signals"),
+        "range_structure_study":external.get("price_action"),
         "candle_age_seconds":external.get("candle_age_seconds"),
         "missing_evidence":missing}
     schema={"type":"object","properties":{"direction":{"type":"string","enum":["UP","DOWN"]},
