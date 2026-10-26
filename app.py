@@ -68,6 +68,10 @@ def setup():
  execute("""CREATE TABLE IF NOT EXISTS monitor_events (
  id TEXT PRIMARY KEY,code TEXT NOT NULL,severity TEXT NOT NULL,message TEXT NOT NULL,
  active INTEGER NOT NULL,created_at TEXT NOT NULL)""")
+ try:
+  execute("ALTER TABLE research_calls ADD COLUMN final_reference_mean REAL")
+ except Exception as exc:
+  if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower(): raise
  execute("CREATE INDEX IF NOT EXISTS research_market_idx ON research_calls(market)")
  paper.setup(execute)
  execute("""CREATE TABLE IF NOT EXISTS polymarket_quote_samples (
@@ -452,6 +456,17 @@ async def settle(client):
    execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    execute("UPDATE ai_decisions SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    execute("UPDATE research_calls SET winner=?,settled_at=? WHERE market=? AND winner IS NULL",(win,datetime.now(timezone.utc).isoformat(),slug))
+   # Exact-price scoring is separate from official binary settlement. Only
+   # grade BRTI numeric errors with all 60 actual published final-minute ticks.
+   try:
+    ref=await reference_prices(client,{**market,"slug":slug})
+    if ref.get("final_minute_samples")==60:
+     final_mean=number(ref.get("final_minute_average_so_far"))
+     if final_mean is not None:
+      execute("UPDATE research_calls SET final_reference_mean=? WHERE market=?",(final_mean,slug))
+   except Exception:
+    # Missing historical reference observations must never block official WIN/LOSS.
+    pass
    execute("UPDATE paper_positions SET winner=? WHERE market=? AND status='OPEN'",(win,slug))
    diagnostic["verified"]+=1
   except Exception as exc:
@@ -824,6 +839,46 @@ def research_csv():
    fields=[market,checkpoint,created,strategy,direction,call.get("source"),call.get("confidence"),winner,result,cost.get("quoted_entry"),cost.get("assumed_slippage_per_contract"),cost.get("fee_usd"),pnl,snapshot]
    writer.writerow([("'"+v if v.startswith(("=","+","-","@")) else v) if isinstance(v,str) else v for v in fields])
  return Response(out.getvalue(),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=btc_15m_forward_research.csv"})
+
+def numeric_price_forecast_report():
+ """Observed absolute USD errors, using ONLY completed BRTI 60/60 seconds."""
+ rows=execute("""SELECT checkpoint,snapshot_json,calls_json,final_reference_mean
+   FROM research_calls WHERE final_reference_mean IS NOT NULL
+   ORDER BY created_at DESC LIMIT 10000""",fetch=True)
+ groups={}
+ for checkpoint,snapshot_json,calls_json,actual in rows:
+  try:
+   snap=json.loads(snapshot_json);calls=json.loads(calls_json)
+   if not isinstance(snap,dict) or not isinstance(calls,dict):continue
+   y=number(actual)
+   if y is None or y<=0:continue
+   candidates={"CURRENT_BRTI_BASELINE":(snap.get("settlement_forecast") or {}).get("current_reference_usd"),
+               "PRICE_PATH":(calls.get("PRICE_PATH") or {}).get("forecast_final_mean_usd"),
+               "AI":(calls.get("AI") or {}).get("forecast_final_mean_usd") if (calls.get("AI") or {}).get("source")=="AI_REVIEW" else None}
+   for name,pred in candidates.items():
+    p=number(pred)
+    if p is None or p<=0:continue
+    bucket=groups.setdefault((checkpoint,name),{"checkpoint":checkpoint,"source":name,"graded":0,"sum_abs_error_usd":0.0,"sum_square_error_usd":0.0})
+    err=p-y
+    bucket["graded"]+=1
+    bucket["sum_abs_error_usd"]+=abs(err)
+    bucket["sum_square_error_usd"]+=err*err
+  except (ValueError,TypeError):continue
+ out=[]
+ for item in groups.values():
+  n=item["graded"]
+  out.append({"checkpoint":item["checkpoint"],"source":item["source"],"graded":n,
+   "mean_absolute_error_usd":round(item["sum_abs_error_usd"]/n,2),
+   "root_mean_square_error_usd":round((item["sum_square_error_usd"]/n)**.5,2)})
+ return {"version":"forward-binary-and-numeric-audit-v1",
+         "status":"observed" if out else "awaiting_complete_final_minute_reference",
+         "results":out,"definition":"Error against the actual 60/60 published BRTI final-minute index mean. Current BRTI at prediction time is a naive baseline. Historical guesses and unavailable ticks are excluded; forecasts are not recalibrated probabilities.",
+         "note":"Compare forecast sources only on paired same-checkpoint rounds with actual BRTI reference coverage. Errors are USD, not trade P&L."}
+
+@app.get("/api/price-forecast/accuracy")
+def price_forecast_accuracy():
+ try:return numeric_price_forecast_report()
+ except Exception:return JSONResponse({"status":"unavailable","error":"Price accuracy database unavailable"},status_code=503)
 
 @app.get("/api/entry-estimate")
 def estimate_entry(direction:str="UP",contracts:float=Query(100,gt=0,le=1000000),slippage:float=Query(.005,ge=0,le=.25)):
