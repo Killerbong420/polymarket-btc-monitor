@@ -952,9 +952,10 @@ def status():
  try:
   rows=execute("SELECT result,COUNT(*) FROM signals WHERE phase='FINAL_15M' GROUP BY result",fetch=True)
   recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason,decision_source,decision_reason,ai_confidence FROM signals WHERE phase='FINAL_15M' ORDER BY created_at DESC LIMIT 50",fetch=True)
-  ai_rows=execute("SELECT market,phase,direction,confidence,source,reason,created_at,result FROM ai_decisions WHERE phase='FINAL_15M' ORDER BY created_at DESC LIMIT 50",fetch=True)
-  ai_counts=execute("SELECT result,COUNT(*) FROM ai_decisions WHERE phase='FINAL_15M' GROUP BY result",fetch=True)
-  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"ai_decision_counts":dict(ai_counts),"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
+  ai_rows=execute("SELECT market,phase,direction,confidence,source,reason,created_at,result FROM ai_decisions WHERE phase='FINAL_15M' AND source='AI_REVIEW' ORDER BY created_at DESC LIMIT 50",fetch=True)
+  ai_counts=execute("SELECT result,COUNT(*) FROM ai_decisions WHERE phase='FINAL_15M' AND source='AI_REVIEW' GROUP BY result",fetch=True)
+  ai_verified_counts=execute("SELECT result,COUNT(*) FROM signals WHERE phase='FINAL_15M' AND decision_source='AI_REVIEW' GROUP BY result",fetch=True)
+  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"ai_decision_counts":dict(ai_counts),"ai_verified_counts":dict(ai_verified_counts),"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
  except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
 @app.get("/",response_class=HTMLResponse)
 def home():
