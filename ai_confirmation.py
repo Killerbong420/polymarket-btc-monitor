@@ -2,6 +2,7 @@
 import json
 import os
 import time
+import math
 import httpx
 from paper_trader import opportunity_context
 
@@ -158,6 +159,28 @@ PROFIT_INSTRUCTIONS=(
     "Without a supplied position use HOLD. Keep the opportunity reason under 160 characters. "
 )
 
+def final_price_direction(parsed, external, target):
+    """Make the model's actual FUTURE BRTI price estimate determine its direction.
+
+    Current index side, indicator trend and market odds are evidence, not
+    equivalent to a forecast of the final one-minute settlement average.
+    """
+    baseline = external.get("settlement_forecast") or {}
+    raw = parsed.get("forecast_final_mean_usd")
+    if baseline.get("status") != "available":
+        return None, None
+    try:
+        price = float(raw)
+        current = float(baseline["current_reference_usd"])
+        target = float(target)
+    except (ValueError, TypeError, KeyError):
+        raise ValueError("Missing numeric future BRTI price forecast")
+    if (not all(math.isfinite(x) and x>0 for x in (price,current,target))
+            or abs(price/current-1) > .03):
+        raise ValueError("Non-finite or implausible BRTI price forecast")
+    return round(price,2), ("UP" if price>target else "DOWN" if price<target else None)
+
+
 def news_assessment(parsed,external):
     supplied={h.get('id'):h for h in ((external.get('external_intelligence') or {}).get('news') or {}).get('headlines',[]) if h.get('id')}
     raw=parsed.get('news_ids') or []
@@ -207,6 +230,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "paper_trade_context":opportunity_context(external.get("market_quote")),
         "paper_position":external.get("paper_position"),
         "target_behavior": external.get("target_behavior"), "reference_price": external.get("reference_price"),
+        "future_settlement_forecast":external.get("settlement_forecast"),
         "market_quote": external.get("market_quote"),
         "external_intelligence": external.get("external_intelligence", {"status":"unavailable"}),
         "outcome_feedback":external.get("outcome_feedback"),
@@ -234,10 +258,12 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "verdict": {"type": "string", "enum": ["UP", "DOWN"]},
         "reason": {"type": "string"},
         "flip_risk": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "UNKNOWN"]},
+        "forecast_final_mean_usd": {"type":["number","null"]},
+        "price_path_reason": {"type":"string"},
         "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
         "news_ids": {"type":"array","items":{"type":"string"}},
         "news_effect": {"type":"string","enum":["UP","DOWN","MIXED","NONE","UNKNOWN"]}
-    }, "required": ["verdict", "reason", "flip_risk", "confidence", "news_ids", "news_effect", "profit_opportunity"], "additionalProperties": False}
+    }, "required": ["verdict", "reason", "flip_risk", "confidence", "news_ids", "news_effect", "profit_opportunity", "forecast_final_mean_usd", "price_path_reason"], "additionalProperties": False}
     payload = {
         "model": MODEL, "store": False,
         "instructions": (
@@ -246,7 +272,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "Assess higher highs/lows, candle bodies and wicks, breakout or rejection near support/resistance, "
             "momentum acceleration/fading, EMA alignment, RSI and volume where provided. "
             "Weigh recent structure most heavily; compare contradictory trade pressure or indicators. "
-            "Predict the current 15-minute contract settlement direction relative to its official price to beat, not the next candle. Account for seconds_left. Spot prices are proxies, not BRTI settlement. Select UP or DOWN, never WAIT "
+            "Project the FUTURE final 60-second BRTI reference average at contract expiry. Forecast its numeric USD price, incorporating the time left, observed speed and acceleration, trend fading, breaks, likely reversals, volatility, flows and all fresh evidence. Use future_settlement_forecast as a modest baseline, not a fact. The current BRTI side is NOT the answer and MUST NOT simply be copied. Your UP/DOWN verdict must equal whether YOUR predicted final-minute average is above or below official_price_to_beat. If BRTI evidence or target is unavailable, output null numeric price rather than guessing an official-index price. Explain the FUTURE price path in price_path_reason. Spot prices are proxies, not BRTI settlement. Select UP or DOWN, never WAIT "
             "when usable candles exist; confidence LOW when unclear or stale. "
             "Explain the specific chart evidence for the direction, not just generic bullish/bearish claims. "
             "Never invent unavailable data, probabilities or certainty; research only, not trading advice. "
@@ -271,8 +297,13 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         parsed = json.loads("".join(text_parts))
         if parsed.get("verdict") not in ("UP", "DOWN"):
             raise ValueError("Invalid model verdict")
+        price_forecast, forecast_dir = final_price_direction(parsed,external,price_to_beat)
+        verdict=forecast_dir or parsed["verdict"]
         _auth_cache = {"status": "inference_verified", "reason": "OpenAI inference succeeded."}
-        _cache = {"status": "ready", "verdict": parsed["verdict"],
+        _cache = {"status": "ready", "verdict": verdict,
+            "forecast_final_mean_usd":price_forecast,
+            "forecast_rationale":str(parsed.get("price_path_reason",""))[:240],
+            "forecast_was_direction_decider":bool(forecast_dir),
             "reason": str(parsed.get("reason", ""))[:240],
             "flip_risk": parsed.get("flip_risk", "UNKNOWN"),
             "confidence": parsed.get("confidence", "LOW"),
@@ -332,6 +363,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     if external.get("candle_age_seconds") is None: missing.append("candle_freshness")
     snapshot={
         "target_behavior":external.get("target_behavior"), "reference_price":external.get("reference_price"),
+        "future_settlement_forecast":external.get("settlement_forecast"),
         "market_quote":external.get("market_quote"),
         "external_intelligence":external.get("external_intelligence", {"status":"unavailable"}),
         "outcome_feedback":external.get("outcome_feedback"),
@@ -375,12 +407,14 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     schema={"type":"object","properties":{"direction":{"type":"string","enum":["UP","DOWN"]},
         "reason":{"type":"string"},"confidence":{"type":"string","enum":["LOW","MEDIUM","HIGH"]},
         "news_ids":{"type":"array","items":{"type":"string"}},
-        "news_effect":{"type":"string","enum":["UP","DOWN","MIXED","NONE","UNKNOWN"]}},
-        "required":["direction","reason","confidence","news_ids","news_effect"],"additionalProperties":False}
+        "news_effect":{"type":"string","enum":["UP","DOWN","MIXED","NONE","UNKNOWN"]},
+        "forecast_final_mean_usd":{"type":["number","null"]},
+        "price_path_reason":{"type":"string"}},
+        "required":["direction","reason","confidence","news_ids","news_effect","forecast_final_mean_usd","price_path_reason"],"additionalProperties":False}
     payload={"model":MODEL,"store":False,"instructions":(
         "Use outcome_feedback to audit confidence and weigh baseline disagreement; small samples do not prove future accuracy. A HIGH label is not a measured win probability. Explain strong evidence before opposing the official target side. " + ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "At the supplied current-round checkpoint (early, halfway or late), review the provided BTC market observations and make exactly one binary research forecast: UP or DOWN. Never output WAIT.  "
         "You may disagree with the indicator direction when concrete evidence supports it. "
-        "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. "
+        "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. Forecast the NUMERIC FUTURE 60-second BRTI settlement mean in forecast_final_mean_usd when verified official-index evidence exists; null otherwise. Predict how price MOVES FROM NOW TO THE FINAL MINUTE, not which side is winning NOW. Future settlement may REVERSE the current side. Use future_settlement_forecast as a secondary quantitative trajectory baseline, not proof or a substitute for independent reasoning. The binary direction MUST reflect YOUR numerical future settlement estimate versus the official price-to-beat, not present target position or chart bias. Explain speed, acceleration, time remaining, volatility and reversal risk in price_path_reason. "
         "When evidence is weak or conflicting, still choose the more supported direction and set confidence LOW; explicitly explain the uncertainty. This is a research forecast, not a trade instruction. "
         "Analyze the chronological OHLCV candle graph itself: swing highs/lows, trend structure, recent candle bodies/wicks, support/resistance, breakout/rejection, and reversal versus continuation. Explicitly weigh current_behavior, acceleration versus fading, pullback versus reversal, and price location inside its range; do not treat UP/DOWN bias as sufficient evidence. "
         "Consider every supplied evidence field, contradictions, proximity to the official target, "
@@ -390,7 +424,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "Keep the reason under 160 characters."),
         "input":json.dumps(snapshot,default=str,separators=(",",":")),
         "text":{"format":{"type":"json_schema","name":"btc_halfway_final","strict":True,"schema":schema}},
-        "max_output_tokens":360}
+        "max_output_tokens":500}
     try:
         res=await client.post("https://api.openai.com/v1/responses",
             headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},
@@ -401,9 +435,14 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
                 for p in x.get("content",[]) if p.get("type")=="output_text"]
         decision=json.loads("".join(chunks))
         if decision.get("direction") not in ("UP","DOWN"): raise ValueError("Invalid direction")
-        return {"direction":decision["direction"],"source":"AI_REVIEW",
+        forecast_price,forecast_dir=final_price_direction(decision,external,target)
+        direction=forecast_dir or decision["direction"]
+        return {"direction":direction,"source":"AI_REVIEW",
+            "forecast_final_mean_usd":forecast_price,
+            "forecast_rationale":str(decision.get("price_path_reason",""))[:240],
+            "forecast_was_direction_decider":bool(forecast_dir),
             "reason":str(decision.get("reason",""))[:160],
-            "ai_direction":decision["direction"],"ai_confidence":decision.get("confidence","LOW"),
+            "ai_direction":direction,"ai_confidence":decision.get("confidence","LOW"),
             "evidence":snapshot,"model":MODEL,"news_assessment":news_assessment(decision,external)}
     except Exception as exc:
         return {**fallback,"reason":"AI request unavailable ("+type(exc).__name__+")",
