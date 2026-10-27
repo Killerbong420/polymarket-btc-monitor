@@ -118,6 +118,7 @@ async def loop(client,execute,verified_winner,external_state):
        candidate=number(terms.get("priceToBeat"))
        if terms.get("indexSymbol")=="BRTI" and candidate is not None and candidate>0:
         target=candidate
+        market["assetPriceTerms"]=terms
         state.update(target=target,status="running",reason="Official target retrieved from market details")
         break
       except Exception:continue
