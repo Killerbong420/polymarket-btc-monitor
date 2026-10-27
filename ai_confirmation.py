@@ -222,6 +222,68 @@ def numeric_forecast_schema(external, target):
     return {"type": "number"} if numeric_forecast_required(external, target) else {"type": ["number", "null"]}
 
 
+# Change to this version only for calls that actually see a verified BRTI path.
+PATH_AI_VERSION = "forward-15m-v3-path-informed-ai"
+
+def trusted_price_path(external, target):
+    """Expose only a fresh, target-matched official-index forecast to the model.
+
+    This protects against a stale market, a proxy price, or a different
+    round's target silently anchoring an AI decision.
+    """
+    external = external if isinstance(external, dict) else {}
+    ref = external.get("reference_price") or {}
+    path = external.get("settlement_forecast") or {}
+    if (not isinstance(ref, dict) or not isinstance(path, dict)
+            or ref.get("status") != "fresh"
+            or ref.get("source") != "Polymarket US BTC reference / BRTI"
+            or path.get("status") != "available"
+            or path.get("quality") not in ("OBSERVED", "LIMITED")):
+        return None
+    try:
+        official = float(target)
+        projected = float(path.get("forecast_final_mean_usd"))
+        path_target = float(path.get("target_usd"))
+        current = float(ref.get("price"))
+        age = float(ref.get("age_seconds"))
+        path_age = float(path.get("age_seconds"))
+        path_current = float(path.get("current_reference_usd"))
+    except (ValueError, TypeError, OverflowError):
+        return None
+    if (not all(math.isfinite(v) and v > 0 for v in
+                (official, projected, path_target, current, path_current))
+            or not all(math.isfinite(v) and 0 <= v <= 15 for v in (age, path_age))
+            or abs(path_target-official) > .02
+            or abs(path_current-current) > .05
+            or abs(projected/current-1) > .03):
+        return None
+    lower, upper = path.get("downside_scenario_usd"), path.get("upside_scenario_usd")
+    try:
+        low, high = float(lower), float(upper)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (math.isfinite(low) and math.isfinite(high) and
+            0 < low <= projected <= high):
+        return None
+    return {
+        "status": "verified_input_not_calibrated",
+        "version": path.get("version"),
+        "quality": path.get("quality"),
+        "forecast_final_mean_usd": round(projected, 2),
+        "target_usd": round(official, 2),
+        "projected_direction": "UP" if projected >= official else "DOWN",
+        "downside_scenario_usd": round(low, 2),
+        "upside_scenario_usd": round(high, 2),
+        "target_in_scenario_range": low <= official <= high,
+        "net_trend_usd_per_min": path.get("net_trend_usd_per_min"),
+        "opposing_short_long_slopes": bool(path.get("opposing_short_long_slopes")),
+        "observed_final_minute_seconds": path.get("observed_final_minute_seconds"),
+        "modeled_final_minute_seconds": path.get("modeled_final_minute_seconds"),
+        "seconds_to_settlement": path.get("seconds_to_settlement"),
+        "warning": "Scenario range is heuristic, not a probability or guaranteed price. Independently reassess candles and reversals."
+    }
+
+
 def final_price_direction(parsed, external, target):
     """Make the model's actual FUTURE BRTI price estimate determine its direction.
 
@@ -304,10 +366,13 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         return _cache
     _last_request = now
     captured_epoch=time.time()
+    path_context=trusted_price_path(external,price_to_beat)
     snapshot = {
         "target_behavior": external.get("target_behavior"), "reference_price": external.get("reference_price"),
         "brti_recent_samples": external.get("brti_recent_samples"),
-        "independent_forecast_mode":True,
+        "independent_forecast_mode":not bool(path_context),
+        "price_path_baseline":path_context,
+        "analysis_context_version":PATH_AI_VERSION if path_context else "forward-15m-v2-independent-ai",
         "numeric_forecast_required":numeric_forecast_required(external, price_to_beat),
         "market_quote": external.get("market_quote"),
         "external_intelligence": external.get("external_intelligence", {"status":"unavailable"}),
@@ -349,7 +414,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "Assess higher highs/lows, candle bodies and wicks, breakout or rejection near support/resistance, "
             "momentum acceleration/fading, EMA alignment, RSI and volume where provided. "
             "Weigh recent structure most heavily; compare contradictory trade pressure or indicators. "
-            "Project the FUTURE final 60-second BRTI reference average at contract expiry. Forecast its numeric USD price, incorporating the time left, observed speed and acceleration, trend fading, breaks, likely reversals, volatility, flows and all fresh evidence. No price-path baseline is supplied; independently estimate final BRTI price from official ticks, completed candles, and time left. The current BRTI side is NOT the answer and MUST NOT simply be copied. Your UP/DOWN verdict must equal whether YOUR predicted final-minute average is above or below official_price_to_beat. If numeric_forecast_required is true, forecast_final_mean_usd MUST be a finite numeric FUTURE estimate; never null. Express uncertainty in confidence and rationale, not by omitting the estimate. If verified BRTI evidence or target is unavailable, output null numeric price rather than inventing an official-index price. Explain the FUTURE price path in price_path_reason. Spot prices are proxies, not BRTI settlement. Select UP or DOWN, never WAIT "
+            "Project the FUTURE final 60-second BRTI reference average at contract expiry. Forecast its numeric USD price, incorporating the time left, observed speed and acceleration, trend fading, breaks, likely reversals, volatility, flows and all fresh evidence. When price_path_baseline is provided, use its target-matched future BRTI price, scenario range, projected trend and reversal warning as concrete numerical evidence. The model is fallible and the scenario is not calibrated: weigh observed candles, momentum and fresh flow independently. Explain a materially different estimate rather than copying the baseline. If target_in_scenario_range is true, reflect directional uncertainty in confidence. If baseline is absent, estimate independently from official ticks, completed candles, and time left. The current BRTI side is NOT the answer and MUST NOT simply be copied. Your UP/DOWN verdict must equal whether YOUR predicted final-minute average is above or below official_price_to_beat. If numeric_forecast_required is true, forecast_final_mean_usd MUST be a finite numeric FUTURE estimate; never null. Express uncertainty in confidence and rationale, not by omitting the estimate. If verified BRTI evidence or target is unavailable, output null numeric price rather than inventing an official-index price. Explain the FUTURE price path in price_path_reason. Spot prices are proxies, not BRTI settlement. Select UP or DOWN, never WAIT "
             "when usable candles exist; confidence LOW when unclear or stale. "
             "Explain the specific chart evidence for the direction, not just generic bullish/bearish claims. "
             "Never invent unavailable data, probabilities or certainty; research only, not trading advice. "
@@ -379,8 +444,9 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "reason": str(parsed.get("reason", ""))[:240],
             "flip_risk": parsed.get("flip_risk", "UNKNOWN"),
             "confidence": parsed.get("confidence", "LOW"),
-            "news_assessment":news_assessment(parsed,external),"analysis_context_version":"forward-15m-v2-independent-ai",
-            "independent_forecast":True,
+            "news_assessment":news_assessment(parsed,external),"analysis_context_version":PATH_AI_VERSION if path_context else "forward-15m-v2-independent-ai",
+            "independent_forecast":not bool(path_context), "price_path_informed":bool(path_context),
+            "price_path_baseline_version":path_context.get("version") if path_context else None,
             "forecast_status":"NUMERIC_VERIFIED" if price_forecast is not None else "DIRECTION_ONLY",
             "signal": signal, "market": market, "phase": phase,
             "captured_epoch":captured_epoch,"paper_signal_id":market+":LIVE:"+str(int(captured_epoch*1000)),
@@ -437,10 +503,13 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     if not external.get("pressure_available"): missing.append("verified_buy_sell_pressure")
     if external.get("volume_ratio") is None: missing.append("volume_ratio")
     if external.get("candle_age_seconds") is None: missing.append("candle_freshness")
+    path_context=trusted_price_path(external,target)
     snapshot={
         "target_behavior":external.get("target_behavior"), "reference_price":external.get("reference_price"),
         "brti_recent_samples":external.get("brti_recent_samples"),
-        "independent_forecast_mode":True,
+        "independent_forecast_mode":not bool(path_context),
+        "price_path_baseline":path_context,
+        "analysis_context_version":PATH_AI_VERSION if path_context else "forward-15m-v2-independent-ai",
         "numeric_forecast_required":numeric_forecast_required(external, target),
         "market_quote":external.get("market_quote"),
         "external_intelligence":external.get("external_intelligence", {"status":"unavailable"}),
@@ -492,7 +561,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
     payload={"model":MODEL,"store":False,"instructions":(
         "Use outcome_feedback to audit confidence and weigh baseline disagreement; small samples do not prove future accuracy. A HIGH label is not a measured win probability. Treat the present target side as one observation, not a default forecast: explain the expected FUTURE price path, especially when movement or reversals may overturn the current side. " + ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "At the supplied current-round checkpoint (early, halfway or late), review the provided BTC market observations and make exactly one binary research forecast: UP or DOWN. Never output WAIT.  "
         "You may disagree with the indicator direction when concrete evidence supports it. "
-        "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. If numeric_forecast_required is true, forecast_final_mean_usd MUST be a finite number projecting the FUTURE final-minute BRTI mean; NEVER null, even when unsure (reflect uncertainty in confidence). If verified official-index input is unavailable, leave the numeric forecast null rather than fabricate it. Predict how price MOVES FROM NOW TO THE FINAL MINUTE, not which side is winning NOW. Future settlement may REVERSE the current side. No separate numerical price-path forecast is supplied. Derive your own future BRTI price estimate from observed data and expiry time. The binary direction MUST reflect YOUR numerical future settlement estimate versus the official price-to-beat, not present target position or chart bias. Explain speed, acceleration, time remaining, volatility and reversal risk in price_path_reason. "
+        "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. If numeric_forecast_required is true, forecast_final_mean_usd MUST be a finite number projecting the FUTURE final-minute BRTI mean; NEVER null, even when unsure (reflect uncertainty in confidence). If verified official-index input is unavailable, leave the numeric forecast null rather than fabricate it. Predict how price MOVES FROM NOW TO THE FINAL MINUTE, not which side is winning NOW. Future settlement may REVERSE the current side. If price_path_baseline is supplied, use its projected final-minute BRTI average as a nonbinding quantitative anchor, evaluate the scenario width, current momentum, volatility and reversal indicators, and explain substantive differences. If it is absent, estimate final BRTI independently from available observations. The binary direction MUST reflect YOUR numerical future settlement estimate versus the official price-to-beat, not present target position or chart bias. Explain speed, acceleration, time remaining, volatility and reversal risk in price_path_reason. "
         "When evidence is weak or conflicting, still choose the more supported direction and set confidence LOW; explicitly explain the uncertainty. This is a research forecast, not a trade instruction. "
         "Analyze the chronological OHLCV candle graph itself: swing highs/lows, trend structure, recent candle bodies/wicks, support/resistance, breakout/rejection, and reversal versus continuation. Explicitly weigh current_behavior, acceleration versus fading, pullback versus reversal, and price location inside its range; do not treat UP/DOWN bias as sufficient evidence. "
         "Consider every supplied evidence field, contradictions, proximity to the official target, "
@@ -517,7 +586,9 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
             "forecast_final_mean_usd":forecast_price,
             "forecast_rationale":str(decision.get("price_path_reason",""))[:240],
             "forecast_was_direction_decider":bool(forecast_dir),
-            "independent_forecast":True,
+            "independent_forecast":not bool(path_context), "price_path_informed":bool(path_context),
+            "analysis_context_version":PATH_AI_VERSION if path_context else "forward-15m-v2-independent-ai",
+            "price_path_baseline_version":path_context.get("version") if path_context else None,
             "forecast_status":"NUMERIC_VERIFIED" if forecast_price is not None else "DIRECTION_ONLY",
             "reason":str(decision.get("reason",""))[:160],
             "ai_direction":direction,"ai_confidence":decision.get("confidence","LOW"),
