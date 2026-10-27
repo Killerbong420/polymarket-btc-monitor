@@ -8,6 +8,8 @@ on:
       - research.py
       - settlement_forecast.py
       - forecast_audit.py
+      - forward_training.py
+      - test_forward_training.py
       - test_forecast_upgrade.py
       - .github/workflows/forecast-upgrade-tests.yml
 permissions:
