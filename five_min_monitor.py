@@ -59,13 +59,17 @@ async def score_pending(client,execute,verified_winner):
    stamp=slug.split("btc-updown-5m-",1)[-1]
    start=datetime.strptime(stamp,"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc)
    if time.time()<(start+timedelta(minutes=6)).timestamp():continue
-   event="btc-updown-5m-"+stamp
-   er=await client.get("https://gateway.polymarket.us/v1/events/slug/"+event,timeout=8)
-   if er.status_code!=200:continue
-   body=er.json(); ev=body.get("event",body) if isinstance(body,dict) else {}
-   markets=ev.get("markets",[]) if isinstance(ev,dict) else []
-   if not markets and isinstance(body,dict):markets=body.get("markets",[])
-   match=next((m for m in markets if isinstance(m,dict) and (m.get("slug") or m.get("marketSlug"))==slug),None)
+   match=None
+   # Standard and CPC events are distinct on Polymarket US. A CPC
+   # five-minute round must be graded against its own published event.
+   for event in dict.fromkeys((slug, "btc-updown-5m-"+stamp, "cpc-btc-updown-5m-"+stamp)):
+    er=await client.get("https://gateway.polymarket.us/v1/events/slug/"+event,timeout=8)
+    if er.status_code!=200:continue
+    body=er.json(); ev=body.get("event",body) if isinstance(body,dict) else {}
+    markets=ev.get("markets",[]) if isinstance(ev,dict) else []
+    if not markets and isinstance(body,dict):markets=body.get("markets",[])
+    match=next((m for m in markets if isinstance(m,dict) and (m.get("slug") or m.get("marketSlug"))==slug),None)
+    if match:break
    if not match:continue
    status=str(match.get("status") or match.get("marketStatus") or "").upper()
    if "RESOLVED" not in status or "UNRESOLVED" in status:continue
