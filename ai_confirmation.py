@@ -4,6 +4,9 @@ import os
 import time
 import math
 import httpx
+import logging
+
+_LOG = logging.getLogger(__name__)
 
 # Fixed research sample; never present these frequencies as calibrated live odds.
 HISTORY_CONTEXT_VERSION = "btc15m-20261018-20261024-v1"
@@ -97,6 +100,48 @@ _lock = None
 _auth_cache = {"status": "pending", "reason": "Authentication check has not run."}
 _auth_last = 0.0
 
+_SAFE_AI_ERRORS = frozenset({
+    "ai_response_not_object", "ai_output_token_limit", "ai_response_incomplete",
+    "ai_output_empty", "ai_json_invalid", "ai_json_not_object",
+    "ai_verdict_invalid", "ai_direction_invalid", "ai_forecast_missing",
+    "ai_forecast_inputs_invalid", "ai_forecast_out_of_range",
+})
+
+def ai_failure_category(exc):
+    """Return only safe labels, never provider output, request bodies, or secrets."""
+    code = str(exc) if isinstance(exc, ValueError) else ""
+    if code in _SAFE_AI_ERRORS:
+        return code
+    if isinstance(exc, httpx.HTTPStatusError):
+        return "ai_http_" + str(exc.response.status_code)
+    if isinstance(exc, httpx.TimeoutException):
+        return "ai_http_timeout"
+    if isinstance(exc, httpx.RequestError):
+        return "ai_network_error"
+    return "ai_" + type(exc).__name__.lower()
+
+def parse_structured_response(body):
+    """Explain incomplete or invalid structured output without logging its content."""
+    if not isinstance(body, dict):
+        raise ValueError("ai_response_not_object")
+    if body.get("status") == "incomplete":
+        details = body.get("incomplete_details") or {}
+        reason = details.get("reason") if isinstance(details, dict) else None
+        raise ValueError("ai_output_token_limit" if reason == "max_output_tokens" else "ai_response_incomplete")
+    chunks = [part.get("text", "") for item in (body.get("output") or [])
+        if isinstance(item, dict) and item.get("type") == "message"
+        for part in (item.get("content") or [])
+        if isinstance(part, dict) and part.get("type") == "output_text"]
+    if not chunks or not any(isinstance(part, str) and part.strip() for part in chunks):
+        raise ValueError("ai_output_empty")
+    try:
+        parsed = json.loads("".join(chunks))
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError("ai_json_invalid") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("ai_json_not_object")
+    return parsed
+
 def auth_state():
     if not os.getenv("OPENAI_API_KEY"):
         return {"status": "not_configured", "reason": "Set OPENAI_API_KEY in Render."}
@@ -173,15 +218,17 @@ def final_price_direction(parsed, external, target):
     if not verified and baseline.get("status") != "available":
         return None, None
     raw = parsed.get("forecast_final_mean_usd")
+    if raw is None:
+        raise ValueError("ai_forecast_missing")
     try:
         price = float(raw)
         current = float(reference["price"] if verified else baseline["current_reference_usd"])
         target = float(target)
-    except (ValueError, TypeError, KeyError):
-        raise ValueError("Missing numeric future BRTI price forecast")
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ValueError("ai_forecast_inputs_invalid") from exc
     if (not all(math.isfinite(x) and x>0 for x in (price,current,target))
             or abs(price/current-1) > .03):
-        raise ValueError("Non-finite or implausible BRTI price forecast")
+        raise ValueError("ai_forecast_out_of_range")
     return round(price,2), ("UP" if price>=target else "DOWN")
 
 
@@ -291,14 +338,9 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             json=payload, timeout=22)
         r.raise_for_status()
         body = r.json()
-        text_parts = [part.get("text", "") for item in body.get("output", [])
-            if item.get("type") == "message"
-            for part in item.get("content", []) if part.get("type") == "output_text"]
-        if not text_parts:
-            raise ValueError("Model returned no usable text")
-        parsed = json.loads("".join(text_parts))
+        parsed = parse_structured_response(body)
         if parsed.get("verdict") not in ("UP", "DOWN"):
-            raise ValueError("Invalid model verdict")
+            raise ValueError("ai_verdict_invalid")
         price_forecast, forecast_dir = final_price_direction(parsed,external,price_to_beat)
         verdict=forecast_dir or parsed["verdict"]
         _auth_cache = {"status": "inference_verified", "reason": "OpenAI inference succeeded."}
@@ -331,9 +373,12 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "reason": "OpenAI HTTP " + str(status) + " (" + category + "). Check API billing, key permissions, and model access.",
             "http_status": status, "error_category": category, "model": MODEL}
     except Exception as exc:
-        # Never put secrets, full URLs, or response bodies in public diagnostics.
+        # Log the safe failure category only: never raw response bodies or credentials.
+        category = ai_failure_category(exc)
+        _LOG.warning("AI live confirmation rejected: %s", category)
         _cache = {"status": "error", "verdict": "WAIT",
-            "reason": "OpenAI request failed (" + type(exc).__name__ + "). Check API key, model access and billing in Render.",
+            "error_category": category,
+            "reason": "OpenAI confirmation rejected (" + category + ").",
             "model": MODEL}
     return _cache
 
@@ -435,10 +480,8 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
             json=payload,timeout=12)
         res.raise_for_status()
         body=res.json()
-        chunks=[p.get("text","") for x in body.get("output",[]) if x.get("type")=="message"
-                for p in x.get("content",[]) if p.get("type")=="output_text"]
-        decision=json.loads("".join(chunks))
-        if decision.get("direction") not in ("UP","DOWN"): raise ValueError("Invalid direction")
+        decision=parse_structured_response(body)
+        if decision.get("direction") not in ("UP","DOWN"): raise ValueError("ai_direction_invalid")
         forecast_price,forecast_dir=final_price_direction(decision,external,target)
         direction=forecast_dir or decision["direction"]
         return {"direction":direction,"source":"AI_REVIEW",
@@ -451,8 +494,10 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
             "ai_direction":direction,"ai_confidence":decision.get("confidence","LOW"),
             "evidence":snapshot,"model":MODEL,"news_assessment":news_assessment(decision,external)}
     except Exception as exc:
-        return {**fallback,"reason":"AI request unavailable ("+type(exc).__name__+")",
-                "evidence":snapshot}
+        category = ai_failure_category(exc)
+        _LOG.warning("AI %s checkpoint rejected: %s", checkpoint, category)
+        return {**fallback,"reason":"AI request unavailable ("+category+")",
+                "error_category":category,"evidence":snapshot}
 
 
 
