@@ -64,6 +64,17 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("performance.window_size||100", self.html)
         self.assertIn("most recent settled", self.html.lower())
 
+    def test_quick_prediction_shows_plain_up_down_and_first5_accuracy(self):
+        self.assertIn("⚡ QUICK PREDICTION · UP / DOWN", self.html)
+        self.assertNotIn("▲ FAST UP", self.html)
+        self.assertNotIn("▼ FAST DOWN", self.html)
+        self.assertNotIn("'LAST FAST '+fastDirection", self.html)
+        self.assertIn("id=\"quickAccuracySummary\"", self.html)
+        self.assertIn("id=\"quickAccuracyMinutes\"", self.html)
+        self.assertIn("id=\"quickAccuracyRecent\"", self.html)
+        self.assertIn("fetch('/api/quick-accuracy'", self.html)
+        self.assertIn("refreshFirstFiveQuickAccuracy()", self.html)
+
     def test_obsolete_quote_card_completely_removed(self):
         self.assertNotIn("Market prices / order book", self.html)
         self.assertNotIn('id="marketStatus"', self.html)
