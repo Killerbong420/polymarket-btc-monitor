@@ -70,10 +70,11 @@ def setup():
  execute("""CREATE TABLE IF NOT EXISTS monitor_events (
  id TEXT PRIMARY KEY,code TEXT NOT NULL,severity TEXT NOT NULL,message TEXT NOT NULL,
  active INTEGER NOT NULL,created_at TEXT NOT NULL)""")
- try:
-  execute("ALTER TABLE research_calls ADD COLUMN final_reference_mean REAL")
- except Exception as exc:
-  if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower(): raise
+ for column in ("final_reference_mean REAL",
+                "final_reference_source TEXT NOT NULL DEFAULT 'LEGACY_UNVERIFIED'"):
+  try: execute("ALTER TABLE research_calls ADD COLUMN "+column)
+  except Exception as exc:
+   if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower(): raise
  execute("CREATE INDEX IF NOT EXISTS research_market_idx ON research_calls(market)")
  paper.setup(execute)
  execute("""CREATE TABLE IF NOT EXISTS polymarket_quote_samples (
@@ -385,50 +386,73 @@ def verified_winner(m, settlement):
  if p==0.0: return "DOWN"
  return None
 
+def official_numeric_price(market, winner):
+ """Numeric scoring uses only the official resolved BTC BRTI market settlement."""
+ if not isinstance(market,dict) or winner not in ("UP","DOWN"):return None
+ status=str(market.get("status") or market.get("marketStatus") or "").upper()
+ if "RESOLVED" not in status or "UNRESOLVED" in status:return None
+ terms=market.get("assetPriceTerms") or {}
+ if not isinstance(terms,dict) or terms.get("marketType")!="ASSET_PRICE_MARKET_TYPE_UP_DOWN":return None
+ asset=terms.get("asset") or {}
+ if not isinstance(asset,dict) or str(asset.get("symbol") or "").lower()!="btc":return None
+ if terms.get("indexSymbol")!="BRTI":return None
+ sides=market.get("marketSides") or []
+ if not isinstance(sides,list) or len(sides)!=2:return None
+ if {str(s.get("description") or "").lower() for s in sides if isinstance(s,dict)}!={"yes","no"}:return None
+ if {s.get("long") for s in sides if isinstance(s,dict)}!={True,False}:return None
+ target=number(terms.get("priceToBeat"))
+ official=number(terms.get("settlementPrice"))
+ if target is None or official is None or target<=0 or official<=0:return None
+ if ("UP" if official>=target else "DOWN")!=winner:return None
+ return round(official,2)
+
+
 _reference_retry_after={}
 async def retry_numeric_final_means(client, max_requests=3, now=None):
- """Retry 60/60 BRTI reference scoring after official binary settlement.
+ """Backfill official published settlement prices; never use chart reconstructions.
 
- The US reference history may be late. A previously settled binary round
- must not disappear from numeric scoring merely because ticks were late at
- its initial official settlement fetch. No inferred/missing ticks allowed.
+ Legacy numeric values were sourced from the public 1s chart, which can differ
+ from the published market settlement. Revalidate them before numeric scoring.
  """
  now=time.time() if now is None else now
  result={"status":"checked","requested":0,"graded":0,"incomplete":0}
- rows=execute("""SELECT market,snapshot_json FROM research_calls
-      WHERE winner IN ('UP','DOWN') AND final_reference_mean IS NULL
-      ORDER BY created_at DESC LIMIT 120""",fetch=True)
- seen=set()
- for market,snapshot_json in rows:
-  if market in seen:continue
-  seen.add(market)
+ rows=execute("""SELECT DISTINCT market,winner FROM research_calls
+      WHERE winner IN ('UP','DOWN')
+      AND (final_reference_mean IS NULL OR final_reference_source!='OFFICIAL_MARKET_SETTLEMENT')
+      ORDER BY market DESC LIMIT 150""",fetch=True)
+ for market,win in rows:
   start=market_start(market)
-  if start is None or not (start+960<=now<=start+2*86400):continue
+  if start is None or not (start+960<=now<=start+8*86400):continue
   if now < _reference_retry_after.get(market,0):continue
-  try: snap=json.loads(snapshot_json)
-  except (TypeError,ValueError):continue
-  ref=snap.get("reference_price") if isinstance(snap,dict) else None
-  if not isinstance(ref,dict) or ref.get("source")!="Polymarket US BTC reference / BRTI":
-   continue  # Never assume a spot-only or unverified market uses BRTI.
   if result["requested"]>=max_requests:break
   result["requested"]+=1
   try:
-   ticks=await reference_prices(client,{"slug":market,"assetPriceTerms":{"indexSymbol":"BRTI"}})
-   mean=number(ticks.get("final_minute_average_so_far"))
-   if ticks.get("final_minute_samples")==60 and mean is not None:
-    execute("UPDATE research_calls SET final_reference_mean=? WHERE market=? AND winner IS NOT NULL AND final_reference_mean IS NULL",(mean,market))
-    result["graded"]+=1
-    _reference_retry_after.pop(market,None)
-   else:
+   stamp=market.split("btc-updown-15m-",1)[-1]
+   r=await client.get("https://gateway.polymarket.us/v1/events/slug/btc-updown-15m-"+stamp,timeout=10)
+   r.raise_for_status()
+   raw=r.json()
+   event=raw.get("event",raw) if isinstance(raw,dict) else {}
+   contracts=event.get("markets",[]) if isinstance(event,dict) else []
+   if not contracts and isinstance(raw,dict):contracts=raw.get("markets",[])
+   candidate=next((m for m in contracts if isinstance(m,dict)
+       and str(m.get("slug") or m.get("marketSlug") or "")==market),None)
+   official=official_numeric_price(candidate,win)
+   if official is None:
     result["incomplete"]+=1
     _reference_retry_after[market]=now+600
+    continue
+   execute("""UPDATE research_calls SET final_reference_mean=?,
+       final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
+       WHERE market=? AND winner=?""",(official,market,win))
+   result["graded"]+=1
+   _reference_retry_after.pop(market,None)
   except Exception:
    result["incomplete"]+=1
    _reference_retry_after[market]=now+600
- # Keep the cache bounded across long-running monitoring sessions.
+ # Bound retry cache over long-running sessions.
  for market,until in list(_reference_retry_after.items()):
   start=market_start(market)
-  if start is None or start+2*86400<now: _reference_retry_after.pop(market,None)
+  if start is None or start+8*86400<now: _reference_retry_after.pop(market,None)
  return result
 
 async def settle(client):
@@ -504,8 +528,14 @@ async def settle(client):
    execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    execute("UPDATE ai_decisions SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    execute("UPDATE research_calls SET winner=?,settled_at=? WHERE market=? AND winner IS NULL",(win,datetime.now(timezone.utc).isoformat(),slug))
-   # BRTI exact-price scoring retries independently after binary settlement.
-   # The official winner is never inferred from any BRTI price reconstruction.
+   official=official_numeric_price(market,win)
+   if official is not None:
+    execute("""UPDATE research_calls SET final_reference_mean=?,
+        final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
+        WHERE market=? AND winner=?""",(official,slug,win))
+    diagnostic["official_numeric_recorded"]=diagnostic.get("official_numeric_recorded",0)+1
+   # Numeric scoring may backfill from the published market value when absent.
+   # The official binary winner is never inferred from a public chart reconstruction.
    execute("UPDATE paper_positions SET winner=? WHERE market=? AND status='OPEN'",(win,slug))
    diagnostic["verified"]+=1
   except Exception as exc:
@@ -905,9 +935,10 @@ def research_csv():
  return Response(out.getvalue(),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=btc_15m_forward_research.csv"})
 
 def numeric_price_forecast_report():
- """Observed absolute USD errors, using ONLY completed BRTI 60/60 seconds."""
+ """Observed USD forecast errors against official market settlement metadata."""
  rows=execute("""SELECT checkpoint,snapshot_json,calls_json,final_reference_mean
    FROM research_calls WHERE final_reference_mean IS NOT NULL
+   AND final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
    ORDER BY created_at DESC LIMIT 10000""",fetch=True)
  groups={}
  paired={}
@@ -955,8 +986,8 @@ def numeric_price_forecast_report():
    "ai_better_than_unchanged_count":group["ai_better_than_static"],
    "path_better_than_unchanged_count":group["path_better_than_static"]})
  return {"version":"forward-binary-and-numeric-audit-v2",
-         "status":"observed" if out else "awaiting_complete_final_minute_reference",
-         "results":out,"paired_comparisons":paired_summary,"definition":"Error against the actual 60/60 published BRTI final-minute index mean. Current BRTI at prediction time is a naive baseline. Historical guesses and unavailable ticks are excluded; forecasts are not recalibrated probabilities.",
+         "status":"observed" if out else "awaiting_official_settlement_prices",
+         "results":out,"paired_comparisons":paired_summary,"definition":"Error against the authoritative Polymarket US BTC market assetPriceTerms.settlementPrice (official BRTI index). Public chart reconstructions and legacy unverified prices are excluded. Current BRTI at prediction time is a naive baseline; these are not calibrated win probabilities.",
          "note":"Paired comparisons require AI, independent path and unchanged-reference baseline in the same observed round and checkpoint. Errors are USD, not trade P&L."}
 
 @app.get("/api/price-forecast/accuracy")
@@ -967,7 +998,9 @@ def price_forecast_accuracy():
 @app.get("/api/forecast/diagnostics")
 def forecast_diagnostics():
  try:
-  rows=execute("""SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner,final_reference_mean
+  rows=execute("""SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner,
+      CASE WHEN final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
+       THEN final_reference_mean ELSE NULL END
       FROM research_calls ORDER BY created_at DESC LIMIT 5000""",fetch=True)
   return summarize_forecast_audit(rows)
  except Exception:return JSONResponse({"status":"unavailable","error":"Forecast audit database unavailable"},status_code=503)
@@ -977,6 +1010,7 @@ def forecast_training_readiness():
  try:
   rows=execute("""SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner,final_reference_mean
        FROM research_calls WHERE winner IN ('UP','DOWN') AND final_reference_mean IS NOT NULL
+       AND final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
        ORDER BY created_at DESC LIMIT 5000""",fetch=True)
   return score_training_readiness(rows)
  except Exception:return JSONResponse({"status":"unavailable","error":"Training evidence unavailable"},status_code=503)

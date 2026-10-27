@@ -62,7 +62,11 @@ class NonblockingSettlementTests(unittest.IsolatedAsyncioTestCase):
                   patch("app.persist_alerts")):
                 task=asyncio.create_task(app.loop())
                 try:
-                    await asyncio.sleep(0.15)
+                    # Allow a bounded startup window on loaded CI runners.
+                    for _ in range(100):
+                        if calls["market"] >= 3 and calls["settle"] >= 1:
+                            break
+                        await asyncio.sleep(0.01)
                     self.assertGreaterEqual(calls["market"],3)
                     self.assertEqual(calls["settle"],1)
                 finally:
