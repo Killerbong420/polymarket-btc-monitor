@@ -876,7 +876,12 @@ async def loop():
      behavior=target_behavior(d,target,slug,reference)
      forecast_now=time.time()
      quick=quick_forecast(reference,now=forecast_now)
-     track_first_five_quick(slug,reference,quick,forecast_now)
+     try:
+      track_first_five_quick(slug,reference,quick,forecast_now)
+      state["quick_accuracy_error"]=None
+     except Exception as quick_exc:
+      # A logging issue must never freeze the live 15-minute prediction loop.
+      state["quick_accuracy_error"]=type(quick_exc).__name__
      price_path=forecast_settlement(reference,d,target,left15,now=forecast_now)
      regime_shadow=regime_shadow_forecast(reference,d,target,left15,now=forecast_now)
      d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow,quick_forecast=quick)
