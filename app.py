@@ -14,7 +14,6 @@ from forecast_audit import summarize_forecast_audit
 from forecast_guard import anchored_shadow_forecast, validate_official_target
 from quick_forecast import quick_forecast
 import five_min_monitor
-import five_min_monitor
 from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
 from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history
@@ -754,6 +753,8 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  a_price=number(calls["AI"].get("forecast_final_mean_usd"))
  p_price=number(calls["PRICE_PATH"].get("forecast_final_mean_usd"))
  calls["AI"]["independent_forecast"]=bool(review.get("independent_forecast"))
+ calls["AI"]["price_path_informed"]=bool(review.get("price_path_informed"))
+ calls["AI"]["analysis_context_version"]=review.get("analysis_context_version") or VERSION
  calls["AI"]["forecast_status"]=review.get("forecast_status","LEGACY_OR_UNVERIFIED")
  calls["AI"]["forecast_was_direction_decider"]=bool(review.get("forecast_was_direction_decider"))
  calls["AI"]["matches_price_path_to_cent"]=(round(a_price,2)==round(p_price,2)) if a_price is not None and p_price is not None else None
@@ -782,7 +783,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
   direction=call.get("direction")
   px=quote.get("up_entry" if direction=="UP" else "down_entry") if direction in ("UP","DOWN") and quote.get("status")=="available" else None
   call["entry_cost"]=entry_cost(px)
- snapshot={"version":VERSION,"captured_at":captured,"seconds_left":left,"checkpoint":checkpoint,
+ snapshot={"version":review.get("analysis_context_version") or VERSION,"captured_at":captured,"seconds_left":left,"checkpoint":checkpoint,
   "official_target":target,"target_behavior":behavior,"reference_price":frozen.get("reference_price"),
   "market_quote":quote,"chart_pattern":frozen.get("chart_pattern"),"price_action":frozen.get("price_action"),"bot_research_signals":frozen.get("bot_research_signals"),"graph_evidence":frozen.get("graph_evidence"),
   "external_intelligence":frozen.get("external_intelligence"),"news_assessment":review.get("news_assessment"),
@@ -798,7 +799,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
     run("INSERT INTO signals (id,market,phase,direction,flip,score,created_at,quality,quality_reason,decision_source,decision_reason,ai_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,flip,score,captured,quality,quality_reason,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],confidence))
     run("INSERT INTO ai_decisions (id,market,phase,direction,confidence,source,reason,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,confidence,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],captured))
   finally:cur.close()
- if checkpoint=="HALFWAY":state["last_halfway_ai"]={"market":slug,"phase":"FINAL_15M","direction":chosen,"forecast_final_mean_usd":review.get("forecast_final_mean_usd"),"indicator_direction":fallback,"source":review.get("source"),"reason":review.get("reason"),"ai_confidence":confidence,"updated":captured,"news_assessment":review.get("news_assessment")}
+ if checkpoint=="HALFWAY":state["last_halfway_ai"]={"market":slug,"phase":"FINAL_15M","direction":chosen,"price_path_informed":bool(review.get("price_path_informed")),"analysis_context_version":review.get("analysis_context_version") or VERSION,"forecast_final_mean_usd":review.get("forecast_final_mean_usd"),"indicator_direction":fallback,"source":review.get("source"),"reason":review.get("reason"),"ai_confidence":confidence,"updated":captured,"news_assessment":review.get("news_assessment")}
  _research_cache["updated_epoch"]=0
  state["last_checkpoint"]={"market":slug,"checkpoint":checkpoint,"captured_at":captured,"seconds_left":left,"calls":calls}
 
@@ -969,6 +970,8 @@ async def read_only_diagnostics_loop():
      "monitor_cycle_seconds":state.get("last_cycle_duration_seconds"),
      "quick_forecast_status":(state.get("quick_forecast") or {}).get("status"),
      "ai_status":(public_state() or {}).get("status"),
+     "ai_path_informed":(public_state() or {}).get("price_path_informed"),
+     "five_minute":{k:five_min_monitor.state.get(k) for k in ("status","market","direction","target","forecast","reason")},
      "ai_performance":current.get("ai_performance"),
      "database_reporting_error":bool(current.get("database_error")),
      "numeric_accuracy_status":prices.get("status"),
@@ -993,10 +996,6 @@ async def lifespan(app):
   async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
    await five_min_monitor.loop(client,execute,verified_winner,state)
  five_task=asyncio.create_task(five_min_worker())
- async def five_min_worker():
-  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
-   await five_min_monitor.loop(client,execute,verified_winner,state)
- five_task=asyncio.create_task(five_min_worker())
  # Paper-trading worker disabled: prediction-only mode.
  async def historical_job():
   try:
@@ -1012,7 +1011,6 @@ async def lifespan(app):
  history_task.cancel()
  diagnostics_task.cancel()
  context_task.cancel()
- five_task.cancel()
  five_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
@@ -1364,10 +1362,6 @@ def lightweight_live():
          "last_checkpoint":state.get("last_checkpoint"),
          "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),
          "server_epoch":time.time()}
-
-@app.get("/api/five-minute")
-def five_minute_report():
- return five_min_monitor.state
 
 @app.get("/api/five-minute")
 def five_minute_report():
