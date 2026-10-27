@@ -1,49 +1,49 @@
 {
-  "checked_at_utc": "2026-10-27T01:47:06.461032+00:00",
+  "checked_at_utc": "2026-10-27T01:50:18.382001+00:00",
   "source": "https://polymarket-btc-monitor-test.onrender.com",
   "live": {
     "app_status": "running",
-    "updated": "2026-10-27T01:47:05.708670+00:00",
+    "updated": "2026-10-27T01:50:19.124159+00:00",
     "market": "cpc-btc-updown-15m-2026-10-27-0145z",
     "scoreboard": {
       "wins": 70,
       "losses": 30,
-      "pending": 1,
+      "pending": 0,
       "graded": 100,
       "window_size": 100,
       "accuracy_pct": 70.0,
       "win_loss_ratio": 2.333,
       "ratio_label": "70:30",
       "basis": "Most recent 100 settled genuine AI_REVIEW FINAL_15M predictions; pending calls excluded",
-      "unverified": 1
+      "unverified": 0
     },
     "math_check_pct": 70.0,
-    "last_50_settled_count": 49,
-    "last_50_settled_wins": 35,
+    "last_50_settled_count": 50,
+    "last_50_settled_wins": 36,
     "last_50_settled_losses": 14,
     "duplicate_settled_markets_last_50": 0,
-    "pending_ai_count_in_last_50": 1,
+    "pending_ai_count_in_last_50": 0,
     "settlement_diagnostic": {
-      "pending_markets": 1,
+      "pending_markets": 2,
       "checked": 1,
-      "verified": 0,
+      "verified": 1,
       "unresolved": 1,
       "errors": [],
       "reasons": {
-        "settlement_not_published": 1
+        "round_not_yet_settled": 1
       },
       "overdue_markets": 0,
       "numeric_price_backfill": {
         "status": "checked",
-        "requested": 0,
-        "graded": 0,
+        "requested": 1,
+        "graded": 1,
         "incomplete": 0
       }
     },
     "feed_health": {
       "status": "FRESH",
-      "source": "Coinbase Exchange BTC-USD",
-      "age_seconds": 4,
+      "source": "Kraken BTC/USD",
+      "age_seconds": 14,
       "error": null
     },
     "database_error": null,
@@ -60,92 +60,92 @@
       {
         "checkpoint": "LATE",
         "source": "CURRENT_BRTI_BASELINE",
-        "graded": 9,
-        "mean_absolute_error_usd": 32.08,
-        "root_mean_square_error_usd": 46.1
+        "graded": 10,
+        "mean_absolute_error_usd": 36.95,
+        "root_mean_square_error_usd": 50.65
       },
       {
         "checkpoint": "LATE",
         "source": "PRICE_PATH",
-        "graded": 9,
-        "mean_absolute_error_usd": 26.88,
-        "root_mean_square_error_usd": 36.93
+        "graded": 10,
+        "mean_absolute_error_usd": 32.35,
+        "root_mean_square_error_usd": 43.51
       },
       {
         "checkpoint": "LATE",
         "source": "AI",
-        "graded": 9,
-        "mean_absolute_error_usd": 26.88,
-        "root_mean_square_error_usd": 36.93
+        "graded": 10,
+        "mean_absolute_error_usd": 32.35,
+        "root_mean_square_error_usd": 43.51
       },
       {
         "checkpoint": "HALFWAY",
         "source": "CURRENT_BRTI_BASELINE",
-        "graded": 9,
-        "mean_absolute_error_usd": 41.81,
-        "root_mean_square_error_usd": 57.37
+        "graded": 10,
+        "mean_absolute_error_usd": 48.34,
+        "root_mean_square_error_usd": 64.1
       },
       {
         "checkpoint": "HALFWAY",
         "source": "PRICE_PATH",
-        "graded": 9,
-        "mean_absolute_error_usd": 43.03,
-        "root_mean_square_error_usd": 61.31
+        "graded": 10,
+        "mean_absolute_error_usd": 42.22,
+        "root_mean_square_error_usd": 59.2
       },
       {
         "checkpoint": "HALFWAY",
         "source": "AI",
-        "graded": 9,
-        "mean_absolute_error_usd": 43.03,
-        "root_mean_square_error_usd": 61.31
+        "graded": 10,
+        "mean_absolute_error_usd": 42.22,
+        "root_mean_square_error_usd": 59.2
       },
       {
         "checkpoint": "EARLY",
         "source": "CURRENT_BRTI_BASELINE",
-        "graded": 8,
-        "mean_absolute_error_usd": 65.06,
-        "root_mean_square_error_usd": 77.43
+        "graded": 9,
+        "mean_absolute_error_usd": 75.78,
+        "root_mean_square_error_usd": 90.71
       },
       {
         "checkpoint": "EARLY",
         "source": "PRICE_PATH",
-        "graded": 8,
-        "mean_absolute_error_usd": 63.1,
-        "root_mean_square_error_usd": 81.55
+        "graded": 9,
+        "mean_absolute_error_usd": 82.09,
+        "root_mean_square_error_usd": 109.52
       },
       {
         "checkpoint": "EARLY",
         "source": "AI",
-        "graded": 7,
-        "mean_absolute_error_usd": 65.27,
-        "root_mean_square_error_usd": 85.27
+        "graded": 8,
+        "mean_absolute_error_usd": 86.36,
+        "root_mean_square_error_usd": 114.91
       }
     ],
     "paired_comparisons": [
       {
         "checkpoint": "LATE",
-        "paired_rounds": 9,
-        "ai_mae_usd": 26.88,
-        "price_path_mae_usd": 26.88,
-        "unchanged_reference_mae_usd": 32.08,
+        "paired_rounds": 10,
+        "ai_mae_usd": 32.35,
+        "price_path_mae_usd": 32.35,
+        "unchanged_reference_mae_usd": 36.95,
         "ai_better_than_unchanged_count": 6,
         "path_better_than_unchanged_count": 6
       },
       {
         "checkpoint": "HALFWAY",
-        "paired_rounds": 9,
-        "ai_mae_usd": 43.03,
-        "price_path_mae_usd": 43.03,
-        "unchanged_reference_mae_usd": 41.81,
-        "ai_better_than_unchanged_count": 2,
-        "path_better_than_unchanged_count": 2
+        "paired_rounds": 10,
+        "ai_mae_usd": 42.22,
+        "price_path_mae_usd": 42.22,
+        "unchanged_reference_mae_usd": 48.34,
+        "ai_better_than_unchanged_count": 3,
+        "path_better_than_unchanged_count": 3
       },
       {
         "checkpoint": "EARLY",
-        "paired_rounds": 7,
-        "ai_mae_usd": 65.27,
-        "price_path_mae_usd": 65.27,
-        "unchanged_reference_mae_usd": 62.67,
+        "paired_rounds": 8,
+        "ai_mae_usd": 86.36,
+        "price_path_mae_usd": 86.36,
+        "unchanged_reference_mae_usd": 75.03,
         "ai_better_than_unchanged_count": 3,
         "path_better_than_unchanged_count": 3
       }
@@ -158,20 +158,215 @@
     "version": "forward-15m-v1",
     "strategies": [
       {
-        "checkpoint": "LATE",
+        "checkpoint": "EARLY",
         "strategy": "AI",
-        "wins": 107,
-        "losses": 29,
+        "wins": 73,
+        "losses": 62,
+        "pending": 1,
+        "no_call": 2,
+        "paper_costed": 84,
+        "paper_pnl_usd": -948.37,
+        "graded": 135,
+        "coverage_pct": 98.6,
+        "accuracy_pct": 54.1,
+        "interval_95_pct": [
+          45.7,
+          62.3
+        ],
+        "sample_label": "OBSERVED SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "strategy": "INDICATORS",
+        "wins": 17,
+        "losses": 9,
+        "pending": 0,
+        "no_call": 112,
+        "paper_costed": 18,
+        "paper_pnl_usd": -45.61,
+        "graded": 26,
+        "coverage_pct": 18.8,
+        "accuracy_pct": 65.4,
+        "interval_95_pct": [
+          46.2,
+          80.6
+        ],
+        "sample_label": "SMALL SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "strategy": "INDICATOR_BINARY",
+        "wins": 78,
+        "losses": 59,
         "pending": 1,
         "no_call": 0,
-        "paper_costed": 108,
-        "paper_pnl_usd": 145.19,
-        "graded": 136,
+        "paper_costed": 86,
+        "paper_pnl_usd": -288.0,
+        "graded": 137,
         "coverage_pct": 100.0,
-        "accuracy_pct": 78.7,
+        "accuracy_pct": 56.9,
         "interval_95_pct": [
-          71.1,
-          84.7
+          48.6,
+          64.9
+        ],
+        "sample_label": "OBSERVED SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "strategy": "TARGET_SIDE",
+        "wins": 79,
+        "losses": 58,
+        "pending": 1,
+        "no_call": 0,
+        "paper_costed": 86,
+        "paper_pnl_usd": -907.33,
+        "graded": 137,
+        "coverage_pct": 100.0,
+        "accuracy_pct": 57.7,
+        "interval_95_pct": [
+          49.3,
+          65.6
+        ],
+        "sample_label": "OBSERVED SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "strategy": "PRICE_PATH",
+        "wins": 3,
+        "losses": 6,
+        "pending": 1,
+        "no_call": 0,
+        "paper_costed": 8,
+        "paper_pnl_usd": -188.65,
+        "graded": 9,
+        "coverage_pct": 100.0,
+        "accuracy_pct": 33.3,
+        "interval_95_pct": [
+          12.1,
+          64.6
+        ],
+        "sample_label": "SMALL SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "strategy": "CONFLUENCE",
+        "wins": 3,
+        "losses": 2,
+        "pending": 0,
+        "no_call": 20,
+        "paper_costed": 3,
+        "paper_pnl_usd": -136.01,
+        "graded": 5,
+        "coverage_pct": 20.0,
+        "accuracy_pct": 60.0,
+        "interval_95_pct": [
+          23.1,
+          88.2
+        ],
+        "sample_label": "SMALL SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "strategy": "PRICE_ACTION",
+        "wins": 0,
+        "losses": 3,
+        "pending": 0,
+        "no_call": 21,
+        "paper_costed": 3,
+        "paper_pnl_usd": -177.51,
+        "graded": 3,
+        "coverage_pct": 12.5,
+        "accuracy_pct": 0.0,
+        "interval_95_pct": [
+          0.0,
+          56.2
+        ],
+        "sample_label": "SMALL SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "strategy": "BOT_MACD",
+        "wins": 4,
+        "losses": 1,
+        "pending": 0,
+        "no_call": 19,
+        "paper_costed": 2,
+        "paper_pnl_usd": -45.8,
+        "graded": 5,
+        "coverage_pct": 20.8,
+        "accuracy_pct": 80.0,
+        "interval_95_pct": [
+          37.6,
+          96.4
+        ],
+        "sample_label": "SMALL SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "strategy": "BOT_BOLLINGER",
+        "wins": 0,
+        "losses": 0,
+        "pending": 0,
+        "no_call": 24,
+        "paper_costed": 0,
+        "paper_pnl_usd": 0.0,
+        "graded": 0,
+        "coverage_pct": 0.0,
+        "accuracy_pct": null,
+        "interval_95_pct": null,
+        "sample_label": "SMALL SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "strategy": "BOT_SUPERTREND",
+        "wins": 2,
+        "losses": 1,
+        "pending": 0,
+        "no_call": 21,
+        "paper_costed": 1,
+        "paper_pnl_usd": -68.05,
+        "graded": 3,
+        "coverage_pct": 12.5,
+        "accuracy_pct": 66.7,
+        "interval_95_pct": [
+          20.8,
+          93.9
+        ],
+        "sample_label": "SMALL SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "strategy": "BOT_CONSENSUS",
+        "wins": 2,
+        "losses": 1,
+        "pending": 0,
+        "no_call": 21,
+        "paper_costed": 1,
+        "paper_pnl_usd": -68.05,
+        "graded": 3,
+        "coverage_pct": 12.5,
+        "accuracy_pct": 66.7,
+        "interval_95_pct": [
+          20.8,
+          93.9
+        ],
+        "sample_label": "SMALL SAMPLE"
+      },
+      {
+        "checkpoint": "LATE",
+        "strategy": "AI",
+        "wins": 108,
+        "losses": 29,
+        "pending": 0,
+        "no_call": 0,
+        "paper_costed": 109,
+        "paper_pnl_usd": 186.98,
+        "graded": 137,
+        "coverage_pct": 100.0,
+        "accuracy_pct": 78.8,
+        "interval_95_pct": [
+          71.3,
+          84.8
         ],
         "sample_label": "OBSERVED SAMPLE"
       },
@@ -196,35 +391,35 @@
       {
         "checkpoint": "LATE",
         "strategy": "INDICATOR_BINARY",
-        "wins": 108,
+        "wins": 109,
         "losses": 28,
-        "pending": 1,
+        "pending": 0,
         "no_call": 0,
-        "paper_costed": 106,
-        "paper_pnl_usd": 44.52,
-        "graded": 136,
+        "paper_costed": 107,
+        "paper_pnl_usd": 86.31,
+        "graded": 137,
         "coverage_pct": 100.0,
-        "accuracy_pct": 79.4,
+        "accuracy_pct": 79.6,
         "interval_95_pct": [
-          71.9,
-          85.4
+          72.0,
+          85.5
         ],
         "sample_label": "OBSERVED SAMPLE"
       },
       {
         "checkpoint": "LATE",
         "strategy": "TARGET_SIDE",
-        "wins": 117,
+        "wins": 118,
         "losses": 19,
-        "pending": 1,
+        "pending": 0,
         "no_call": 0,
-        "paper_costed": 106,
-        "paper_pnl_usd": -136.91,
-        "graded": 136,
+        "paper_costed": 107,
+        "paper_pnl_usd": -95.12,
+        "graded": 137,
         "coverage_pct": 100.0,
-        "accuracy_pct": 86.0,
+        "accuracy_pct": 86.1,
         "interval_95_pct": [
-          79.2,
+          79.4,
           90.9
         ],
         "sample_label": "OBSERVED SAMPLE"
@@ -232,35 +427,35 @@
       {
         "checkpoint": "LATE",
         "strategy": "PRICE_PATH",
-        "wins": 8,
+        "wins": 9,
         "losses": 1,
-        "pending": 1,
+        "pending": 0,
         "no_call": 0,
-        "paper_costed": 6,
-        "paper_pnl_usd": 68.36,
-        "graded": 9,
+        "paper_costed": 7,
+        "paper_pnl_usd": 110.15,
+        "graded": 10,
         "coverage_pct": 100.0,
-        "accuracy_pct": 88.9,
+        "accuracy_pct": 90.0,
         "interval_95_pct": [
-          56.5,
-          98.0
+          59.6,
+          98.2
         ],
         "sample_label": "SMALL SAMPLE"
       },
       {
         "checkpoint": "LATE",
         "strategy": "CONFLUENCE",
-        "wins": 7,
+        "wins": 8,
         "losses": 0,
-        "pending": 1,
+        "pending": 0,
         "no_call": 17,
-        "paper_costed": 3,
-        "paper_pnl_usd": 3.27,
-        "graded": 7,
+        "paper_costed": 4,
+        "paper_pnl_usd": 45.06,
+        "graded": 8,
         "coverage_pct": 32.0,
         "accuracy_pct": 100.0,
         "interval_95_pct": [
-          64.6,
+          67.6,
           100.0
         ],
         "sample_label": "SMALL SAMPLE"
@@ -286,17 +481,17 @@
       {
         "checkpoint": "LATE",
         "strategy": "BOT_MACD",
-        "wins": 7,
+        "wins": 8,
         "losses": 0,
-        "pending": 1,
+        "pending": 0,
         "no_call": 16,
-        "paper_costed": 3,
-        "paper_pnl_usd": 43.66,
-        "graded": 7,
+        "paper_costed": 4,
+        "paper_pnl_usd": 85.45,
+        "graded": 8,
         "coverage_pct": 33.3,
         "accuracy_pct": 100.0,
         "interval_95_pct": [
-          64.6,
+          67.6,
           100.0
         ],
         "sample_label": "SMALL SAMPLE"
@@ -355,18 +550,18 @@
       {
         "checkpoint": "HALFWAY",
         "strategy": "AI",
-        "wins": 93,
+        "wins": 94,
         "losses": 43,
-        "pending": 1,
+        "pending": 0,
         "no_call": 0,
-        "paper_costed": 136,
-        "paper_pnl_usd": 13.0,
-        "graded": 136,
+        "paper_costed": 137,
+        "paper_pnl_usd": 40.08,
+        "graded": 137,
         "coverage_pct": 100.0,
-        "accuracy_pct": 68.4,
+        "accuracy_pct": 68.6,
         "interval_95_pct": [
-          60.2,
-          75.6
+          60.4,
+          75.8
         ],
         "sample_label": "OBSERVED SAMPLE"
       },
@@ -391,72 +586,72 @@
       {
         "checkpoint": "HALFWAY",
         "strategy": "INDICATOR_BINARY",
-        "wins": 90,
+        "wins": 91,
         "losses": 46,
-        "pending": 1,
+        "pending": 0,
         "no_call": 0,
-        "paper_costed": 136,
-        "paper_pnl_usd": -134.21,
-        "graded": 136,
+        "paper_costed": 137,
+        "paper_pnl_usd": -107.13,
+        "graded": 137,
         "coverage_pct": 100.0,
-        "accuracy_pct": 66.2,
+        "accuracy_pct": 66.4,
         "interval_95_pct": [
-          57.9,
-          73.6
+          58.2,
+          73.8
         ],
         "sample_label": "OBSERVED SAMPLE"
       },
       {
         "checkpoint": "HALFWAY",
         "strategy": "TARGET_SIDE",
-        "wins": 95,
+        "wins": 96,
         "losses": 41,
-        "pending": 1,
+        "pending": 0,
         "no_call": 0,
-        "paper_costed": 136,
-        "paper_pnl_usd": -848.47,
-        "graded": 136,
+        "paper_costed": 137,
+        "paper_pnl_usd": -821.39,
+        "graded": 137,
         "coverage_pct": 100.0,
-        "accuracy_pct": 69.9,
+        "accuracy_pct": 70.1,
         "interval_95_pct": [
-          61.7,
-          76.9
+          61.9,
+          77.1
         ],
         "sample_label": "OBSERVED SAMPLE"
       },
       {
         "checkpoint": "HALFWAY",
         "strategy": "PRICE_PATH",
-        "wins": 8,
+        "wins": 9,
         "losses": 1,
-        "pending": 1,
+        "pending": 0,
         "no_call": 0,
-        "paper_costed": 9,
-        "paper_pnl_usd": 107.83,
-        "graded": 9,
+        "paper_costed": 10,
+        "paper_pnl_usd": 134.91,
+        "graded": 10,
         "coverage_pct": 100.0,
-        "accuracy_pct": 88.9,
+        "accuracy_pct": 90.0,
         "interval_95_pct": [
-          56.5,
-          98.0
+          59.6,
+          98.2
         ],
         "sample_label": "SMALL SAMPLE"
       },
       {
         "checkpoint": "HALFWAY",
         "strategy": "CONFLUENCE",
-        "wins": 6,
+        "wins": 7,
         "losses": 2,
-        "pending": 1,
+        "pending": 0,
         "no_call": 15,
-        "paper_costed": 8,
-        "paper_pnl_usd": -111.54,
-        "graded": 8,
+        "paper_costed": 9,
+        "paper_pnl_usd": -84.46,
+        "graded": 9,
         "coverage_pct": 37.5,
-        "accuracy_pct": 75.0,
+        "accuracy_pct": 77.8,
         "interval_95_pct": [
-          40.9,
-          92.9
+          45.3,
+          93.7
         ],
         "sample_label": "SMALL SAMPLE"
       },
@@ -546,214 +741,19 @@
           93.9
         ],
         "sample_label": "SMALL SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "AI",
-        "wins": 73,
-        "losses": 61,
-        "pending": 1,
-        "no_call": 2,
-        "paper_costed": 83,
-        "paper_pnl_usd": -898.13,
-        "graded": 134,
-        "coverage_pct": 98.5,
-        "accuracy_pct": 54.5,
-        "interval_95_pct": [
-          46.0,
-          62.7
-        ],
-        "sample_label": "OBSERVED SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "INDICATORS",
-        "wins": 17,
-        "losses": 9,
-        "pending": 0,
-        "no_call": 111,
-        "paper_costed": 18,
-        "paper_pnl_usd": -45.61,
-        "graded": 26,
-        "coverage_pct": 19.0,
-        "accuracy_pct": 65.4,
-        "interval_95_pct": [
-          46.2,
-          80.6
-        ],
-        "sample_label": "SMALL SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "INDICATOR_BINARY",
-        "wins": 78,
-        "losses": 58,
-        "pending": 1,
-        "no_call": 0,
-        "paper_costed": 85,
-        "paper_pnl_usd": -237.76,
-        "graded": 136,
-        "coverage_pct": 100.0,
-        "accuracy_pct": 57.4,
-        "interval_95_pct": [
-          49.0,
-          65.4
-        ],
-        "sample_label": "OBSERVED SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "TARGET_SIDE",
-        "wins": 78,
-        "losses": 58,
-        "pending": 1,
-        "no_call": 0,
-        "paper_costed": 85,
-        "paper_pnl_usd": -952.1,
-        "graded": 136,
-        "coverage_pct": 100.0,
-        "accuracy_pct": 57.4,
-        "interval_95_pct": [
-          49.0,
-          65.4
-        ],
-        "sample_label": "OBSERVED SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "PRICE_PATH",
-        "wins": 3,
-        "losses": 5,
-        "pending": 1,
-        "no_call": 0,
-        "paper_costed": 7,
-        "paper_pnl_usd": -138.41,
-        "graded": 8,
-        "coverage_pct": 100.0,
-        "accuracy_pct": 37.5,
-        "interval_95_pct": [
-          13.7,
-          69.4
-        ],
-        "sample_label": "SMALL SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "CONFLUENCE",
-        "wins": 3,
-        "losses": 2,
-        "pending": 0,
-        "no_call": 19,
-        "paper_costed": 3,
-        "paper_pnl_usd": -136.01,
-        "graded": 5,
-        "coverage_pct": 20.8,
-        "accuracy_pct": 60.0,
-        "interval_95_pct": [
-          23.1,
-          88.2
-        ],
-        "sample_label": "SMALL SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "PRICE_ACTION",
-        "wins": 0,
-        "losses": 3,
-        "pending": 0,
-        "no_call": 20,
-        "paper_costed": 3,
-        "paper_pnl_usd": -177.51,
-        "graded": 3,
-        "coverage_pct": 13.0,
-        "accuracy_pct": 0.0,
-        "interval_95_pct": [
-          0.0,
-          56.2
-        ],
-        "sample_label": "SMALL SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "BOT_MACD",
-        "wins": 4,
-        "losses": 1,
-        "pending": 0,
-        "no_call": 18,
-        "paper_costed": 2,
-        "paper_pnl_usd": -45.8,
-        "graded": 5,
-        "coverage_pct": 21.7,
-        "accuracy_pct": 80.0,
-        "interval_95_pct": [
-          37.6,
-          96.4
-        ],
-        "sample_label": "SMALL SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "BOT_BOLLINGER",
-        "wins": 0,
-        "losses": 0,
-        "pending": 0,
-        "no_call": 23,
-        "paper_costed": 0,
-        "paper_pnl_usd": 0.0,
-        "graded": 0,
-        "coverage_pct": 0.0,
-        "accuracy_pct": null,
-        "interval_95_pct": null,
-        "sample_label": "SMALL SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "BOT_SUPERTREND",
-        "wins": 2,
-        "losses": 1,
-        "pending": 0,
-        "no_call": 20,
-        "paper_costed": 1,
-        "paper_pnl_usd": -68.05,
-        "graded": 3,
-        "coverage_pct": 13.0,
-        "accuracy_pct": 66.7,
-        "interval_95_pct": [
-          20.8,
-          93.9
-        ],
-        "sample_label": "SMALL SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "strategy": "BOT_CONSENSUS",
-        "wins": 2,
-        "losses": 1,
-        "pending": 0,
-        "no_call": 20,
-        "paper_costed": 1,
-        "paper_pnl_usd": -68.05,
-        "graded": 3,
-        "coverage_pct": 13.0,
-        "accuracy_pct": 66.7,
-        "interval_95_pct": [
-          20.8,
-          93.9
-        ],
-        "sample_label": "SMALL SAMPLE"
       }
     ],
     "confidence": [
       {
         "checkpoint": "LATE",
         "confidence": "HIGH",
-        "wins": 50,
+        "wins": 51,
         "losses": 3,
-        "graded": 53,
+        "graded": 54,
         "coverage_pct": 100.0,
-        "accuracy_pct": 94.3,
+        "accuracy_pct": 94.4,
         "interval_95_pct": [
-          84.6,
+          84.9,
           98.1
         ],
         "sample_label": "SMALL SAMPLE"
@@ -761,14 +761,28 @@
       {
         "checkpoint": "HALFWAY",
         "confidence": "HIGH",
-        "wins": 33,
+        "wins": 34,
         "losses": 10,
-        "graded": 43,
+        "graded": 44,
         "coverage_pct": 100.0,
-        "accuracy_pct": 76.7,
+        "accuracy_pct": 77.3,
         "interval_95_pct": [
-          62.3,
-          86.8
+          63.0,
+          87.2
+        ],
+        "sample_label": "SMALL SAMPLE"
+      },
+      {
+        "checkpoint": "EARLY",
+        "confidence": "MEDIUM",
+        "wins": 31,
+        "losses": 25,
+        "graded": 56,
+        "coverage_pct": 100.0,
+        "accuracy_pct": 55.4,
+        "interval_95_pct": [
+          42.4,
+          67.6
         ],
         "sample_label": "SMALL SAMPLE"
       },
@@ -797,20 +811,6 @@
         "interval_95_pct": [
           64.8,
           87.2
-        ],
-        "sample_label": "SMALL SAMPLE"
-      },
-      {
-        "checkpoint": "EARLY",
-        "confidence": "MEDIUM",
-        "wins": 31,
-        "losses": 24,
-        "graded": 55,
-        "coverage_pct": 100.0,
-        "accuracy_pct": 56.4,
-        "interval_95_pct": [
-          43.3,
-          68.6
         ],
         "sample_label": "SMALL SAMPLE"
       },
@@ -874,6 +874,96 @@
     "paired_comparisons": [
       {
         "checkpoint": "LATE",
+        "baseline": "INDICATOR_BINARY",
+        "paired_rounds": 137,
+        "ai_wins": 108,
+        "baseline_wins": 109,
+        "ai_only_correct": 12,
+        "baseline_only_correct": 13,
+        "ai_advantage_percentage_points": -0.7
+      },
+      {
+        "checkpoint": "LATE",
+        "baseline": "TARGET_SIDE",
+        "paired_rounds": 137,
+        "ai_wins": 108,
+        "baseline_wins": 118,
+        "ai_only_correct": 7,
+        "baseline_only_correct": 17,
+        "ai_advantage_percentage_points": -7.3
+      },
+      {
+        "checkpoint": "LATE",
+        "baseline": "CONFLUENCE",
+        "paired_rounds": 8,
+        "ai_wins": 8,
+        "baseline_wins": 8,
+        "ai_only_correct": 0,
+        "baseline_only_correct": 0,
+        "ai_advantage_percentage_points": 0.0
+      },
+      {
+        "checkpoint": "LATE",
+        "baseline": "BOT_MACD",
+        "paired_rounds": 8,
+        "ai_wins": 8,
+        "baseline_wins": 8,
+        "ai_only_correct": 0,
+        "baseline_only_correct": 0,
+        "ai_advantage_percentage_points": 0.0
+      },
+      {
+        "checkpoint": "HALFWAY",
+        "baseline": "INDICATOR_BINARY",
+        "paired_rounds": 137,
+        "ai_wins": 94,
+        "baseline_wins": 91,
+        "ai_only_correct": 14,
+        "baseline_only_correct": 11,
+        "ai_advantage_percentage_points": 2.2
+      },
+      {
+        "checkpoint": "HALFWAY",
+        "baseline": "TARGET_SIDE",
+        "paired_rounds": 137,
+        "ai_wins": 94,
+        "baseline_wins": 96,
+        "ai_only_correct": 12,
+        "baseline_only_correct": 14,
+        "ai_advantage_percentage_points": -1.5
+      },
+      {
+        "checkpoint": "HALFWAY",
+        "baseline": "CONFLUENCE",
+        "paired_rounds": 9,
+        "ai_wins": 7,
+        "baseline_wins": 7,
+        "ai_only_correct": 0,
+        "baseline_only_correct": 0,
+        "ai_advantage_percentage_points": 0.0
+      },
+      {
+        "checkpoint": "EARLY",
+        "baseline": "INDICATOR_BINARY",
+        "paired_rounds": 135,
+        "ai_wins": 73,
+        "baseline_wins": 77,
+        "ai_only_correct": 10,
+        "baseline_only_correct": 14,
+        "ai_advantage_percentage_points": -3.0
+      },
+      {
+        "checkpoint": "EARLY",
+        "baseline": "TARGET_SIDE",
+        "paired_rounds": 135,
+        "ai_wins": 73,
+        "baseline_wins": 77,
+        "ai_only_correct": 6,
+        "baseline_only_correct": 10,
+        "ai_advantage_percentage_points": -3.0
+      },
+      {
+        "checkpoint": "LATE",
         "baseline": "INDICATORS",
         "paired_rounds": 36,
         "ai_wins": 32,
@@ -884,50 +974,10 @@
       },
       {
         "checkpoint": "LATE",
-        "baseline": "INDICATOR_BINARY",
-        "paired_rounds": 136,
-        "ai_wins": 107,
-        "baseline_wins": 108,
-        "ai_only_correct": 12,
-        "baseline_only_correct": 13,
-        "ai_advantage_percentage_points": -0.7
-      },
-      {
-        "checkpoint": "LATE",
-        "baseline": "TARGET_SIDE",
-        "paired_rounds": 136,
-        "ai_wins": 107,
-        "baseline_wins": 117,
-        "ai_only_correct": 7,
-        "baseline_only_correct": 17,
-        "ai_advantage_percentage_points": -7.4
-      },
-      {
-        "checkpoint": "LATE",
         "baseline": "PRICE_ACTION",
         "paired_rounds": 1,
         "ai_wins": 1,
         "baseline_wins": 1,
-        "ai_only_correct": 0,
-        "baseline_only_correct": 0,
-        "ai_advantage_percentage_points": 0.0
-      },
-      {
-        "checkpoint": "LATE",
-        "baseline": "CONFLUENCE",
-        "paired_rounds": 7,
-        "ai_wins": 7,
-        "baseline_wins": 7,
-        "ai_only_correct": 0,
-        "baseline_only_correct": 0,
-        "ai_advantage_percentage_points": 0.0
-      },
-      {
-        "checkpoint": "LATE",
-        "baseline": "BOT_MACD",
-        "paired_rounds": 7,
-        "ai_wins": 7,
-        "baseline_wins": 7,
         "ai_only_correct": 0,
         "baseline_only_correct": 0,
         "ai_advantage_percentage_points": 0.0
@@ -964,36 +1014,6 @@
       },
       {
         "checkpoint": "HALFWAY",
-        "baseline": "INDICATOR_BINARY",
-        "paired_rounds": 136,
-        "ai_wins": 93,
-        "baseline_wins": 90,
-        "ai_only_correct": 14,
-        "baseline_only_correct": 11,
-        "ai_advantage_percentage_points": 2.2
-      },
-      {
-        "checkpoint": "HALFWAY",
-        "baseline": "TARGET_SIDE",
-        "paired_rounds": 136,
-        "ai_wins": 93,
-        "baseline_wins": 95,
-        "ai_only_correct": 12,
-        "baseline_only_correct": 14,
-        "ai_advantage_percentage_points": -1.5
-      },
-      {
-        "checkpoint": "HALFWAY",
-        "baseline": "CONFLUENCE",
-        "paired_rounds": 8,
-        "ai_wins": 6,
-        "baseline_wins": 6,
-        "ai_only_correct": 0,
-        "baseline_only_correct": 0,
-        "ai_advantage_percentage_points": 0.0
-      },
-      {
-        "checkpoint": "HALFWAY",
         "baseline": "BOT_MACD",
         "paired_rounds": 8,
         "ai_wins": 6,
@@ -1001,26 +1021,6 @@
         "ai_only_correct": 0,
         "baseline_only_correct": 0,
         "ai_advantage_percentage_points": 0.0
-      },
-      {
-        "checkpoint": "EARLY",
-        "baseline": "INDICATOR_BINARY",
-        "paired_rounds": 134,
-        "ai_wins": 73,
-        "baseline_wins": 77,
-        "ai_only_correct": 10,
-        "baseline_only_correct": 14,
-        "ai_advantage_percentage_points": -3.0
-      },
-      {
-        "checkpoint": "EARLY",
-        "baseline": "TARGET_SIDE",
-        "paired_rounds": 134,
-        "ai_wins": 73,
-        "baseline_wins": 76,
-        "ai_only_correct": 6,
-        "baseline_only_correct": 9,
-        "ai_advantage_percentage_points": -2.2
       },
       {
         "checkpoint": "EARLY",
@@ -1116,5 +1116,25 @@
     "max_checkpoints_in_report": 10000,
     "note": "Forward observations only. Independent public-indicator bot candidates are unvalidated shadow strategies; compare accuracy AND coverage at the same checkpoint, with no lookahead, AI copying, live orders, or retrospective outcome fitting. Confidence labels are uncalibrated; intervals are descriptive and do not adjust for dependence between rounds. Paper P&L is illustrative only."
   },
-  "research_fetch": "ok"
+  "research_fetch": "ok",
+  "current_checkpoint": {
+    "market": "cpc-btc-updown-15m-2026-10-27-0145z",
+    "checkpoint": "EARLY",
+    "captured_at": "2026-10-27T01:48:05.420461+00:00",
+    "ai_source": "AI_REVIEW",
+    "ai_direction": "DOWN",
+    "ai_forecast_final_mean_usd": 80065.76,
+    "path_direction": "DOWN",
+    "path_forecast_final_mean_usd": 80065.76,
+    "ai_exactly_matches_path": true
+  },
+  "latest_live_settlement_forecast": {
+    "status": "available",
+    "target_usd": 80178.77,
+    "current_reference_usd": 80064.24,
+    "forecast_final_mean_usd": 79987.77,
+    "projected_direction": "DOWN",
+    "seconds_to_settlement": 580.9,
+    "modeled_final_minute_seconds": 60
+  }
 }
