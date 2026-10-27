@@ -1,0 +1,64 @@
+name: One-time BTC accuracy audit
+on:
+  push:
+    branches: [accuracy-audit-20261027]
+    paths: [.github/workflows/accuracy-audit.yml]
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect public accuracy API and write aggregate report
+        shell: bash
+        run: |
+          python - <<'PY'
+          import datetime, json, urllib.request
+          base="https://polymarket-btc-monitor-test.onrender.com"
+          report={"checked_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "source":base}
+          for endpoint,key in [("/api/status","live"),("/api/price-forecast/accuracy","price"),("/api/research","research")]:
+              try:
+                  req=urllib.request.Request(base+endpoint, headers={"User-Agent":"AccuracyAudit/1.0","Accept":"application/json"})
+                  with urllib.request.urlopen(req, timeout=55) as r:
+                      body=json.loads(r.read())
+                  if key=="live":
+                      perf=body.get("ai_performance") or {}
+                      history=body.get("ai_decision_history") or []
+                      settled=[r for r in history if r.get("result") in ("WIN","LOSS")]
+                      markets=[r.get("market") for r in settled]
+                      w=int(perf.get("wins") or 0); l=int(perf.get("losses") or 0)
+                      report["live"]={
+                          "app_status":body.get("status"),"updated":body.get("updated"),
+                          "market":body.get("market"),
+                          "scoreboard":perf,
+                          "math_check_pct":round(100*w/(w+l),1) if w+l else None,
+                          "last_50_settled_count":len(settled),
+                          "last_50_settled_wins":sum(r.get("result")=="WIN" for r in settled),
+                          "last_50_settled_losses":sum(r.get("result")=="LOSS" for r in settled),
+                          "duplicate_settled_markets_last_50":len(markets)-len(set(markets)),
+                          "pending_ai_count_in_last_50":sum(r.get("result")=="PENDING" for r in history),
+                          "settlement_diagnostic":body.get("settlement_diagnostic"),
+                          "feed_health":body.get("feed_health"),
+                          "database_error":body.get("database_error"),
+                          "ai_connection":body.get("ai_connection")
+                      }
+                  elif key=="price":
+                      report["price"]={k:body.get(k) for k in ("version","status","results","paired_comparisons","definition","note")}
+                  else:
+                      report["research"]={k:body.get(k) for k in ("version","strategies","confidence","paired_comparisons","max_checkpoints_in_report","note")}
+                  report[key+"_fetch"]="ok"
+              except Exception as exc:
+                  report[key+"_fetch"]=type(exc).__name__+": "+str(exc)[:250]
+          with open("accuracy-audit-live.json","w") as f:
+              json.dump(report,f,indent=2)
+          print(json.dumps(report,indent=2)[:25000])
+          PY
+      - name: Save summary on audit branch (not production)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add accuracy-audit-live.json
+          git commit -m "Record one-time public BTC prediction accuracy audit" || exit 0
+          git push origin HEAD:accuracy-audit-20261027
