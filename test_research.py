@@ -106,8 +106,8 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(app.execute('SELECT COUNT(*) FROM research_calls',fetch=True)[0][0],0)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM signals',fetch=True)[0][0],0)
  async def test_final_price_accuracy_retries_after_binary_settlement(self):
-  # Official outcomes may settle before the full public BRTI history is available.
-  # Numeric scoring must retry later instead of silently losing the data forever.
+  # A binary winner may be verified before official numeric settlement metadata
+  # is published. Never substitute the public 1-second chart for that value.
   start=(int(time.time())//900-2)*900
   stamp=datetime.fromtimestamp(start,timezone.utc).strftime('%Y-%m-%d-%H%Mz').lower()
   slug='cpc-btc-updown-15m-'+stamp
@@ -115,22 +115,29 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
             'settlement_forecast':{'current_reference_usd':100}}
   calls={'AI':{'source':'AI_REVIEW','direction':'UP','forecast_final_mean_usd':101},
          'PRICE_PATH':{'direction':'UP','forecast_final_mean_usd':100.7}}
-  app.execute('INSERT INTO research_calls (id,market,checkpoint,created_at,snapshot_json,calls_json,winner) VALUES (?,?,?,?,?,?,?)',
-              (slug+':HALFWAY',slug,'HALFWAY',datetime.now(timezone.utc).isoformat(),json.dumps(snapshot),json.dumps(calls),'UP'))
+  app.execute('INSERT INTO research_calls (id,market,checkpoint,created_at,snapshot_json,calls_json,winner,final_reference_mean) VALUES (?,?,?,?,?,?,?,?)',
+              (slug+':HALFWAY',slug,'HALFWAY',datetime.now(timezone.utc).isoformat(),
+               json.dumps(snapshot),json.dumps(calls),'UP',99.2))
+  market={'slug':slug,'status':'MARKET_STATUS_RESOLVED','marketSides':[
+      {'long':True,'description':'yes'},{'long':False,'description':'no'}],
+      'assetPriceTerms':{'marketType':'ASSET_PRICE_MARKET_TYPE_UP_DOWN',
+         'indexSymbol':'BRTI','asset':{'symbol':'btc'},'priceToBeat':100,
+         'settlementPrice':None}}
+  client=type('Client',(),{'get':AsyncMock(return_value=Reply({'event':{'markets':[market]}}))})()
   app._reference_retry_after.pop(slug,None)
-  with patch('app.reference_prices',new=AsyncMock(return_value={'final_minute_samples':59,'final_minute_average_so_far':100.5})) as get_ref:
-   pending=await app.retry_numeric_final_means(None,now=time.time())
-   self.assertEqual(pending['graded'],0)
-   self.assertEqual(pending['incomplete'],1)
-   self.assertEqual(get_ref.await_count,1)
-  self.assertIsNone(app.execute('SELECT final_reference_mean FROM research_calls WHERE market=?',(slug,),fetch=True)[0][0])
+  pending=await app.retry_numeric_final_means(client,now=time.time())
+  self.assertEqual(pending['graded'],0)
+  self.assertEqual(pending['incomplete'],1)
+  self.assertEqual(client.get.await_count,1)
+  self.assertEqual(app.execute('SELECT final_reference_source FROM research_calls WHERE market=?',(slug,),fetch=True)[0][0],'LEGACY_UNVERIFIED')
   retry_after=app._reference_retry_after[slug]
-  with patch('app.reference_prices',new=AsyncMock(return_value={'final_minute_samples':60,'final_minute_average_so_far':100.5})) as get_ref:
-   done=await app.retry_numeric_final_means(None,now=retry_after+1)
-   self.assertEqual(done['graded'],1)
-   self.assertEqual(get_ref.await_count,1)
+  market['assetPriceTerms']['settlementPrice']=100.5
+  done=await app.retry_numeric_final_means(client,now=retry_after+1)
+  self.assertEqual(done['graded'],1)
+  self.assertEqual(client.get.await_count,2)
   self.assertEqual(app.execute('SELECT winner FROM research_calls WHERE market=?',(slug,),fetch=True)[0][0],'UP')
   self.assertEqual(app.execute('SELECT final_reference_mean FROM research_calls WHERE market=?',(slug,),fetch=True)[0][0],100.5)
+  self.assertEqual(app.execute('SELECT final_reference_source FROM research_calls WHERE market=?',(slug,),fetch=True)[0][0],'OFFICIAL_MARKET_SETTLEMENT')
   report=app.numeric_price_forecast_report()
   results={x['source']:x for x in report['results']}
   self.assertEqual(results['CURRENT_BRTI_BASELINE']['mean_absolute_error_usd'],.5)
