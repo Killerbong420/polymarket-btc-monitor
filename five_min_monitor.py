@@ -23,12 +23,22 @@ async def discover(client):
  start=now.replace(minute=(now.minute//5)*5,second=0,microsecond=0)
  stamp=start.strftime("%Y-%m-%d-%H%Mz").lower()
  slug="btc-updown-5m-"+stamp
- r=await client.get("https://gateway.polymarket.us/v1/events/slug/"+slug,timeout=8)
- if r.status_code!=200:return None,"event_http_"+str(r.status_code)
- body=r.json()
- event=body.get("event",body) if isinstance(body,dict) else {}
- markets=event.get("markets",[]) if isinstance(event,dict) else []
- if not markets and isinstance(body,dict):markets=body.get("markets",[])
+ markets=[]
+ errors=[]
+ for event_slug in (slug,"cpc-"+slug):
+  try:
+   r=await client.get("https://gateway.polymarket.us/v1/events/slug/"+event_slug,timeout=8)
+   if r.status_code!=200:
+    errors.append(event_slug+":http_"+str(r.status_code))
+    continue
+   body=r.json()
+   event=body.get("event",body) if isinstance(body,dict) else {}
+   found=event.get("markets",[]) if isinstance(event,dict) else []
+   if not found and isinstance(body,dict):found=body.get("markets",[])
+   if isinstance(found,list):markets.extend(found)
+  except Exception as exc:
+   errors.append(event_slug+":"+type(exc).__name__)
+ if not markets:return None,"; ".join(errors) or "event_has_no_markets"
  for m in markets if isinstance(markets,list) else []:
   if not isinstance(m,dict):continue
   name=m.get("slug") or m.get("marketSlug") or ""
@@ -37,7 +47,7 @@ async def discover(client):
   asset=terms.get("asset") or {}
   if terms.get("marketType")!="ASSET_PRICE_MARKET_TYPE_UP_DOWN" or terms.get("indexSymbol")!="BRTI" or str(asset.get("symbol","")).lower()!="btc":continue
   return {**m,"slug":name,"end":(start+timedelta(minutes=5)).timestamp()},None
- return None,"no_verified_contract"
+ return None,"no_verified_contract_or_metadata"
 
 async def score_pending(client,execute,verified_winner):
  rows=execute("SELECT market FROM five_min_predictions WHERE result='PENDING' ORDER BY created_epoch DESC LIMIT 24",fetch=True)
