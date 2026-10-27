@@ -3,7 +3,7 @@ import json, math, time
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_EVEN
 
-VERSION='forward-15m-v1'
+VERSION='forward-15m-v2-independent-ai'
 CHECKPOINTS=[('EARLY',720),('HALFWAY',450),('LATE',180)]
 FEE_SOURCE='https://docs.polymarket.us/fees'
 FEE_THETA=0.0695  # Standard US taker schedule effective 2026-10-19 13:00 ET.

@@ -1,0 +1,39 @@
+name: BTC Forecast Upgrade Regression
+on:
+  push:
+    branches: [independent-forecast-audit-v2]
+    paths:
+      - ai_confirmation.py
+      - app.py
+      - research.py
+      - settlement_forecast.py
+      - forecast_audit.py
+      - forward_training.py
+      - test_forward_training.py
+      - test_forecast_upgrade.py
+      - .github/workflows/forecast-upgrade-tests.yml
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile all project Python modules
+        run: python -m compileall -q .
+      - name: Run all regression tests
+        run: python -m unittest discover -p 'test_*.py' -v
+      - name: Record validated commit without touching production
+        run: |
+          printf 'forecast-upgrade-tests: PASS\nsource-commit: %s\n' "$GITHUB_SHA" > forecast-upgrade-ci.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add forecast-upgrade-ci.txt
+          git commit -m "Record verified forecast upgrade test run"
+          git push origin HEAD:independent-forecast-audit-v2

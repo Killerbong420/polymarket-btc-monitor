@@ -171,3 +171,35 @@ def forecast_settlement(reference, external, target, seconds_left, now=None):
             "age_seconds": round(age,1),
             "contributions": contributions,
             "limitations": "Forward scenario, not fitted/calibrated to settlement outcomes. Does not predict news or liquidity shocks. Any missing past BRTI ticks remain unobserved. Official settlement/outcome overrides estimates."}
+
+
+def regime_shadow_forecast(reference, external, target, seconds_left, now=None):
+    """Unvalidated time-regime baseline; never overrides AI or production calls.
+
+    More distant forecasts shrink extrapolated motion toward the last observed
+    official index. Do not promote without forward out-of-sample evidence.
+    """
+    base = forecast_settlement(reference, external, target, seconds_left, now=now)
+    result = {"status": "unavailable", "version": "regime-shrink-shadow-v1",
+              "kind": "unvalidated_research_candidate"}
+    if base.get("status") != "available":
+        return {**result, "reason": base.get("reason", "Insufficient BRTI history")}
+    left = float(seconds_left)
+    if left > 450:
+        regime, shrink = "EARLY", 0.35
+    elif left > 180:
+        regime, shrink = "HALFWAY", 0.60
+    else:
+        regime, shrink = "LATE", 0.80
+    if base.get("opposing_short_long_slopes"):
+        shrink *= 0.65
+    observed = int(base.get("observed_final_minute_seconds") or 0)
+    # Preserve observed final-minute BRTI observations as expiry approaches.
+    shrink = (observed + (60-observed)*shrink)/60.0
+    current = base["current_reference_usd"]
+    candidate = round(current + (base["forecast_final_mean_usd"]-current)*shrink, 2)
+    return {**result, "status": "available", "regime": regime,
+            "shrink_factor": round(shrink,4), "current_reference_usd": current,
+            "forecast_final_mean_usd": candidate,
+            "projected_direction": "UP" if candidate >= float(target) else "DOWN",
+            "note": "Shadow heuristic, not fitted or calibrated. No live prediction overrides."}

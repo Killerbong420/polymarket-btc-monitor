@@ -9,7 +9,9 @@ from market_intelligence import intelligence_loop, public_intelligence
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from price_action import analyze_price_action, shadow_price_action
 from bot_library import study_strategies, consensus
-from settlement_forecast import forecast_settlement
+from settlement_forecast import forecast_settlement, regime_shadow_forecast
+from forecast_audit import summarize_forecast_audit
+from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history
 from fastapi import FastAPI, Query, Request
 import paper_trader as paper
@@ -650,6 +652,17 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  calls["PRICE_PATH"]={"direction":path.get("projected_direction") if path.get("status")=="available" and path.get("projected_direction") in ("UP","DOWN") else "WAIT",
   "source":path.get("version"),"confidence":"UNRATED","forecast_final_mean_usd":path.get("forecast_final_mean_usd"),
   "reason":"Independent future BRTI final-minute projection, not the current target side"}
+ regime=frozen.get("time_regime_shadow") or {}
+ calls["REGIME_SHADOW"]={"direction":regime.get("projected_direction") if regime.get("status")=="available" else "WAIT",
+  "source":regime.get("version"),"confidence":"UNRATED","forecast_final_mean_usd":regime.get("forecast_final_mean_usd"),
+  "reason":"Unvalidated time-aware trend-shrink shadow forecast"}
+ a_price=number(calls["AI"].get("forecast_final_mean_usd"))
+ p_price=number(calls["PRICE_PATH"].get("forecast_final_mean_usd"))
+ calls["AI"]["independent_forecast"]=bool(review.get("independent_forecast"))
+ calls["AI"]["forecast_status"]=review.get("forecast_status","LEGACY_OR_UNVERIFIED")
+ calls["AI"]["forecast_was_direction_decider"]=bool(review.get("forecast_was_direction_decider"))
+ calls["AI"]["matches_price_path_to_cent"]=(round(a_price,2)==round(p_price,2)) if a_price is not None and p_price is not None else None
+ calls["AI"]["price_path_delta_usd"]=round(a_price-p_price,2) if a_price is not None and p_price is not None else None
  # Shadow strategy: log abstentions as well as calls, on the same frozen forward checkpoint.
  # Never overwrite the raw AI outcome, main 15m lock, or trading controls.
  calls["CONFLUENCE"]=confluence_forecast(calls["AI"],behavior,frozen.get("reference_price"),frozen.get("chart"))
@@ -666,7 +679,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
   "official_target":target,"target_behavior":behavior,"reference_price":frozen.get("reference_price"),
   "market_quote":quote,"chart_pattern":frozen.get("chart_pattern"),"price_action":frozen.get("price_action"),"bot_research_signals":frozen.get("bot_research_signals"),"graph_evidence":frozen.get("graph_evidence"),
   "external_intelligence":frozen.get("external_intelligence"),"news_assessment":review.get("news_assessment"),
-  "outcome_feedback":frozen.get("outcome_feedback"),"settlement_forecast":frozen.get("settlement_forecast"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
+  "outcome_feedback":frozen.get("outcome_feedback"),"settlement_forecast":frozen.get("settlement_forecast"),"time_regime_shadow":frozen.get("time_regime_shadow"),"brti_recent_samples":frozen.get("brti_recent_samples"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
  # The checkpoint and its legacy halfway rows commit together or roll back together.
  with connect() as c:
   cur=c.cursor()
@@ -745,9 +758,21 @@ async def loop():
      else:state["brti_chart"]={"market":slug,"source":"Polymarket US reference API",
        "points":[],"status":"unavailable","reason":reference.get("reason","No verified BRTI observations")}
      ref_public={k:v for k,v in reference.items() if k!="points"}
+     # Compact genuine timestamped official BRTI samples, NOT a projected path.
+     # Do not fill gaps with synthetic observations; keep the payload bounded.
+     recent_points=[(int(t),round(float(p),2)) for t,p in ref_points
+                    if time.time()-600<=float(t)<=time.time()]
+     brti_samples=[(t,p) for t,p in recent_points if t%30==0][-20:]
+     if recent_points and (not brti_samples or brti_samples[-1][0]!=recent_points[-1][0]):
+      brti_samples.append(recent_points[-1])
+     d["brti_recent_samples"]={"source":reference.get("source"),
+       "timeframe":"observed_30s_samples","points":brti_samples,"last_tick_epoch":recent_points[-1][0] if recent_points else None,
+       "no_missing_ticks_interpolated":True}
      behavior=target_behavior(d,target,slug,reference)
-     price_path=forecast_settlement(reference,d,target,left15,now=time.time())
-     d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path)
+     forecast_now=time.time()
+     price_path=forecast_settlement(reference,d,target,left15,now=forecast_now)
+     regime_shadow=regime_shadow_forecast(reference,d,target,left15,now=forecast_now)
+     d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow)
      state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path)
      try:
       capture_polymarket_quote(quote)
@@ -938,6 +963,23 @@ def numeric_price_forecast_report():
 def price_forecast_accuracy():
  try:return numeric_price_forecast_report()
  except Exception:return JSONResponse({"status":"unavailable","error":"Price accuracy database unavailable"},status_code=503)
+
+@app.get("/api/forecast/diagnostics")
+def forecast_diagnostics():
+ try:
+  rows=execute("""SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner,final_reference_mean
+      FROM research_calls ORDER BY created_at DESC LIMIT 5000""",fetch=True)
+  return summarize_forecast_audit(rows)
+ except Exception:return JSONResponse({"status":"unavailable","error":"Forecast audit database unavailable"},status_code=503)
+
+@app.get("/api/forecast/training-readiness")
+def forecast_training_readiness():
+ try:
+  rows=execute("""SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner,final_reference_mean
+       FROM research_calls WHERE winner IN ('UP','DOWN') AND final_reference_mean IS NOT NULL
+       ORDER BY created_at DESC LIMIT 5000""",fetch=True)
+  return score_training_readiness(rows)
+ except Exception:return JSONResponse({"status":"unavailable","error":"Training evidence unavailable"},status_code=503)
 
 @app.get("/api/entry-estimate")
 def estimate_entry(direction:str="UP",contracts:float=Query(100,gt=0,le=1000000),slippage:float=Query(.005,ge=0,le=.25)):
