@@ -64,6 +64,16 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("performance.window_size||100", self.html)
         self.assertIn("most recent settled", self.html.lower())
 
+    def test_obsolete_quote_card_completely_removed(self):
+        self.assertNotIn("Market prices / order book", self.html)
+        self.assertNotIn('id="marketStatus"', self.html)
+        self.assertNotIn('id="officialQuote"', self.html)
+        self.assertNotIn('$("marketStatus")', self.html)
+        self.assertNotIn('$("officialQuote")', self.html)
+        # Keep working market/quote inputs for the predictor, not the old UI.
+        self.assertIn('id="futureForecastCard"', self.html)
+        self.assertIn('id="futureForecastPrice"', self.html)
+
     def test_live_feeds_are_started(self):
         self.assertIn("connectStream('coinbase');connectStream('kraken');update()", self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},5000)", self.html)
