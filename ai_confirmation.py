@@ -204,6 +204,24 @@ PROFIT_INSTRUCTIONS=(
     "Without a supplied position use HOLD. Keep the opportunity reason under 160 characters. "
 )
 
+def numeric_forecast_required(external, target):
+    """Require a genuine projected BRTI settlement price when official inputs exist."""
+    reference = (external or {}).get("reference_price") or {}
+    if (reference.get("status") != "fresh"
+            or reference.get("source") != "Polymarket US BTC reference / BRTI"):
+        return False
+    try:
+        price = float(reference.get("price"))
+        target = float(target)
+    except (TypeError, ValueError):
+        return False
+    return all(math.isfinite(value) and value > 0 for value in (price, target))
+
+
+def numeric_forecast_schema(external, target):
+    return {"type": "number"} if numeric_forecast_required(external, target) else {"type": ["number", "null"]}
+
+
 def final_price_direction(parsed, external, target):
     """Make the model's actual FUTURE BRTI price estimate determine its direction.
 
@@ -281,6 +299,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "target_behavior": external.get("target_behavior"), "reference_price": external.get("reference_price"),
         "brti_recent_samples": external.get("brti_recent_samples"),
         "independent_forecast_mode":True,
+        "numeric_forecast_required":numeric_forecast_required(external, price_to_beat),
         "market_quote": external.get("market_quote"),
         "external_intelligence": external.get("external_intelligence", {"status":"unavailable"}),
         "outcome_feedback":external.get("outcome_feedback"),
@@ -307,7 +326,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "verdict": {"type": "string", "enum": ["UP", "DOWN"]},
         "reason": {"type": "string"},
         "flip_risk": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "UNKNOWN"]},
-        "forecast_final_mean_usd": {"type":["number","null"]},
+        "forecast_final_mean_usd": numeric_forecast_schema(external, price_to_beat),
         "price_path_reason": {"type":"string"},
         "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
         "news_ids": {"type":"array","items":{"type":"string"}},
@@ -321,7 +340,7 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "Assess higher highs/lows, candle bodies and wicks, breakout or rejection near support/resistance, "
             "momentum acceleration/fading, EMA alignment, RSI and volume where provided. "
             "Weigh recent structure most heavily; compare contradictory trade pressure or indicators. "
-            "Project the FUTURE final 60-second BRTI reference average at contract expiry. Forecast its numeric USD price, incorporating the time left, observed speed and acceleration, trend fading, breaks, likely reversals, volatility, flows and all fresh evidence. No price-path baseline is supplied; independently estimate final BRTI price from official ticks, completed candles, and time left. The current BRTI side is NOT the answer and MUST NOT simply be copied. Your UP/DOWN verdict must equal whether YOUR predicted final-minute average is above or below official_price_to_beat. If BRTI evidence or target is unavailable, output null numeric price rather than guessing an official-index price. Explain the FUTURE price path in price_path_reason. Spot prices are proxies, not BRTI settlement. Select UP or DOWN, never WAIT "
+            "Project the FUTURE final 60-second BRTI reference average at contract expiry. Forecast its numeric USD price, incorporating the time left, observed speed and acceleration, trend fading, breaks, likely reversals, volatility, flows and all fresh evidence. No price-path baseline is supplied; independently estimate final BRTI price from official ticks, completed candles, and time left. The current BRTI side is NOT the answer and MUST NOT simply be copied. Your UP/DOWN verdict must equal whether YOUR predicted final-minute average is above or below official_price_to_beat. If numeric_forecast_required is true, forecast_final_mean_usd MUST be a finite numeric FUTURE estimate; never null. Express uncertainty in confidence and rationale, not by omitting the estimate. If verified BRTI evidence or target is unavailable, output null numeric price rather than inventing an official-index price. Explain the FUTURE price path in price_path_reason. Spot prices are proxies, not BRTI settlement. Select UP or DOWN, never WAIT "
             "when usable candles exist; confidence LOW when unclear or stale. "
             "Explain the specific chart evidence for the direction, not just generic bullish/bearish claims. "
             "Never invent unavailable data, probabilities or certainty; research only, not trading advice. "
@@ -413,6 +432,7 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "target_behavior":external.get("target_behavior"), "reference_price":external.get("reference_price"),
         "brti_recent_samples":external.get("brti_recent_samples"),
         "independent_forecast_mode":True,
+        "numeric_forecast_required":numeric_forecast_required(external, target),
         "market_quote":external.get("market_quote"),
         "external_intelligence":external.get("external_intelligence", {"status":"unavailable"}),
         "outcome_feedback":external.get("outcome_feedback"),
@@ -457,13 +477,13 @@ async def halfway_decision(client, market, duration, indicator_direction, score,
         "reason":{"type":"string"},"confidence":{"type":"string","enum":["LOW","MEDIUM","HIGH"]},
         "news_ids":{"type":"array","items":{"type":"string"}},
         "news_effect":{"type":"string","enum":["UP","DOWN","MIXED","NONE","UNKNOWN"]},
-        "forecast_final_mean_usd":{"type":["number","null"]},
+        "forecast_final_mean_usd":numeric_forecast_schema(external, target),
         "price_path_reason":{"type":"string"}},
         "required":["direction","reason","confidence","news_ids","news_effect","forecast_final_mean_usd","price_path_reason"],"additionalProperties":False}
     payload={"model":MODEL,"store":False,"instructions":(
         "Use outcome_feedback to audit confidence and weigh baseline disagreement; small samples do not prove future accuracy. A HIGH label is not a measured win probability. Treat the present target side as one observation, not a default forecast: explain the expected FUTURE price path, especially when movement or reversals may overturn the current side. " + ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "At the supplied current-round checkpoint (early, halfway or late), review the provided BTC market observations and make exactly one binary research forecast: UP or DOWN. Never output WAIT.  "
         "You may disagree with the indicator direction when concrete evidence supports it. "
-        "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. Forecast the NUMERIC FUTURE 60-second BRTI settlement mean in forecast_final_mean_usd when verified official-index evidence exists; null otherwise. Predict how price MOVES FROM NOW TO THE FINAL MINUTE, not which side is winning NOW. Future settlement may REVERSE the current side. No separate numerical price-path forecast is supplied. Derive your own future BRTI price estimate from observed data and expiry time. The binary direction MUST reflect YOUR numerical future settlement estimate versus the official price-to-beat, not present target position or chart bias. Explain speed, acceleration, time remaining, volatility and reversal risk in price_path_reason. "
+        "Use only supplied data; do not invent BRTI values, order flow, odds or probabilities. If numeric_forecast_required is true, forecast_final_mean_usd MUST be a finite number projecting the FUTURE final-minute BRTI mean; NEVER null, even when unsure (reflect uncertainty in confidence). If verified official-index input is unavailable, leave the numeric forecast null rather than fabricate it. Predict how price MOVES FROM NOW TO THE FINAL MINUTE, not which side is winning NOW. Future settlement may REVERSE the current side. No separate numerical price-path forecast is supplied. Derive your own future BRTI price estimate from observed data and expiry time. The binary direction MUST reflect YOUR numerical future settlement estimate versus the official price-to-beat, not present target position or chart bias. Explain speed, acceleration, time remaining, volatility and reversal risk in price_path_reason. "
         "When evidence is weak or conflicting, still choose the more supported direction and set confidence LOW; explicitly explain the uncertainty. This is a research forecast, not a trade instruction. "
         "Analyze the chronological OHLCV candle graph itself: swing highs/lows, trend structure, recent candle bodies/wicks, support/resistance, breakout/rejection, and reversal versus continuation. Explicitly weigh current_behavior, acceleration versus fading, pullback versus reversal, and price location inside its range; do not treat UP/DOWN bias as sufficient evidence. "
         "Consider every supplied evidence field, contradictions, proximity to the official target, "
