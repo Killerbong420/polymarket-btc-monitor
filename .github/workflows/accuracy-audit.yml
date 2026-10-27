@@ -51,6 +51,26 @@ jobs:
                   report[key+"_fetch"]="ok"
               except Exception as exc:
                   report[key+"_fetch"]=type(exc).__name__+": "+str(exc)[:250]
+          try:
+              req=urllib.request.Request(base+"/api/live",headers={"User-Agent":"AccuracyAudit/1.0","Accept":"application/json"})
+              with urllib.request.urlopen(req,timeout=55) as r:
+                  live=json.loads(r.read())
+              last=live.get("last_checkpoint") or {}
+              calls=last.get("calls") or {}
+              ai=calls.get("AI") or {}
+              path=calls.get("PRICE_PATH") or {}
+              report["current_checkpoint"]={
+                  "market":last.get("market"),"checkpoint":last.get("checkpoint"),
+                  "captured_at":last.get("captured_at"),
+                  "ai_source":ai.get("source"),"ai_direction":ai.get("direction"),
+                  "ai_forecast_final_mean_usd":ai.get("forecast_final_mean_usd"),
+                  "path_direction":path.get("direction"),
+                  "path_forecast_final_mean_usd":path.get("forecast_final_mean_usd"),
+                  "ai_exactly_matches_path":ai.get("forecast_final_mean_usd") is not None and ai.get("forecast_final_mean_usd")==path.get("forecast_final_mean_usd")
+              }
+              report["latest_live_settlement_forecast"]={k:(live.get("settlement_forecast") or {}).get(k) for k in ("status","target_usd","current_reference_usd","forecast_final_mean_usd","projected_direction","seconds_to_settlement","modeled_final_minute_seconds")}
+          except Exception as exc:
+              report["current_checkpoint_error"]=type(exc).__name__+": "+str(exc)[:250]
           with open("accuracy-audit-live.json","w") as f:
               json.dump(report,f,indent=2)
           print(json.dumps(report,indent=2)[:25000])
