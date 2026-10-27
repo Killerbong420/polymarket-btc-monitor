@@ -105,6 +105,38 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
    with self.assertRaises(Exception):await app.capture_checkpoint(None,slug,'HALFWAY',450,d,'UP','WAIT',1,market)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM research_calls',fetch=True)[0][0],0)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM signals',fetch=True)[0][0],0)
+ async def test_final_price_accuracy_retries_after_binary_settlement(self):
+  # Official outcomes may settle before the full public BRTI history is available.
+  # Numeric scoring must retry later instead of silently losing the data forever.
+  start=(int(time.time())//900-2)*900
+  stamp=datetime.fromtimestamp(start,timezone.utc).strftime('%Y-%m-%d-%H%Mz').lower()
+  slug='cpc-btc-updown-15m-'+stamp
+  snapshot={'reference_price':{'source':'Polymarket US BTC reference / BRTI'},
+            'settlement_forecast':{'current_reference_usd':100}}
+  calls={'AI':{'source':'AI_REVIEW','direction':'UP','forecast_final_mean_usd':101},
+         'PRICE_PATH':{'direction':'UP','forecast_final_mean_usd':100.7}}
+  app.execute('INSERT INTO research_calls (id,market,checkpoint,created_at,snapshot_json,calls_json,winner) VALUES (?,?,?,?,?,?,?)',
+              (slug+':HALFWAY',slug,'HALFWAY',datetime.now(timezone.utc).isoformat(),json.dumps(snapshot),json.dumps(calls),'UP'))
+  app._reference_retry_after.pop(slug,None)
+  with patch('app.reference_prices',new=AsyncMock(return_value={'final_minute_samples':59,'final_minute_average_so_far':100.5})) as get_ref:
+   pending=await app.retry_numeric_final_means(None,now=time.time())
+   self.assertEqual(pending['graded'],0)
+   self.assertEqual(pending['incomplete'],1)
+   self.assertEqual(get_ref.await_count,1)
+  self.assertIsNone(app.execute('SELECT final_reference_mean FROM research_calls WHERE market=?',(slug,),fetch=True)[0][0])
+  retry_after=app._reference_retry_after[slug]
+  with patch('app.reference_prices',new=AsyncMock(return_value={'final_minute_samples':60,'final_minute_average_so_far':100.5})) as get_ref:
+   done=await app.retry_numeric_final_means(None,now=retry_after+1)
+   self.assertEqual(done['graded'],1)
+   self.assertEqual(get_ref.await_count,1)
+  self.assertEqual(app.execute('SELECT winner FROM research_calls WHERE market=?',(slug,),fetch=True)[0][0],'UP')
+  self.assertEqual(app.execute('SELECT final_reference_mean FROM research_calls WHERE market=?',(slug,),fetch=True)[0][0],100.5)
+  report=app.numeric_price_forecast_report()
+  results={x['source']:x for x in report['results']}
+  self.assertEqual(results['CURRENT_BRTI_BASELINE']['mean_absolute_error_usd'],.5)
+  self.assertEqual(results['AI']['mean_absolute_error_usd'],.5)
+  self.assertEqual(results['PRICE_PATH']['mean_absolute_error_usd'],.2)
+
  async def test_endpoints_and_quote_round_guard(self):
   c=TestClient(app.app);self.assertEqual(c.get('/api/research').status_code,200)
   self.assertEqual(c.get('/api/research.csv').status_code,200)
