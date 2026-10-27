@@ -679,7 +679,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
   "official_target":target,"target_behavior":behavior,"reference_price":frozen.get("reference_price"),
   "market_quote":quote,"chart_pattern":frozen.get("chart_pattern"),"price_action":frozen.get("price_action"),"bot_research_signals":frozen.get("bot_research_signals"),"graph_evidence":frozen.get("graph_evidence"),
   "external_intelligence":frozen.get("external_intelligence"),"news_assessment":review.get("news_assessment"),
-  "outcome_feedback":frozen.get("outcome_feedback"),"settlement_forecast":frozen.get("settlement_forecast"),"time_regime_shadow":frozen.get("time_regime_shadow"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
+  "outcome_feedback":frozen.get("outcome_feedback"),"settlement_forecast":frozen.get("settlement_forecast"),"time_regime_shadow":frozen.get("time_regime_shadow"),"brti_recent_samples":frozen.get("brti_recent_samples"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
  # The checkpoint and its legacy halfway rows commit together or roll back together.
  with connect() as c:
   cur=c.cursor()
@@ -758,6 +758,16 @@ async def loop():
      else:state["brti_chart"]={"market":slug,"source":"Polymarket US reference API",
        "points":[],"status":"unavailable","reason":reference.get("reason","No verified BRTI observations")}
      ref_public={k:v for k,v in reference.items() if k!="points"}
+     # Compact genuine timestamped official BRTI samples, NOT a projected path.
+     # Do not fill gaps with synthetic observations; keep the payload bounded.
+     recent_points=[(int(t),round(float(p),2)) for t,p in ref_points
+                    if time.time()-600<=float(t)<=time.time()]
+     brti_samples=[(t,p) for t,p in recent_points if t%30==0][-20:]
+     if recent_points and (not brti_samples or brti_samples[-1][0]!=recent_points[-1][0]):
+      brti_samples.append(recent_points[-1])
+     d["brti_recent_samples"]={"source":reference.get("source"),
+       "timeframe":"observed_30s_samples","points":brti_samples,"last_tick_epoch":recent_points[-1][0] if recent_points else None,
+       "no_missing_ticks_interpolated":True}
      behavior=target_behavior(d,target,slug,reference)
      forecast_now=time.time()
      price_path=forecast_settlement(reference,d,target,left15,now=forecast_now)
