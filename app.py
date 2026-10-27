@@ -885,6 +885,7 @@ def numeric_price_forecast_report():
    FROM research_calls WHERE final_reference_mean IS NOT NULL
    ORDER BY created_at DESC LIMIT 10000""",fetch=True)
  groups={}
+ paired={}
  for checkpoint,snapshot_json,calls_json,actual in rows:
   try:
    snap=json.loads(snapshot_json);calls=json.loads(calls_json)
@@ -894,8 +895,18 @@ def numeric_price_forecast_report():
    candidates={"CURRENT_BRTI_BASELINE":(snap.get("settlement_forecast") or {}).get("current_reference_usd"),
                "PRICE_PATH":(calls.get("PRICE_PATH") or {}).get("forecast_final_mean_usd"),
                "AI":(calls.get("AI") or {}).get("forecast_final_mean_usd") if (calls.get("AI") or {}).get("source")=="AI_REVIEW" else None}
+   valid={k:number(v) for k,v in candidates.items()}
+   # Always compare against the exact same checkpoint/round; AI can be
+   # missing on difficult rounds, so unpaired MAEs alone are misleading.
+   if all(valid.get(k) is not None and valid[k]>0 for k in ("AI","PRICE_PATH","CURRENT_BRTI_BASELINE")):
+    group=paired.setdefault(checkpoint,{"checkpoint":checkpoint,"paired_rounds":0,"sum_ai_error":0.0,"sum_path_error":0.0,"sum_static_error":0.0,"ai_better_than_static":0,"path_better_than_static":0})
+    aerr=abs(valid["AI"]-y);perr=abs(valid["PRICE_PATH"]-y);serr=abs(valid["CURRENT_BRTI_BASELINE"]-y)
+    group["paired_rounds"]+=1
+    group["sum_ai_error"]+=aerr;group["sum_path_error"]+=perr;group["sum_static_error"]+=serr
+    group["ai_better_than_static"]+=int(aerr<serr)
+    group["path_better_than_static"]+=int(perr<serr)
    for name,pred in candidates.items():
-    p=number(pred)
+    p=valid[name]
     if p is None or p<=0:continue
     bucket=groups.setdefault((checkpoint,name),{"checkpoint":checkpoint,"source":name,"graded":0,"sum_abs_error_usd":0.0,"sum_square_error_usd":0.0})
     err=p-y
@@ -909,10 +920,19 @@ def numeric_price_forecast_report():
   out.append({"checkpoint":item["checkpoint"],"source":item["source"],"graded":n,
    "mean_absolute_error_usd":round(item["sum_abs_error_usd"]/n,2),
    "root_mean_square_error_usd":round((item["sum_square_error_usd"]/n)**.5,2)})
- return {"version":"forward-binary-and-numeric-audit-v1",
+ paired_summary=[]
+ for group in paired.values():
+  n=group["paired_rounds"]
+  paired_summary.append({"checkpoint":group["checkpoint"],"paired_rounds":n,
+   "ai_mae_usd":round(group["sum_ai_error"]/n,2),
+   "price_path_mae_usd":round(group["sum_path_error"]/n,2),
+   "unchanged_reference_mae_usd":round(group["sum_static_error"]/n,2),
+   "ai_better_than_unchanged_count":group["ai_better_than_static"],
+   "path_better_than_unchanged_count":group["path_better_than_static"]})
+ return {"version":"forward-binary-and-numeric-audit-v2",
          "status":"observed" if out else "awaiting_complete_final_minute_reference",
-         "results":out,"definition":"Error against the actual 60/60 published BRTI final-minute index mean. Current BRTI at prediction time is a naive baseline. Historical guesses and unavailable ticks are excluded; forecasts are not recalibrated probabilities.",
-         "note":"Compare forecast sources only on paired same-checkpoint rounds with actual BRTI reference coverage. Errors are USD, not trade P&L."}
+         "results":out,"paired_comparisons":paired_summary,"definition":"Error against the actual 60/60 published BRTI final-minute index mean. Current BRTI at prediction time is a naive baseline. Historical guesses and unavailable ticks are excluded; forecasts are not recalibrated probabilities.",
+         "note":"Paired comparisons require AI, independent path and unchanged-reference baseline in the same observed round and checkpoint. Errors are USD, not trade P&L."}
 
 @app.get("/api/price-forecast/accuracy")
 def price_forecast_accuracy():
