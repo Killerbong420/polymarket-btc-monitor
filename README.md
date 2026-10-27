@@ -1,5 +1,27 @@
 # Polymarket BTC Monitor
 
+## Quick prediction: causal next-minute BRTI forecast
+
+The FAST UP / FAST DOWN tile now prioritizes a read-only server forecast of
+**BRTI movement over the next 60 seconds**, independent from the locked 15-minute
+settlement call. It uses only already-published one-second Polymarket US
+reference ticks to measure 12s/30s/60s/120s movement, noise and opposing
+short-versus-long slopes. Recent momentum is deliberately damped before
+projection, and opposing slopes produce an explicit reversal watch.
+A fresh, verified reference and enough observed history are required; no
+future ticks, interpolated candles, contract odds or exchange-price stand-ins
+enter the BRTI calculation. A genuinely flat signal may abstain rather than
+pretending confidence.
+
+The browser can still show clearly labeled preliminary Coinbase/Kraken
+stream evidence when the verified BRTI forecast is unavailable or stale.
+The FAST quality badge describes indicator alignment, **not calibrated odds**.
+The forecast concerns the next minute's BTC index movement, not which side
+wins the 15-minute Polymarket round. No new orders or automated trades.
+
+Validation: `python -m unittest -v test_quick_forecast`.
+
+
 
 ## Forecast the FUTURE 15-minute settlement number, not the current winning side
 
