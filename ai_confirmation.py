@@ -4,7 +4,6 @@ import os
 import time
 import math
 import httpx
-from paper_trader import opportunity_context
 
 # Fixed research sample; never present these frequencies as calibrated live odds.
 HISTORY_CONTEXT_VERSION = "btc15m-20261018-20261024-v1"
@@ -232,8 +231,6 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
     _last_request = now
     captured_epoch=time.time()
     snapshot = {
-        "paper_trade_context":opportunity_context(external.get("market_quote")),
-        "paper_position":external.get("paper_position"),
         "target_behavior": external.get("target_behavior"), "reference_price": external.get("reference_price"),
         "brti_recent_samples": external.get("brti_recent_samples"),
         "independent_forecast_mode":True,
@@ -260,7 +257,6 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "candles_ohlcv": (external.get("graph_evidence") or {}).get("candles_ohlcv", [])[-20:]},
     }
     schema = {"type": "object", "properties": {
-        "profit_opportunity":PROFIT_SCHEMA,
         "verdict": {"type": "string", "enum": ["UP", "DOWN"]},
         "reason": {"type": "string"},
         "flip_risk": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "UNKNOWN"]},
@@ -269,11 +265,11 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
         "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
         "news_ids": {"type":"array","items":{"type":"string"}},
         "news_effect": {"type":"string","enum":["UP","DOWN","MIXED","NONE","UNKNOWN"]}
-    }, "required": ["verdict", "reason", "flip_risk", "confidence", "news_ids", "news_effect", "profit_opportunity", "forecast_final_mean_usd", "price_path_reason"], "additionalProperties": False}
+    }, "required": ["verdict", "reason", "flip_risk", "confidence", "news_ids", "news_effect", "forecast_final_mean_usd", "price_path_reason"], "additionalProperties": False}
     payload = {
         "model": MODEL, "store": False,
         "instructions": (
-            PROFIT_INSTRUCTIONS + "Use outcome_feedback to audit confidence and weigh baseline disagreement; small samples do not prove future accuracy. A HIGH label is not a measured win probability. Treat the present target side as one observation, not a default forecast: explain the expected FUTURE price path, especially when movement or reversals may overturn the current side. " + ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
+            "Use outcome_feedback to audit confidence and weigh baseline disagreement; small samples do not prove future accuracy. A HIGH label is not a measured win probability. Treat the present target side as one observation, not a default forecast: explain the expected FUTURE price path, especially when movement or reversals may overturn the current side. " + ANALYSIS_INSTRUCTIONS + EXTERNAL_INSTRUCTIONS + HISTORY_INSTRUCTIONS + "Act as a BTC price-action chart analyst. Read the chronological 1-minute OHLCV candles "
             "in graph_evidence (oldest to newest), not just the precomputed indicator signal. "
             "Assess higher highs/lows, candle bodies and wicks, breakout or rejection near support/resistance, "
             "momentum acceleration/fading, EMA alignment, RSI and volume where provided. "
@@ -317,7 +313,6 @@ async def confirm(client: httpx.AsyncClient, market, phase, signal, flip, score,
             "independent_forecast":True,
             "forecast_status":"NUMERIC_VERIFIED" if price_forecast is not None else "DIRECTION_ONLY",
             "signal": signal, "market": market, "phase": phase,
-            "profit_opportunity":parsed.get("profit_opportunity",{}),
             "captured_epoch":captured_epoch,"paper_signal_id":market+":LIVE:"+str(int(captured_epoch*1000)),
             "_paper_snapshot":{**snapshot,"official_target":price_to_beat},
             "model": MODEL, "external_context_included": bool(external.get("external_intelligence")),
