@@ -20,7 +20,7 @@ def number(v):
     except (ValueError,TypeError):return None
 
 def market_start(slug):
-    try:return datetime.strptime(str(slug).split('btc-updown-15m-',1)[1],'%Y-%m-%d-%H%Mz').replace(tzinfo=timezone.utc).timestamp()
+    try:return datetime.strptime(str(slug).split('btc-updown-15m-',1)[1] if 'btc-updown-15m-' in str(slug) else str(slug).split('btc-updown-5m-',1)[1],'%Y-%m-%d-%H%Mz').replace(tzinfo=timezone.utc).timestamp()
     except (ValueError,IndexError):return None
 
 async def reference_prices(client,market):
@@ -45,12 +45,13 @@ async def reference_prices(client,market):
         ordered=sorted(points.items())
         if not ordered:raise ValueError('No published ticks')
         age=max(0,now-ordered[-1][0]);target_points=[points[t] for t in range(int(start)-60,int(start)) if t in points]
-        final_start=start+840
-        final_points=[points[t] for t in range(int(final_start),int(start)+900) if t<=now and t in points]
+        duration=300 if 'btc-updown-5m-' in str(market.get('slug')) else 900
+        final_start=start+duration-60
+        final_points=[points[t] for t in range(int(final_start),int(start)+duration) if t<=now and t in points]
         return {'status':'fresh' if age<=15 else 'stale','source':'Polymarket US BTC reference / BRTI',
                 'source_url':'https://docs.polymarket.us/api-reference/asset-prices/overview',
                 'price':ordered[-1][1],'price_epoch':ordered[-1][0],'age_seconds':round(age,1),
-                'points':ordered,'window_start':start,'window_end':start+900,
+                'points':ordered,'window_start':start,'window_end':start+duration,
                 'opening_average':round(sum(target_points)/60,2) if len(target_points)==60 else None,
                 'opening_average_samples':len(target_points),
                 'final_minute_average_so_far':round(sum(final_points)/len(final_points),2) if final_points else None,
