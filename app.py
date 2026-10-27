@@ -13,6 +13,7 @@ from settlement_forecast import forecast_settlement, regime_shadow_forecast
 from forecast_audit import summarize_forecast_audit
 from forecast_guard import anchored_shadow_forecast, validate_official_target
 from quick_forecast import quick_forecast
+from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
 from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history
 from fastapi import FastAPI, Query, Request
@@ -83,6 +84,66 @@ def setup():
    id TEXT PRIMARY KEY, market TEXT NOT NULL,sampled_epoch REAL NOT NULL,
    up_bid REAL,up_ask REAL,down_bid REAL,down_ask REAL,spread REAL)""")
  execute("CREATE INDEX IF NOT EXISTS pm_quote_market_epoch ON polymarket_quote_samples (market,sampled_epoch)")
+ execute("""CREATE TABLE IF NOT EXISTS quick_predictions (
+   id TEXT PRIMARY KEY, market TEXT NOT NULL, minute_slot INTEGER NOT NULL,
+   captured_epoch INTEGER NOT NULL, observed_epoch INTEGER NOT NULL,
+   target_epoch INTEGER NOT NULL, starting_reference REAL NOT NULL,
+   forecast_reference REAL NOT NULL, direction TEXT NOT NULL,
+   quality TEXT NOT NULL, reversal_watch INTEGER NOT NULL,
+   model_version TEXT NOT NULL, result TEXT NOT NULL DEFAULT 'PENDING',
+   final_reference REAL, scored_epoch INTEGER)""")
+ execute("""CREATE INDEX IF NOT EXISTS quick_first5_graded_idx
+   ON quick_predictions(captured_epoch DESC,id DESC)
+   WHERE result IN ('WIN','LOSS')""")
+ execute("""CREATE INDEX IF NOT EXISTS quick_pending_market_idx
+   ON quick_predictions(market,target_epoch) WHERE result='PENDING'""")
+_quick_seen_market=None
+_quick_seen_slots=set()
+def track_first_five_quick(slug, reference, quick, now_epoch):
+ """Persist first 5 market-minute calls; grade exact BRTI ticks a minute later."""
+ global _quick_seen_market
+ if _quick_seen_market != slug:
+  _quick_seen_slots.clear()
+  _quick_seen_market = slug
+ entry=make_quick_entry(slug,market_start(slug),now_epoch,quick)
+ if entry and entry["minute_slot"] not in _quick_seen_slots:
+  execute("""INSERT INTO quick_predictions
+    (id,market,minute_slot,captured_epoch,observed_epoch,target_epoch,
+     starting_reference,forecast_reference,direction,quality,reversal_watch,
+     model_version,result) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO NOTHING""",
+     (entry["id"],entry["market"],entry["minute_slot"],entry["captured_epoch"],
+      entry["observed_epoch"],entry["target_epoch"],entry["starting_reference"],
+      entry["forecast_reference"],entry["direction"],entry["quality"],
+      entry["reversal_watch"],entry["model_version"],entry["result"]))
+  _quick_seen_slots.add(entry["minute_slot"])
+ if reference.get("source")!="Polymarket US BTC reference / BRTI":
+  return
+ rows=execute("""SELECT id,target_epoch,starting_reference,direction
+   FROM quick_predictions WHERE market=? AND result='PENDING' AND target_epoch<=?
+   ORDER BY target_epoch LIMIT 8""",(slug,int(now_epoch)),fetch=True)
+ for ident,target_epoch,start_price,direction in rows:
+  end_price=actual_tick_at(reference,target_epoch,now_epoch)
+  if end_price is None: continue
+  result=grade_quick_call(start_price,direction,end_price)
+  if result is None: continue
+  execute("""UPDATE quick_predictions SET result=?,final_reference=?,scored_epoch=?
+    WHERE id=? AND result='PENDING'""",(result,end_price,int(now_epoch),ident))
+
+def first_five_quick_report():
+ rows=execute("""SELECT result,minute_slot FROM quick_predictions
+   WHERE result IN ('WIN','LOSS') ORDER BY captured_epoch DESC,id DESC LIMIT 100""",fetch=True)
+ counts=dict(execute("""SELECT result,COUNT(*) FROM quick_predictions
+   WHERE result IN ('PENDING','NO_CALL','TIE') GROUP BY result""",fetch=True))
+ summary=summarize_quick_calls(rows,pending=counts.get("PENDING",0),
+   no_call=counts.get("NO_CALL",0),ties=counts.get("TIE",0))
+ recent=execute("""SELECT market,minute_slot,captured_epoch,direction,quality,
+    result,starting_reference,final_reference FROM quick_predictions
+    ORDER BY captured_epoch DESC,id DESC LIMIT 12""",fetch=True)
+ summary["recent"]=[dict(zip(("market","minute_slot","captured_epoch","direction",
+   "quality","result","starting_reference","final_reference"),r)) for r in recent]
+ return summary
+
 _last_quote_cleanup=0.0
 def capture_polymarket_quote(quote):
   """Store real Polymarket 15-minute UP/DOWN book quotes, not BTC spot data."""
@@ -815,6 +876,7 @@ async def loop():
      behavior=target_behavior(d,target,slug,reference)
      forecast_now=time.time()
      quick=quick_forecast(reference,now=forecast_now)
+     track_first_five_quick(slug,reference,quick,forecast_now)
      price_path=forecast_settlement(reference,d,target,left15,now=forecast_now)
      regime_shadow=regime_shadow_forecast(reference,d,target,left15,now=forecast_now)
      d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow,quick_forecast=quick)
@@ -1285,6 +1347,12 @@ def lightweight_live():
          "last_checkpoint":state.get("last_checkpoint"),
          "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),
          "server_epoch":time.time()}
+
+@app.get("/api/quick-accuracy")
+def quick_accuracy_report():
+ try:return first_five_quick_report()
+ except Exception:return JSONResponse({"status":"unavailable",
+   "error":"First-five-minute quick prediction database unavailable"},status_code=503)
 
 @app.get("/api/status")
 def status():
