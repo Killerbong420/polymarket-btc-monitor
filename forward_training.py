@@ -143,9 +143,17 @@ def validate_cohort(examples):
         "candidate_accuracy_pct":round(100*stats["candidate_correct"]/v,1),
         "path_accuracy_pct":round(100*stats["path_correct"]/v,1),
         "unchanged_accuracy_pct":round(100*stats["static_correct"]/v,1)}
+    # Directional calls are the actual decision target. Require a meaningful
+    # improvement on untouched chronological holdout data, not merely a tiny
+    # one-round advantage that could be noise. Early checkpoints are especially
+    # noisy, so demand at least five additional correct settled rounds.
+    required_direction_gain = max(5, math.ceil(0.03 * v)) if ordered[0]["checkpoint"] == "EARLY" else max(3, math.ceil(0.02 * v))
+    direction_gain = stats["candidate_correct"] - max(stats["path_correct"], stats["static_correct"])
     improves=(stats["candidate_error"]<.98*min(stats["path_error"],stats["static_error"]) and
-              stats["candidate_correct"]>max(stats["path_correct"],stats["static_correct"]))
+              direction_gain>=required_direction_gain)
     return {**status,"status":"validated_candidate" if improves else "no_verified_improvement",
+            "direction_gain_vs_best_baseline":direction_gain,
+            "required_direction_gain":required_direction_gain,
             "evaluation":performance, "passes_offline_gate":bool(improves),
             "live_model_unchanged":True,
             "note":"This single chronological holdout is a screening test, not proof of live predictive edge."}
