@@ -98,5 +98,25 @@ class ForecastGuardTests(unittest.TestCase):
         self.assertEqual(match["shadow_better_than_path_count"],0)
 
 
+    def test_paired_direction_uses_same_officially_settled_round(self):
+        snap={"settlement_forecast":{"current_reference_usd":100.0}}
+        ai={"source":"AI_REVIEW","direction":"UP","forecast_final_mean_usd":102.0}
+        path={"direction":"DOWN","forecast_final_mean_usd":99.0}
+        rows=[
+            ("HALFWAY",json.dumps(snap),json.dumps({"AI":ai,"PRICE_PATH":path}),101.0,"UP"),
+            ("LATE",json.dumps(snap),json.dumps({"AI":ai,"PRICE_PATH":path}),99.0,"DOWN"),
+            ("HALFWAY",json.dumps(snap),json.dumps({"AI":{**ai,"source":"INDICATORS_FALLBACK"},"PRICE_PATH":path}),99.0,"DOWN"),
+            ("HALFWAY",json.dumps(snap),json.dumps({"AI":ai,"PRICE_PATH":path}),101.0,None),
+        ]
+        with patch.object(app,"execute",return_value=rows):
+            report=app.numeric_price_forecast_report()
+        groups={x["checkpoint"]:x for x in report["paired_direction_comparisons"]}
+        self.assertEqual(groups["HALFWAY"]["paired_rounds"],1)
+        self.assertEqual(groups["HALFWAY"]["ai_only_correct"],1)
+        self.assertEqual(groups["HALFWAY"]["path_wins"],0)
+        self.assertEqual(groups["LATE"]["paired_rounds"],1)
+        self.assertEqual(groups["LATE"]["path_only_correct"],1)
+
+
 if __name__=="__main__":
     unittest.main()
