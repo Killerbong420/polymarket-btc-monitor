@@ -45,7 +45,10 @@ async def discover(client):
   if "btc-updown-5m-" not in name:continue
   terms=m.get("assetPriceTerms") or {}
   asset=terms.get("asset") or {}
-  if terms.get("marketType")!="ASSET_PRICE_MARKET_TYPE_UP_DOWN" or terms.get("indexSymbol")!="BRTI" or str(asset.get("symbol","")).lower()!="btc":continue
+  # Event listings may omit assetPriceTerms. Validate identity by exact UTC round slug;
+  # require BRTI terms from the authoritative market-detail response before forecasting.
+  if not name.endswith(stamp):continue
+  if terms and (terms.get("indexSymbol") not in (None,"BRTI") or terms.get("marketType") not in (None,"ASSET_PRICE_MARKET_TYPE_UP_DOWN")):continue
   return {**m,"slug":name,"end":(start+timedelta(minutes=5)).timestamp()},None
  return None,"no_verified_contract_or_metadata"
 
@@ -101,7 +104,7 @@ async def loop(client,execute,verified_winner,external_state):
     if prior:
      direction,forecast,result=prior[0]
      state.update(direction=direction,forecast=forecast,result=result,reason="Frozen prospective five-minute settlement forecast")
-    elif target is None or target<=0:
+    if target is None or target<=0:
      state.update(direction="WAIT",forecast=None,reason="Official priceToBeat absent in event contract; requesting market details")
      for path in ("/v1/markets/"+slug,"/v1/market/slug/"+slug):
       try:
@@ -134,5 +137,5 @@ async def loop(client,execute,verified_winner,external_state):
     last_score=time.monotonic()
    state["accuracy"]=report(execute)
   except asyncio.CancelledError:raise
-  except Exception as e:state.update(status="error",reason=type(e).__name__)
+  except Exception as e:state.update(status="error",reason=type(e).__name__+": "+str(e)[:150])
   await asyncio.sleep(5)
