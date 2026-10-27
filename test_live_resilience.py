@@ -68,7 +68,7 @@ class NonblockingSettlementTests(unittest.IsolatedAsyncioTestCase):
                             break
                         await asyncio.sleep(0.01)
                     self.assertGreaterEqual(calls["market"],3)
-                    self.assertEqual(calls["settle"],1)
+                    self.assertEqual(calls["settle"],1, {"status":app.state.get("status"),"error":app.state.get("error"),"market":calls["market"],"cycle":app.state.get("last_cycle_duration_seconds")})
                 finally:
                     task.cancel()
                     try: await task
