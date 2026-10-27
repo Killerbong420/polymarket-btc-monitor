@@ -903,6 +903,7 @@ async def read_only_diagnostics_loop():
      "numeric_accuracy_results":prices.get("results"),
      "paired_accuracy_comparisons":prices.get("paired_comparisons"),
      "shadow_paired_comparisons":prices.get("shadow_paired_comparisons"),
+      "paired_direction_comparisons":prices.get("paired_direction_comparisons"),
      "target_validation":state.get("target_validation"),
      "active_alert_codes":[a.get("code") for a in state.get("alerts",[]) if isinstance(a,dict)]
     }
@@ -984,14 +985,21 @@ def research_csv():
 
 def numeric_price_forecast_report():
  """Observed USD forecast errors against official market settlement metadata."""
- rows=execute("""SELECT checkpoint,snapshot_json,calls_json,final_reference_mean
+ rows=execute("""SELECT checkpoint,snapshot_json,calls_json,final_reference_mean,winner
    FROM research_calls WHERE final_reference_mean IS NOT NULL
    AND final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
    ORDER BY created_at DESC LIMIT 10000""",fetch=True)
  groups={}
  paired={}
  shadow_paired={}
- for checkpoint,snapshot_json,calls_json,actual in rows:
+ direction_paired={}
+ for row in rows:
+  if len(row)==5:
+   checkpoint,snapshot_json,calls_json,actual,winner=row
+  elif len(row)==4:
+   checkpoint,snapshot_json,calls_json,actual=row
+   winner=None
+  else:continue
   try:
    snap=json.loads(snapshot_json);calls=json.loads(calls_json)
    if not isinstance(snap,dict) or not isinstance(calls,dict):continue
@@ -1002,6 +1010,26 @@ def numeric_price_forecast_report():
                "ANCHORED_SHADOW":(calls.get("ANCHORED_SHADOW") or {}).get("forecast_final_mean_usd"),
                "AI":(calls.get("AI") or {}).get("forecast_final_mean_usd") if (calls.get("AI") or {}).get("source")=="AI_REVIEW" else None}
    valid={k:number(v) for k,v in candidates.items()}
+   # Compare direction on the same officially settled round and checkpoint.
+   ai_call=calls.get("AI") or {}
+   path_call=calls.get("PRICE_PATH") or {}
+   ai_dir=ai_call.get("direction") if ai_call.get("source")=="AI_REVIEW" else None
+   path_dir=path_call.get("direction")
+   if (winner in ("UP","DOWN") and ai_dir in ("UP","DOWN")
+       and path_dir in ("UP","DOWN")
+       and valid.get("AI") is not None and valid.get("PRICE_PATH") is not None):
+    dp=direction_paired.setdefault(checkpoint,{"checkpoint":checkpoint,
+       "paired_rounds":0,"ai_wins":0,"path_wins":0,
+       "both_correct":0,"ai_only_correct":0,"path_only_correct":0,"both_wrong":0})
+    dp["paired_rounds"]+=1
+    a_win=ai_dir==winner
+    p_win=path_dir==winner
+    dp["ai_wins"]+=int(a_win)
+    dp["path_wins"]+=int(p_win)
+    dp["both_correct"]+=int(a_win and p_win)
+    dp["ai_only_correct"]+=int(a_win and not p_win)
+    dp["path_only_correct"]+=int(p_win and not a_win)
+    dp["both_wrong"]+=int(not a_win and not p_win)
    # Always compare against the exact same checkpoint/round; AI can be
    # missing on difficult rounds, so unpaired MAEs alone are misleading.
    if all(valid.get(k) is not None and valid[k]>0 for k in ("AI","PRICE_PATH","CURRENT_BRTI_BASELINE")):
@@ -1057,10 +1085,15 @@ def numeric_price_forecast_report():
    "price_path_mae_usd":round(sg["sum_path_error"]/n,2),
    "shadow_better_than_path_count":sg["shadow_better_than_path"],
    "shadow_better_than_ai_count":sg["shadow_better_than_ai"]})
- return {"version":"forward-binary-and-numeric-audit-v3",
+ directional=[]
+ for dp in direction_paired.values():
+  n=dp["paired_rounds"]
+  directional.append({**dp,"ai_accuracy_pct":round(dp["ai_wins"]*100/n,1),
+   "path_accuracy_pct":round(dp["path_wins"]*100/n,1)})
+ return {"version":"forward-binary-and-numeric-audit-v4",
          "status":"observed" if out else "awaiting_official_settlement_prices",
-         "results":out,"paired_comparisons":paired_summary,"shadow_paired_comparisons":shadow_paired_summary,"definition":"Error against the authoritative Polymarket US BTC market assetPriceTerms.settlementPrice (official BRTI index). Public chart reconstructions and legacy unverified prices are excluded. Current BRTI at prediction time is a naive baseline; these are not calibrated win probabilities.",
-         "note":"Paired comparisons require AI, independent path and unchanged-reference baseline in the same observed round and checkpoint. Errors are USD, not trade P&L."}
+         "results":out,"paired_comparisons":paired_summary,"shadow_paired_comparisons":shadow_paired_summary,"paired_direction_comparisons":directional,"definition":"Error against the authoritative Polymarket US BTC market assetPriceTerms.settlementPrice (official BRTI index). Public chart reconstructions and legacy unverified prices are excluded. Current BRTI at prediction time is a naive baseline; these are not calibrated win probabilities.",
+         "note":"Paired numeric comparisons use the same checkpoint and officially settled round; paired direction also requires a published binary winner. Versions may be mixed; do not treat these historical scores as proof of a future edge. Errors are USD, not trade P&L."}
 
 @app.get("/api/price-forecast/accuracy")
 def price_forecast_accuracy():
