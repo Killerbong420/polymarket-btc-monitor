@@ -866,6 +866,36 @@ async def paper_worker():
    except Exception as exc:state["paper_error"]=type(exc).__name__+": "+str(exc)[:160]
    await asyncio.sleep(max(0,1-(time.monotonic()-started)))
 
+async def read_only_diagnostics_loop():
+ """Publish aggregates to private Render logs without opening Postgres to the internet."""
+ await asyncio.sleep(15)
+ while True:
+  try:
+   def gather():
+    current=status()
+    prices=numeric_price_forecast_report()
+    return {
+     "checked_utc":datetime.now(timezone.utc).isoformat(),
+     "prediction_model_version":VERSION,
+     "service_status":state.get("status"),
+     "persistent_database":bool(DB),
+     "market_active":bool(state.get("market")),
+     "reference_status":(state.get("reference_price") or {}).get("status"),
+     "monitor_cycle_seconds":state.get("last_cycle_duration_seconds"),
+     "ai_status":(public_state() or {}).get("status"),
+     "ai_performance":current.get("ai_performance"),
+     "database_reporting_error":bool(current.get("database_error")),
+     "numeric_accuracy_status":prices.get("status"),
+     "numeric_accuracy_results":prices.get("results"),
+     "paired_accuracy_comparisons":prices.get("paired_comparisons"),
+     "active_alert_codes":[a.get("code") for a in state.get("alerts",[]) if isinstance(a,dict)]
+    }
+   summary=await asyncio.to_thread(gather)
+   print("BTC_READ_ONLY_DIAG "+json.dumps(summary,default=str,separators=(",",":")),flush=True)
+  except Exception as exc:
+   print("BTC_READ_ONLY_DIAG_ERROR "+type(exc).__name__,flush=True)
+  await asyncio.sleep(600)
+
 @asynccontextmanager
 async def lifespan(app):
  task=asyncio.create_task(loop())
@@ -879,13 +909,15 @@ async def lifespan(app):
    historical_state.update(status="complete",checked=len(records),targets=sum(x["price_to_beat"] is not None for x in records),winners=sum(x["winner"] is not None for x in records),verified=sum(x["status"]=="VERIFIED" for x in records),movement_complete=sum(x.get("movement_status")=="COMPLETE" for x in records),target_movement_complete=sum(x.get("movement_status")=="COMPLETE" and x.get("price_to_beat") is not None for x in records),finished=datetime.now(timezone.utc).isoformat())
   except Exception as exc: historical_state.update(status="error",error=str(exc)[:300])
  history_task=asyncio.create_task(historical_job())
+ diagnostics_task=asyncio.create_task(read_only_diagnostics_loop())
  yield
  task.cancel()
  history_task.cancel()
+ diagnostics_task.cancel()
  context_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,history_task,context_task,*pending_predictions):
+ for running in (task,history_task,context_task,diagnostics_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
