@@ -568,7 +568,10 @@ async function updateServer(){if(statusInFlight)return;statusInFlight=true;const
   const get=k=>rows.find(x=>x.source===k);
   const ai=get('AI'),path=get('PRICE_PATH'),naive=get('CURRENT_BRTI_BASELINE');
   const t=x=>x?x.mean_absolute_error_usd.toLocaleString('en-US',{style:'currency',currency:'USD'})+' ('+x.graded+' rounds)':'awaiting samples';
-  document.getElementById('futureForecastAudit').textContent='Observed final-price mean absolute error at halfway · AI '+t(ai)+' · Future path '+t(path)+' · No-movement baseline '+t(naive)+' · 60/60 BRTI ticks required; compare on matched rounds only.';
+  const matched=(data.paired_comparisons||[]).find(x=>x.checkpoint==='HALFWAY');
+  const aud=document.getElementById('futureForecastAudit');
+  aud.textContent=matched?'Matched halfway price accuracy · '+matched.paired_rounds+' identical rounds · AI average miss '+t({mean_absolute_error_usd:matched.ai_mae_usd,graded:matched.paired_rounds})+' · Future path '+t({mean_absolute_error_usd:matched.price_path_mae_usd,graded:matched.paired_rounds})+' · Unchanged-price baseline '+t({mean_absolute_error_usd:matched.unchanged_reference_mae_usd,graded:matched.paired_rounds})+' · no hindsight':
+    'Final-price errors (UNPAIRED; samples may differ) · AI '+t(ai)+' · Future path '+t(path)+' · No-movement baseline '+t(naive)+' · 60/60 BRTI ticks required.';
  }catch(e){document.getElementById('futureForecastAudit').textContent='Price error audit not available yet; pending complete verified final-minute BRTI observations.'}
 }
 refreshFutureForecastAudit();setInterval(()=>{if(!document.hidden)refreshFutureForecastAudit()},120000);
