@@ -65,7 +65,9 @@ def forecast_settlement(reference, external, target, seconds_left, now=None):
             t0, p0 = sample[-1]
             if last_t > t0:
                 speeds.append(((price-p0)*60/(last_t-t0), weight))
-    trend_per_min = (sum(s*w for s,w in speeds)/sum(w for _,w in speeds)) if speeds else 0.
+    if not speeds:
+        return {**base, "reason": "Insufficient BRTI movement history to project a future price; current tick alone cannot predict settlement"}
+    trend_per_min = sum(s*w for s,w in speeds)/sum(w for _,w in speeds)
 
     # Volatility from actual reference changes; do not call this an
     # empirically calibrated interval. Sparse reference observations lower quality.
@@ -114,6 +116,11 @@ def forecast_settlement(reference, external, target, seconds_left, now=None):
         contributions["kraken_book_usd_per_min"] = round(adjustment,4)
     trend_per_min = clamp(trend_per_min, -max_trend, max_trend)
 
+    # A short-horizon slope opposing the longer trend is a concrete reversal
+    # warning, not proof of a future flip or a calibrated probability.
+    reversal_risk = (len(speeds)>=2 and speeds[0][0]*speeds[-1][0]<0
+                     and abs(speeds[0][0])>volatility*.2)
+
     # A recent directional burst decays instead of being extrapolated linearly
     # across an entire round. This models a FUTURE path, not the current side.
     def estimate_at(t):
@@ -140,7 +147,7 @@ def forecast_settlement(reference, external, target, seconds_left, now=None):
     # Scenario width is heuristic and explicitly NOT a calibrated CI.
     horizon_m = max(0, min(900, end-now-30))/60
     half_range = max(price*.00003,
-                     volatility*1.5*math.sqrt(max(.1,horizon_m))*(projected/60))
+                     volatility*(1.85 if reversal_risk else 1.5)*math.sqrt(max(.1,horizon_m))*(projected/60))
     down, up = max(.01,price_mean-half_range),price_mean+half_range
     quality = "LIMITED" if (not speeds or missing_past>2 or len(changes)<3) else "OBSERVED"
     return {**base, "status": "available", "quality": quality,
@@ -155,6 +162,7 @@ def forecast_settlement(reference, external, target, seconds_left, now=None):
             "target_in_scenario_range": down<=target<=up,
             "volatility_reference_usd_per_min": round(volatility,3),
             "net_trend_usd_per_min": round(trend_per_min,4),
+            "opposing_short_long_slopes": bool(reversal_risk),
             "slope_inputs": len(speeds),
             "observed_final_minute_seconds": known,
             "modeled_final_minute_seconds": projected,
