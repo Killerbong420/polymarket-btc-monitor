@@ -11,6 +11,7 @@ from price_action import analyze_price_action, shadow_price_action
 from bot_library import study_strategies, consensus
 from settlement_forecast import forecast_settlement, regime_shadow_forecast
 from forecast_audit import summarize_forecast_audit
+from forecast_guard import anchored_shadow_forecast, validate_official_target
 from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history
 from fastapi import FastAPI, Query, Request
@@ -693,6 +694,18 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  calls["AI"]["forecast_was_direction_decider"]=bool(review.get("forecast_was_direction_decider"))
  calls["AI"]["matches_price_path_to_cent"]=(round(a_price,2)==round(p_price,2)) if a_price is not None and p_price is not None else None
  calls["AI"]["price_path_delta_usd"]=round(a_price-p_price,2) if a_price is not None and p_price is not None else None
+ # Fixed conservative research shadow: records a bounded blend of the
+ # independent BRTI path and AI estimate without modifying the AI call.
+ shadow=anchored_shadow_forecast(a_price,path,frozen.get("reference_price"),target)
+ calls["ANCHORED_SHADOW"]={
+  "direction":shadow.get("projected_direction","WAIT"),
+  "source":shadow.get("version"),
+  "confidence":"UNRATED",
+  "forecast_final_mean_usd":shadow.get("forecast_final_mean_usd"),
+  "status":shadow.get("status"),
+  "reason":shadow.get("reason") or shadow.get("note"),
+  "ai_was_clipped":shadow.get("ai_was_clipped"),
+ }
  # Shadow strategy: log abstentions as well as calls, on the same frozen forward checkpoint.
  # Never overwrite the raw AI outcome, main 15m lock, or trading controls.
  calls["CONFLUENCE"]=confluence_forecast(calls["AI"],behavior,frozen.get("reference_price"),frozen.get("chart"))
@@ -709,7 +722,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
   "official_target":target,"target_behavior":behavior,"reference_price":frozen.get("reference_price"),
   "market_quote":quote,"chart_pattern":frozen.get("chart_pattern"),"price_action":frozen.get("price_action"),"bot_research_signals":frozen.get("bot_research_signals"),"graph_evidence":frozen.get("graph_evidence"),
   "external_intelligence":frozen.get("external_intelligence"),"news_assessment":review.get("news_assessment"),
-  "outcome_feedback":frozen.get("outcome_feedback"),"settlement_forecast":frozen.get("settlement_forecast"),"time_regime_shadow":frozen.get("time_regime_shadow"),"brti_recent_samples":frozen.get("brti_recent_samples"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
+  "outcome_feedback":frozen.get("outcome_feedback"),"settlement_forecast":frozen.get("settlement_forecast"),"time_regime_shadow":frozen.get("time_regime_shadow"),"brti_recent_samples":frozen.get("brti_recent_samples"),"target_validation":frozen.get("target_validation"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
  # The checkpoint and its legacy halfway rows commit together or roll back together.
  with connect() as c:
   cur=c.cursor()
@@ -810,7 +823,8 @@ async def loop():
      except Exception as quote_exc:
       state["quote_storage_error"]=type(quote_exc).__name__+": "+str(quote_exc)[:150]
      avg=reference.get("opening_average");pt=number(target)
-     state["target_validation"]={"status":"match" if abs(avg-pt)<=.02 else "mismatch","difference_usd":round(avg-pt,4)} if avg is not None and pt is not None else {"status":"unavailable"}
+     state["target_validation"]=validate_official_target(pt,reference)
+ d["target_validation"]=state["target_validation"]
      captured={r[0] for r in execute("SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True)}
      plan=checkpoint_plan(left15,captured)
      state["missed_checkpoints"]=plan["missed"]
@@ -888,6 +902,8 @@ async def read_only_diagnostics_loop():
      "numeric_accuracy_status":prices.get("status"),
      "numeric_accuracy_results":prices.get("results"),
      "paired_accuracy_comparisons":prices.get("paired_comparisons"),
+     "shadow_paired_comparisons":prices.get("shadow_paired_comparisons"),
+     "target_validation":state.get("target_validation"),
      "active_alert_codes":[a.get("code") for a in state.get("alerts",[]) if isinstance(a,dict)]
     }
    summary=await asyncio.to_thread(gather)
@@ -974,6 +990,7 @@ def numeric_price_forecast_report():
    ORDER BY created_at DESC LIMIT 10000""",fetch=True)
  groups={}
  paired={}
+ shadow_paired={}
  for checkpoint,snapshot_json,calls_json,actual in rows:
   try:
    snap=json.loads(snapshot_json);calls=json.loads(calls_json)
@@ -982,6 +999,7 @@ def numeric_price_forecast_report():
    if y is None or y<=0:continue
    candidates={"CURRENT_BRTI_BASELINE":(snap.get("settlement_forecast") or {}).get("current_reference_usd"),
                "PRICE_PATH":(calls.get("PRICE_PATH") or {}).get("forecast_final_mean_usd"),
+               "ANCHORED_SHADOW":(calls.get("ANCHORED_SHADOW") or {}).get("forecast_final_mean_usd"),
                "AI":(calls.get("AI") or {}).get("forecast_final_mean_usd") if (calls.get("AI") or {}).get("source")=="AI_REVIEW" else None}
    valid={k:number(v) for k,v in candidates.items()}
    # Always compare against the exact same checkpoint/round; AI can be
@@ -993,6 +1011,19 @@ def numeric_price_forecast_report():
     group["sum_ai_error"]+=aerr;group["sum_path_error"]+=perr;group["sum_static_error"]+=serr
     group["ai_better_than_static"]+=int(aerr<serr)
     group["path_better_than_static"]+=int(perr<serr)
+   if all(valid.get(k) is not None and valid[k]>0 for k in ("AI","PRICE_PATH","CURRENT_BRTI_BASELINE","ANCHORED_SHADOW")):
+    sg=shadow_paired.setdefault(checkpoint,{"checkpoint":checkpoint,"paired_rounds":0,
+        "sum_shadow_error":0.0,"sum_ai_error":0.0,"sum_path_error":0.0,
+        "shadow_better_than_path":0,"shadow_better_than_ai":0})
+    serr=abs(valid["ANCHORED_SHADOW"]-y)
+    aerr=abs(valid["AI"]-y)
+    perr=abs(valid["PRICE_PATH"]-y)
+    sg["paired_rounds"]+=1
+    sg["sum_shadow_error"]+=serr
+    sg["sum_ai_error"]+=aerr
+    sg["sum_path_error"]+=perr
+    sg["shadow_better_than_path"]+=int(serr<perr)
+    sg["shadow_better_than_ai"]+=int(serr<aerr)
    for name,pred in candidates.items():
     p=valid[name]
     if p is None or p<=0:continue
@@ -1017,9 +1048,18 @@ def numeric_price_forecast_report():
    "unchanged_reference_mae_usd":round(group["sum_static_error"]/n,2),
    "ai_better_than_unchanged_count":group["ai_better_than_static"],
    "path_better_than_unchanged_count":group["path_better_than_static"]})
- return {"version":"forward-binary-and-numeric-audit-v2",
+ shadow_paired_summary=[]
+ for sg in shadow_paired.values():
+  n=sg["paired_rounds"]
+  shadow_paired_summary.append({"checkpoint":sg["checkpoint"],"paired_rounds":n,
+   "shadow_mae_usd":round(sg["sum_shadow_error"]/n,2),
+   "ai_mae_usd":round(sg["sum_ai_error"]/n,2),
+   "price_path_mae_usd":round(sg["sum_path_error"]/n,2),
+   "shadow_better_than_path_count":sg["shadow_better_than_path"],
+   "shadow_better_than_ai_count":sg["shadow_better_than_ai"]})
+ return {"version":"forward-binary-and-numeric-audit-v3",
          "status":"observed" if out else "awaiting_official_settlement_prices",
-         "results":out,"paired_comparisons":paired_summary,"definition":"Error against the authoritative Polymarket US BTC market assetPriceTerms.settlementPrice (official BRTI index). Public chart reconstructions and legacy unverified prices are excluded. Current BRTI at prediction time is a naive baseline; these are not calibrated win probabilities.",
+         "results":out,"paired_comparisons":paired_summary,"shadow_paired_comparisons":shadow_paired_summary,"definition":"Error against the authoritative Polymarket US BTC market assetPriceTerms.settlementPrice (official BRTI index). Public chart reconstructions and legacy unverified prices are excluded. Current BRTI at prediction time is a naive baseline; these are not calibrated win probabilities.",
          "note":"Paired comparisons require AI, independent path and unchanged-reference baseline in the same observed round and checkpoint. Errors are USD, not trade P&L."}
 
 @app.get("/api/price-forecast/accuracy")
