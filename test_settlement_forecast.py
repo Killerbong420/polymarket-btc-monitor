@@ -41,6 +41,13 @@ class FutureSettlementTests(unittest.TestCase):
         self.assertEqual(a["forecast_final_mean_usd"], b["forecast_final_mean_usd"])
         self.assertEqual(a["projected_direction"],b["projected_direction"])
 
+    def test_one_current_tick_is_not_pretended_future_trend(self):
+        ref,ext,target,left,now=context(movement=.003,target=101.37)
+        ref["points"]=[ref["points"][-1]]
+        f=forecast_settlement(ref,ext,target,left,now=now)
+        self.assertEqual(f["status"],"unavailable")
+        self.assertNotIn("forecast_final_mean_usd",f)
+
     def test_no_brtI_means_no_forecast_from_spot(self):
         ref,ext,target,left,now=context(target=100)
         ref["status"]="unavailable"
