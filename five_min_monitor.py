@@ -92,7 +92,7 @@ async def loop(client,execute,verified_winner,external_state):
    else:
     slug=market["slug"];left=max(0,market["end"]-time.time())
     target=number((market.get("assetPriceTerms") or {}).get("priceToBeat"))
-    state.update(status="running",market=slug,seconds_left=round(left),target=target,
+    state.update(status="running" if target is not None and target>0 else "target_unavailable",market=slug,seconds_left=round(left),target=target,
                  url="https://polymarket.us/event/"+slug)
     if slug!=_last_market:
      _last_market=slug
@@ -101,11 +101,30 @@ async def loop(client,execute,verified_winner,external_state):
     if prior:
      direction,forecast,result=prior[0]
      state.update(direction=direction,forecast=forecast,result=result,reason="Frozen prospective five-minute settlement forecast")
-    elif target is not None and target>0 and left>20:
+    elif target is None or target<=0:
+     state.update(direction="WAIT",forecast=None,reason="Official priceToBeat absent in event contract; requesting market details")
+     for path in ("/v1/markets/"+slug,"/v1/market/slug/"+slug):
+      try:
+       response=await client.get("https://gateway.polymarket.us"+path,timeout=6)
+       if response.status_code!=200:continue
+       body=response.json()
+       detail=body.get("market",body) if isinstance(body,dict) else {}
+       if not isinstance(detail,dict):continue
+       if (detail.get("slug") or detail.get("marketSlug"))!=slug:continue
+       terms=detail.get("assetPriceTerms") or {}
+       candidate=number(terms.get("priceToBeat"))
+       if terms.get("indexSymbol")=="BRTI" and candidate is not None and candidate>0:
+        target=candidate
+        state.update(target=target,status="running",reason="Official target retrieved from market details")
+        break
+      except Exception:continue
+    if not prior and target is not None and target>0 and left>20:
      reference=await reference_prices(client,market)
+     if reference.get("status")!="fresh":state["reason"]="Official BRTI unavailable: "+str(reference.get("reason") or reference.get("status"))
      if reference.get("status")=="fresh" and reference.get("source")=="Polymarket US BTC reference / BRTI":
       forecast=forecast_settlement(reference,external_state.get("external") or {},target,left,now=time.time())
       predicted=number(forecast.get("forecast_final_mean_usd"))
+      if forecast.get("status")!="available":state["reason"]="Forecast unavailable: "+str(forecast.get("reason") or "insufficient data")
       if forecast.get("status")=="available" and predicted is not None and predicted>0:
        direction="UP" if predicted>=target else "DOWN"
        execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",(slug,time.time(),direction,target,predicted))
