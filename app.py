@@ -11,6 +11,7 @@ from price_action import analyze_price_action, shadow_price_action
 from bot_library import study_strategies, consensus
 from settlement_forecast import forecast_settlement, regime_shadow_forecast
 from forecast_audit import summarize_forecast_audit
+from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history
 from fastapi import FastAPI, Query, Request
 import paper_trader as paper
@@ -960,6 +961,15 @@ def forecast_diagnostics():
       FROM research_calls ORDER BY created_at DESC LIMIT 5000""",fetch=True)
   return summarize_forecast_audit(rows)
  except Exception:return JSONResponse({"status":"unavailable","error":"Forecast audit database unavailable"},status_code=503)
+
+@app.get("/api/forecast/training-readiness")
+def forecast_training_readiness():
+ try:
+  rows=execute("""SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner,final_reference_mean
+       FROM research_calls WHERE winner IN ('UP','DOWN') AND final_reference_mean IS NOT NULL
+       ORDER BY created_at DESC LIMIT 5000""",fetch=True)
+  return score_training_readiness(rows)
+ except Exception:return JSONResponse({"status":"unavailable","error":"Training evidence unavailable"},status_code=503)
 
 @app.get("/api/entry-estimate")
 def estimate_entry(direction:str="UP",contracts:float=Query(100,gt=0,le=1000000),slippage:float=Query(.005,ge=0,le=.25)):
