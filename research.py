@@ -35,9 +35,12 @@ async def reference_prices(client,market):
         r.raise_for_status();series=r.json().get('series',[])
         s=next(x for x in series if x.get('asset',{}).get('symbol')=='btc' and x.get('asset',{}).get('assetClass')=='ASSET_CLASS_CRYPTO' and x.get('currency')=='USD')
         points={}
-        for x in s.get('candles',[]):
+        for x in s.get('candles') or []:
+            if not isinstance(x,dict):continue
             t=number(x.get('timestamp'));p=number(x.get('close'))
-            if t is not None and p is not None and p>0 and int(x.get('tickCount',0))>0 and start-60<=t<=now:
+            try:tick_count=int(x.get('tickCount') or 0)
+            except (ValueError,TypeError,OverflowError):continue
+            if t is not None and p is not None and p>0 and tick_count>0 and start-60<=t<=now:
                 points[int(t)]=p
         ordered=sorted(points.items())
         if not ordered:raise ValueError('No published ticks')
