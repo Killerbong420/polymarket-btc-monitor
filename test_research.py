@@ -54,7 +54,7 @@ class PureTests(unittest.TestCase):
 class ReferenceTests(unittest.IsolatedAsyncioTestCase):
  async def test_reference_rejects_gapfilled_and_wrong_asset(self):
   slug='cpc-btc-updown-15m-2026-10-25-1400z';start=r.market_start(slug);now=start+450
-  candles=[{'timestamp':start-60+i,'close':'100','tickCount':1} for i in range(60)]+[{'timestamp':now-1,'close':'101','tickCount':1},{'timestamp':now,'close':'999','tickCount':0},{'timestamp':now+1,'close':'999','tickCount':1}]
+  candles=[{'timestamp':start-60+i,'close':'100','tickCount':1} for i in range(60)]+[{'timestamp':now-1,'close':'101','tickCount':1},{'timestamp':now,'close':'999','tickCount':0},{'timestamp':now+1,'close':'999','tickCount':1},{'timestamp':now-2,'close':'999','tickCount':'bad'},None]
   c=type('Client',(),{'get':AsyncMock(return_value=Reply({'series':[{'asset':{'symbol':'eth','assetClass':'ASSET_CLASS_CRYPTO'},'currency':'USD','candles':[]},{'asset':{'symbol':'btc','assetClass':'ASSET_CLASS_CRYPTO'},'currency':'USD','candles':candles}]}))})()
   with patch('research.time.time',return_value=now):
    ref=await r.reference_prices(c,{'slug':slug,'assetPriceTerms':{'indexSymbol':'BRTI'}})
