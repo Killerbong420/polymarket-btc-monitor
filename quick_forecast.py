@@ -85,6 +85,11 @@ def quick_forecast(reference, now=None):
     # Extrapolate only part of the observed movement: bursts typically decay.
     # A true opposing short trend can turn the projection but is labeled risky.
     predicted_delta = .55*pace
+    # When a genuine high-amplitude short-term reversal cancels the older
+    # trend, forecast a damped reversal instead of a misleading zero-edge
+    # outcome. Keep the confidence LOW while horizons disagree.
+    if reversal and (predicted_delta*short <= 0 or abs(predicted_delta) < noise):
+        predicted_delta = .35*short
     max_move = max(5.0, price*.0015)
     predicted_delta = max(-max_move, min(max_move, predicted_delta))
     if abs(predicted_delta) < .005:
