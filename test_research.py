@@ -136,6 +136,9 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(results['CURRENT_BRTI_BASELINE']['mean_absolute_error_usd'],.5)
   self.assertEqual(results['AI']['mean_absolute_error_usd'],.5)
   self.assertEqual(results['PRICE_PATH']['mean_absolute_error_usd'],.2)
+  self.assertEqual(report['paired_comparisons'][0]['paired_rounds'],1)
+  self.assertEqual(report['paired_comparisons'][0]['ai_mae_usd'],.5)
+  self.assertEqual(report['paired_comparisons'][0]['price_path_mae_usd'],.2)
 
  async def test_endpoints_and_quote_round_guard(self):
   c=TestClient(app.app);self.assertEqual(c.get('/api/research').status_code,200)
