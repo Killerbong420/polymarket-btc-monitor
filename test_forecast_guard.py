@@ -34,8 +34,10 @@ class ForecastGuardTests(unittest.TestCase):
         p=path()
         shadow=anchored_shadow_forecast(raw_ai,p,reference(),100.0)
         self.assertEqual(shadow["status"],"available")
-        self.assertEqual(shadow["version"],"anchored-brti-price-shadow-v1")
-        self.assertEqual(shadow["forecast_final_mean_usd"],100.15)
+        self.assertEqual(shadow["version"],"anchored-brti-price-shadow-v2")
+        self.assertEqual(shadow["forecast_final_mean_usd"],100.04)
+        self.assertAlmostEqual(shadow["weight_ai"],0.04)
+        self.assertAlmostEqual(shadow["weight_path"],0.96)
         self.assertEqual(shadow["projected_direction"],"UP")
         self.assertEqual(raw_ai,101.0)
         self.assertEqual(p["forecast_final_mean_usd"],100.0)
@@ -44,13 +46,25 @@ class ForecastGuardTests(unittest.TestCase):
         shadow=anchored_shadow_forecast(130.,path(),reference(),100.)
         self.assertEqual(shadow["status"],"available")
         self.assertTrue(shadow["ai_was_clipped"])
-        self.assertEqual(shadow["forecast_final_mean_usd"],100.75)
+        self.assertEqual(shadow["forecast_final_mean_usd"],100.0)
+        self.assertEqual(shadow["weight_ai"],0.0)
         p=path();p["target_usd"]=100.04
         self.assertEqual(anchored_shadow_forecast(130.,p,reference(),100.)["status"],"unavailable")
         p=path();p["quality"]="LIMITED"
         self.assertEqual(anchored_shadow_forecast(130.,p,reference(),100.)["status"],"unavailable")
         stale=reference();stale["status"]="stale"
         self.assertEqual(anchored_shadow_forecast(130.,path(),stale,100.)["status"],"unavailable")
+
+    def test_shadow_respects_scenario_distance_and_no_wild_extrapolation(self):
+        p=path()
+        p["forecast_final_mean_usd"]=101.0
+        p["upside_scenario_usd"]=103.0
+        shadow=anchored_shadow_forecast(106.0,p,reference(),100.0)
+        self.assertEqual(shadow["forecast_final_mean_usd"],101.0)
+        self.assertTrue(shadow["ai_was_clipped"])
+        self.assertEqual(shadow["projected_direction"],"UP")
+        self.assertEqual(shadow["ai_path_disagreement_usd"],5.0)
+        self.assertEqual(shadow["weight_ai"],0.0)
 
     def test_unavailable_target_or_index_does_not_reject_ai_call(self):
         fresh={"reference_price":reference()}
@@ -82,6 +96,26 @@ class ForecastGuardTests(unittest.TestCase):
         self.assertEqual(match["price_path_mae_usd"],.5)
         self.assertEqual(match["shadow_better_than_ai_count"],1)
         self.assertEqual(match["shadow_better_than_path_count"],0)
+
+
+    def test_paired_direction_uses_same_officially_settled_round(self):
+        snap={"settlement_forecast":{"current_reference_usd":100.0}}
+        ai={"source":"AI_REVIEW","direction":"UP","forecast_final_mean_usd":102.0}
+        path={"direction":"DOWN","forecast_final_mean_usd":99.0}
+        rows=[
+            ("HALFWAY",json.dumps(snap),json.dumps({"AI":ai,"PRICE_PATH":path}),101.0,"UP"),
+            ("LATE",json.dumps(snap),json.dumps({"AI":ai,"PRICE_PATH":path}),99.0,"DOWN"),
+            ("HALFWAY",json.dumps(snap),json.dumps({"AI":{**ai,"source":"INDICATORS_FALLBACK"},"PRICE_PATH":path}),99.0,"DOWN"),
+            ("HALFWAY",json.dumps(snap),json.dumps({"AI":ai,"PRICE_PATH":path}),101.0,None),
+        ]
+        with patch.object(app,"execute",return_value=rows):
+            report=app.numeric_price_forecast_report()
+        groups={x["checkpoint"]:x for x in report["paired_direction_comparisons"]}
+        self.assertEqual(groups["HALFWAY"]["paired_rounds"],1)
+        self.assertEqual(groups["HALFWAY"]["ai_only_correct"],1)
+        self.assertEqual(groups["HALFWAY"]["path_wins"],0)
+        self.assertEqual(groups["LATE"]["paired_rounds"],1)
+        self.assertEqual(groups["LATE"]["path_only_correct"],1)
 
 
 if __name__=="__main__":
