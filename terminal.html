@@ -779,6 +779,49 @@ refresh();setInterval(refresh,8000);
 }
 refreshFiveMinute();setInterval(()=>{if(!document.hidden)refreshFiveMinute()},10000);
 })();
+</script><script>
+/* Secondary, independently graded five-minute market; primary 15m layout unchanged. */
+(()=>{
+ const primary=document.getElementById('final15Panel');
+ if(!primary)return;
+ const panel=document.createElement('section');
+ panel.id='fiveMinutePanel';
+ panel.className='card';
+ panel.style.cssText='border-left:4px solid #b79aff;margin-top:10px';
+ panel.innerHTML='<div class="row" style="justify-content:space-between"><span class="label">5-MINUTE POLYMARKET · SECONDARY</span><span class="small" id="fiveCountdown">Checking market</span></div><div class="value wait" id="fiveDirection">WAIT</div><div class="small" id="fiveTarget">Official target: awaiting verified contract</div><div class="small" id="fiveForecast">Forecast: awaiting fresh BRTI</div><div class="small" id="fiveScore" style="margin-top:8px;font-weight:700">5m accuracy: collecting</div><details style="margin-top:6px"><summary class="small">Last 5m predictions and results</summary><div id="fiveRecent" class="small"></div></details><div class="small" id="fiveMarketLink"></div><p class="small">Independent 5-minute final-average BRTI forecast. One frozen prediction per round; only verified official settlements count. Does not affect 15-minute signals or win rate.</p>';
+ primary.insertAdjacentElement('afterend',panel);
+ const el=id=>document.getElementById(id);
+ const money=v=>Number.isFinite(Number(v))?'
+
+
+
++Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
+ async function refreshFive(){
+  try{
+   const response=await fetch('/api/five-minute',{cache:'no-store'});
+   if(!response.ok)throw Error('Unavailable');
+   const data=await response.json(),live=data.live||{},accuracy=data.accuracy||{};
+   const dir=['UP','DOWN'].includes(live.direction)?live.direction:'WAIT';
+   el('fiveDirection').textContent=dir;
+   el('fiveDirection').className='value '+(dir==='UP'?'up':dir==='DOWN'?'down':'wait');
+   el('fiveCountdown').textContent=live.seconds_left!=null?Math.floor(live.seconds_left/60)+':'+String(Math.max(0,live.seconds_left%60)).padStart(2,'0')+' left':(live.reason||'Checking');
+   el('fiveTarget').textContent='Official target: '+money(live.target);
+   el('fiveForecast').textContent='Projected final 60s BRTI mean: '+money(live.forecast)+' · '+(live.reason||'');
+   el('fiveScore').textContent='5m accuracy: '+(accuracy.graded?accuracy.accuracy_pct+'%':'collecting')+' · '+(accuracy.wins||0)+' WIN / '+(accuracy.losses||0)+' LOSS · last '+(accuracy.graded||0)+'/100 settled';
+   el('fiveRecent').replaceChildren();
+   for(const item of (accuracy.recent||[])){
+    const line=document.createElement('div');
+    line.textContent=item.market+' · '+item.direction+' · '+item.result;
+    el('fiveRecent').append(line);
+   }
+   const link=el('fiveMarketLink');link.replaceChildren();
+   if(live.url&&/^https:\/\/polymarket\.us\/event\/btc-updown-5m-[a-zA-Z0-9-]+$/.test(live.url)){
+    const a=document.createElement('a');a.href=live.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='View current 5m market on Polymarket';link.append(a);
+   }
+  }catch(e){el('fiveCountdown').textContent='Feed unavailable';}
+ }
+ refreshFive();setInterval(()=>{if(!document.hidden)refreshFive()},10000);
+})();
 </script></body></html>
 
 
