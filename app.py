@@ -823,7 +823,7 @@ async def loop():
      except Exception as quote_exc:
       state["quote_storage_error"]=type(quote_exc).__name__+": "+str(quote_exc)[:150]
      avg=reference.get("opening_average");pt=number(target)
-         state["target_validation"]=validate_official_target(pt,reference)
+     state["target_validation"]=validate_official_target(pt,reference)
      d["target_validation"]=state["target_validation"]
      captured={r[0] for r in execute("SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True)}
      plan=checkpoint_plan(left15,captured)
