@@ -228,19 +228,18 @@ def final_price_direction(parsed, external, target):
     Current index side, indicator trend and market odds are evidence, not
     equivalent to a forecast of the final one-minute settlement average.
     """
-    # Prefer verified live BRTI evidence, never another model's path estimate.
-    reference = external.get("reference_price") or {}
-    baseline = external.get("settlement_forecast") or {}
-    verified = (reference.get("status") == "fresh" and
-                reference.get("source") == "Polymarket US BTC reference / BRTI")
-    if not verified and baseline.get("status") != "available":
+    # Missing authoritative evidence is a direction-only forecast, not a
+    # malformed AI response. Never synthesize or validate an "official" USD
+    # settlement estimate against a missing target or a spot-price proxy.
+    if not numeric_forecast_required(external, target):
         return None, None
+    reference = external.get("reference_price") or {}
     raw = parsed.get("forecast_final_mean_usd")
     if raw is None:
         raise ValueError("ai_forecast_missing")
     try:
         price = float(raw)
-        current = float(reference["price"] if verified else baseline["current_reference_usd"])
+        current = float(reference["price"])
         target = float(target)
     except (ValueError, TypeError, KeyError) as exc:
         raise ValueError("ai_forecast_inputs_invalid") from exc
