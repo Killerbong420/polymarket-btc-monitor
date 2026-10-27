@@ -383,6 +383,52 @@ def verified_winner(m, settlement):
  if p==0.0: return "DOWN"
  return None
 
+_reference_retry_after={}
+async def retry_numeric_final_means(client, max_requests=3, now=None):
+ """Retry 60/60 BRTI reference scoring after official binary settlement.
+
+ The US reference history may be late. A previously settled binary round
+ must not disappear from numeric scoring merely because ticks were late at
+ its initial official settlement fetch. No inferred/missing ticks allowed.
+ """
+ now=time.time() if now is None else now
+ result={"status":"checked","requested":0,"graded":0,"incomplete":0}
+ rows=execute("""SELECT market,snapshot_json FROM research_calls
+      WHERE winner IN ('UP','DOWN') AND final_reference_mean IS NULL
+      ORDER BY created_at DESC LIMIT 120""",fetch=True)
+ seen=set()
+ for market,snapshot_json in rows:
+  if market in seen:continue
+  seen.add(market)
+  start=market_start(market)
+  if start is None or not (start+960<=now<=start+2*86400):continue
+  if now < _reference_retry_after.get(market,0):continue
+  try: snap=json.loads(snapshot_json)
+  except (TypeError,ValueError):continue
+  ref=snap.get("reference_price") if isinstance(snap,dict) else None
+  if not isinstance(ref,dict) or ref.get("source")!="Polymarket US BTC reference / BRTI":
+   continue  # Never assume a spot-only or unverified market uses BRTI.
+  if result["requested"]>=max_requests:break
+  result["requested"]+=1
+  try:
+   ticks=await reference_prices(client,{"slug":market,"assetPriceTerms":{"indexSymbol":"BRTI"}})
+   mean=number(ticks.get("final_minute_average_so_far"))
+   if ticks.get("final_minute_samples")==60 and mean is not None:
+    execute("UPDATE research_calls SET final_reference_mean=? WHERE market=? AND winner IS NOT NULL AND final_reference_mean IS NULL",(mean,market))
+    result["graded"]+=1
+    _reference_retry_after.pop(market,None)
+   else:
+    result["incomplete"]+=1
+    _reference_retry_after[market]=now+600
+  except Exception:
+   result["incomplete"]+=1
+   _reference_retry_after[market]=now+600
+ # Keep the cache bounded across long-running monitoring sessions.
+ for market,until in list(_reference_retry_after.items()):
+  start=market_start(market)
+  if start is None or start+2*86400<now: _reference_retry_after.pop(market,None)
+ return result
+
 async def settle(client):
  # Resolve the original event when the market-slug endpoint is unavailable.
  # Never infer official outcomes from Coinbase spot candles.
@@ -456,22 +502,15 @@ async def settle(client):
    execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    execute("UPDATE ai_decisions SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
    execute("UPDATE research_calls SET winner=?,settled_at=? WHERE market=? AND winner IS NULL",(win,datetime.now(timezone.utc).isoformat(),slug))
-   # Exact-price scoring is separate from official binary settlement. Only
-   # grade BRTI numeric errors with all 60 actual published final-minute ticks.
-   try:
-    ref=await reference_prices(client,{**market,"slug":slug})
-    if ref.get("final_minute_samples")==60:
-     final_mean=number(ref.get("final_minute_average_so_far"))
-     if final_mean is not None:
-      execute("UPDATE research_calls SET final_reference_mean=? WHERE market=?",(final_mean,slug))
-   except Exception:
-    # Missing historical reference observations must never block official WIN/LOSS.
-    pass
+   # BRTI exact-price scoring retries independently after binary settlement.
+   # The official winner is never inferred from any BRTI price reconstruction.
    execute("UPDATE paper_positions SET winner=? WHERE market=? AND status='OPEN'",(win,slug))
    diagnostic["verified"]+=1
   except Exception as exc:
    diagnostic["errors"].append(type(exc).__name__+": "+str(exc)[:100])
  diagnostic["overdue_markets"]=sum(1 for (slug,) in pending if market_start(slug) is not None and time.time()>market_start(slug)+2700)
+ try: diagnostic["numeric_price_backfill"]=await retry_numeric_final_means(client)
+ except Exception as exc:diagnostic["numeric_price_backfill"]={"status":"error","reason":type(exc).__name__}
  state["settlement_diagnostic"]=diagnostic
 def final_direction(data, primary, score):
  # Research-only forced binary prediction, including weak/mixed conditions.
@@ -693,7 +732,7 @@ async def loop():
      except Exception:d["outcome_feedback"]={"status":"unavailable"}
      terms=fifteen.get("assetPriceTerms") or {}
      ptb=terms.get("priceToBeat") or {}
-     target=ptb.get("value") if isinstance(ptb,dict) else None
+     target=number(ptb)  # Accept official target whether API supplies a scalar or {"value": ...}.
      reference,quote=await asyncio.gather(reference_prices(client,fifteen),market_quote(client,slug))
      # Display-only BRTI reference series from the Polymarket US reference API.
      # Keep raw index ticks in process memory; no CF Benchmarks site scraping.
