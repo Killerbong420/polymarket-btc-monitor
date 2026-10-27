@@ -228,22 +228,31 @@ def final_price_direction(parsed, external, target):
     Current index side, indicator trend and market odds are evidence, not
     equivalent to a forecast of the final one-minute settlement average.
     """
-    # Prefer verified live BRTI evidence, never another model's path estimate.
+    # No official target means direction-only, not a rejected AI call.
+    # A stale current tick may use a still-available independently recorded
+    # reference-only path, but never a Coinbase/Kraken proxy.
     reference = external.get("reference_price") or {}
     baseline = external.get("settlement_forecast") or {}
-    verified = (reference.get("status") == "fresh" and
-                reference.get("source") == "Polymarket US BTC reference / BRTI")
-    if not verified and baseline.get("status") != "available":
+    verified = numeric_forecast_required(external, target)
+    try:
+        target_value = float(target)
+        candidate_current = (reference.get("price") if verified else
+                             baseline.get("current_reference_usd") if baseline.get("status")=="available" else None)
+        current = float(candidate_current)
+        if not math.isfinite(target_value) or target_value <= 0 or not math.isfinite(current) or current <= 0:
+            return None, None
+    except (ValueError, TypeError, OverflowError):
         return None, None
     raw = parsed.get("forecast_final_mean_usd")
     if raw is None:
-        raise ValueError("ai_forecast_missing")
+        if verified:
+            raise ValueError("ai_forecast_missing")
+        return None, None
     try:
         price = float(raw)
-        current = float(reference["price"] if verified else baseline["current_reference_usd"])
-        target = float(target)
-    except (ValueError, TypeError, KeyError) as exc:
+    except (ValueError, TypeError, OverflowError) as exc:
         raise ValueError("ai_forecast_inputs_invalid") from exc
+    target = target_value
     if (not all(math.isfinite(x) and x>0 for x in (price,current,target))
             or abs(price/current-1) > .03):
         raise ValueError("ai_forecast_out_of_range")
