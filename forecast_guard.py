@@ -5,7 +5,7 @@ Record it prospectively; evaluate later on matched, officially settled rounds.
 """
 import math
 
-SHADOW_VERSION = "anchored-brti-price-shadow-v1"
+SHADOW_VERSION = "anchored-brti-price-shadow-v2"
 
 
 def finite_positive(value):
@@ -43,13 +43,15 @@ def validate_official_target(official, reference):
 def anchored_shadow_forecast(ai_forecast, path, reference, official_target):
     """Fixed conservative shadow; never replaces the live AI direction.
 
-    Shrink unvalidated AI excursions toward the independent BRTI price path,
-    bounded by its own explicitly heuristic scenario width. No fitting to
-    historical settlement results; prospective comparisons only.
+    A guarded, prospectively scored research candidate. Give the stronger
+    observed BRTI path at least 95% weight, and use at most 5% of the AI
+    displacement *only* when it lies inside the path scenario width. Those
+    scenario bounds are heuristic, not a confidence interval. Unvalidated
+    historical performance is never claimed as an out-of-sample improvement.
     """
     base = {"status": "unavailable", "version": SHADOW_VERSION,
             "kind": "shadow_only_not_live_signal",
-            "weight_path": .85, "weight_ai": .15}
+            "weight_path": 1.0, "weight_ai": 0.0}
     p = path if isinstance(path, dict) else {}
     ref = reference if isinstance(reference, dict) else {}
     target = finite_positive(official_target)
@@ -69,14 +71,23 @@ def anchored_shadow_forecast(ai_forecast, path, reference, official_target):
     low = finite_positive(p.get("downside_scenario_usd"))
     if high is None or low is None or not low <= projected <= high:
         return {**base, "reason": "Unavailable or inconsistent scenario bounds"}
-    # These scenario bounds are heuristic, not confidence limits.
-    bound = max(5., (high-low)*.75)
-    clipped = min(projected+bound,max(projected-bound,ai))
-    blended = round(.85*projected+.15*clipped, 2)
+    # Reject distant AI extrapolations rather than allowing a 15% adjustment
+    # merely because broad volatility scenarios can contain them.
+    width = max(5., high-projected, projected-low)
+    gap = ai-projected
+    relative_distance = abs(gap)/width
+    ai_weight = .05 * max(0., 1.-relative_distance)
+    # Preserve the independently projected BRTI settlement mean exactly when
+    # the AI estimate is outside the scenario width, without changing the
+    # raw AI decision, signal, or archived forecast.
+    blended = round(projected + ai_weight*gap, 2)
     return {**base, "status": "available",
+            "weight_path": round(1.-ai_weight, 6),
+            "weight_ai": round(ai_weight, 6),
             "forecast_final_mean_usd": blended,
             "projected_direction": "UP" if blended >= target else "DOWN",
-            "ai_was_clipped": abs(clipped-ai) > .005,
+            "ai_was_clipped": relative_distance >= 1.,
+            "ai_path_disagreement_usd": round(gap, 2),
             "anchor_distance_usd": round(blended-projected, 2),
-            "note": "Unvalidated prospectively recorded shadow; never overrides live AI, settlements or trading.",
+            "note": "Unvalidated prospectively scored shadow only; independent live AI directions, official settlements and trading remain unchanged.",
             }
