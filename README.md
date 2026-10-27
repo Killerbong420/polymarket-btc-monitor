@@ -1,5 +1,28 @@
 # Polymarket BTC Monitor
 
+## Quick prediction: first five minutes of each 15-minute round
+
+The quick prediction tile now displays only **UP** or **DOWN** (no FAST prefix)
+while leaving its forecasting logic unchanged. Each verified market's first
+five minutes can generate at most five frozen next-60-second BRTI calls: one
+per market minute, captured live rather than backfilled. The timestamped input
+index price and prediction are retained in the persistent `quick_predictions`
+database table. A call is counted as WIN or LOSS only if a real, exact-timestamp
+Polymarket US BRTI reference tick is observed 60 seconds after its input
+tick. Missing ticks remain PENDING, ties are separate, and an inconclusive
+WAIT is a NO_CALL rather than a win or loss.
+
+`GET /api/quick-accuracy` reports the last 100 graded calls, a separate
+minute-by-minute breakdown (minutes 1–5), pending/no-call/tie counts, and the
+recent prediction log. The dashboard refreshes this scoreboard every 30
+seconds. These are **one-minute Bitcoin index movement predictions**, not
+15-minute Polymarket settlement decisions. They do not affect the final AI
+prediction win/loss board or actual trading. No new predicted win rate is
+asserted before enough live future calls settle.
+
+Validation: `python -m unittest -v test_quick_accuracy test_terminal_ui`.
+
+
 ## Quick prediction: causal next-minute BRTI forecast
 
 The FAST UP / FAST DOWN tile now prioritizes a read-only server forecast of

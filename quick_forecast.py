@@ -97,6 +97,7 @@ def quick_forecast(reference, now=None):
                 "quality": "NO_EDGE", "current_reference_usd": round(price, 2),
                 "forecast_price_60s_usd": round(price, 2),
                 "forecast_move_usd": 0.0, "age_seconds": round(age, 1),
+                "observed_epoch": latest,
                 "reversal_watch": bool(reversal),
                 "reason": "Observed 12s/30s trends cancel; no defendable 60s direction"}
     direction = "UP" if predicted_delta > 0 else "DOWN"
@@ -110,7 +111,8 @@ def quick_forecast(reference, now=None):
             "current_reference_usd": round(price, 2),
             "forecast_price_60s_usd": round(max(.01, price+predicted_delta), 2),
             "forecast_move_usd": round(predicted_delta, 2),
-            "age_seconds": round(age, 1), "input_spans_seconds": sorted(slopes),
+            "age_seconds": round(age, 1), "observed_epoch": latest,
+            "input_spans_seconds": sorted(slopes),
             "short_pace_usd_per_min": round(short, 2),
             "longer_pace_usd_per_min": round(medium, 2),
             "reversal_watch": bool(reversal),
