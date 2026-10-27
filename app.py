@@ -12,6 +12,7 @@ from bot_library import study_strategies, consensus
 from settlement_forecast import forecast_settlement, regime_shadow_forecast
 from forecast_audit import summarize_forecast_audit
 from forecast_guard import anchored_shadow_forecast, validate_official_target
+from quick_forecast import quick_forecast
 from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history
 from fastapi import FastAPI, Query, Request
@@ -813,10 +814,11 @@ async def loop():
        "no_missing_ticks_interpolated":True}
      behavior=target_behavior(d,target,slug,reference)
      forecast_now=time.time()
+     quick=quick_forecast(reference,now=forecast_now)
      price_path=forecast_settlement(reference,d,target,left15,now=forecast_now)
      regime_shadow=regime_shadow_forecast(reference,d,target,left15,now=forecast_now)
-     d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow)
-     state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path)
+     d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow,quick_forecast=quick)
+     state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,quick_forecast=quick)
      try:
       capture_polymarket_quote(quote)
       state["quote_storage_error"]=None
@@ -842,7 +844,7 @@ async def loop():
      for key in ("phase","seconds_left","score"): state.pop(key,None)
      state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No verified Polymarket US 15-minute market: "+str(reason15))
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
-     state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},settlement_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},missed_checkpoints=[])
+     state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},settlement_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},quick_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},missed_checkpoints=[])
      await confirm(client,None,None,"WAIT","WAIT",0,d)
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     # Historical settlement can involve 30 remote rounds and must not
@@ -855,7 +857,7 @@ async def loop():
     persist_alerts(execute,state["alerts"])
    except Exception as e:
     for key in ("phase","seconds_left","score"): state.pop(key,None)
-    state.update(status="feed error",signal="WAIT",flip="WAIT",error=type(e).__name__+": "+str(e)[:200],updated=datetime.now(timezone.utc).isoformat())
+    state.update(status="feed error",signal="WAIT",flip="WAIT",quick_forecast={"status":"unavailable","reason":"Monitoring feed error"},error=type(e).__name__+": "+str(e)[:200],updated=datetime.now(timezone.utc).isoformat())
     db_error=None
     try:execute("SELECT 1",fetch=True)
     except Exception:db_error="Database query failed"
@@ -896,6 +898,7 @@ async def read_only_diagnostics_loop():
      "market_active":bool(state.get("market")),
      "reference_status":(state.get("reference_price") or {}).get("status"),
      "monitor_cycle_seconds":state.get("last_cycle_duration_seconds"),
+     "quick_forecast_status":(state.get("quick_forecast") or {}).get("status"),
      "ai_status":(public_state() or {}).get("status"),
      "ai_performance":current.get("ai_performance"),
      "database_reporting_error":bool(current.get("database_error")),
@@ -1277,7 +1280,7 @@ def lightweight_live():
          "market":state.get("market"),"signal":state.get("signal"),
          "error":state.get("error"),"external":state.get("external") or {},
          "brti_chart":state.get("brti_chart"),"reference_price":state.get("reference_price"),
-         "target_behavior":state.get("target_behavior"),"settlement_forecast":state.get("settlement_forecast"),
+         "target_behavior":state.get("target_behavior"),"settlement_forecast":state.get("settlement_forecast"),"quick_forecast":state.get("quick_forecast"),
          "final_15m":state.get("final_15m"),"last_halfway_ai":state.get("last_halfway_ai"),
          "last_checkpoint":state.get("last_checkpoint"),
          "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),
