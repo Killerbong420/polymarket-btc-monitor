@@ -14,6 +14,7 @@ from forecast_audit import summarize_forecast_audit
 from forecast_guard import anchored_shadow_forecast, validate_official_target
 from quick_forecast import quick_forecast
 import five_min_monitor
+import five_min_monitor
 from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
 from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history
@@ -992,6 +993,10 @@ async def lifespan(app):
   async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
    await five_min_monitor.loop(client,execute,verified_winner,state)
  five_task=asyncio.create_task(five_min_worker())
+ async def five_min_worker():
+  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
+   await five_min_monitor.loop(client,execute,verified_winner,state)
+ five_task=asyncio.create_task(five_min_worker())
  # Paper-trading worker disabled: prediction-only mode.
  async def historical_job():
   try:
@@ -1007,6 +1012,7 @@ async def lifespan(app):
  history_task.cancel()
  diagnostics_task.cancel()
  context_task.cancel()
+ five_task.cancel()
  five_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
@@ -1362,6 +1368,11 @@ def lightweight_live():
 @app.get("/api/five-minute")
 def five_minute_report():
  return five_min_monitor.state
+
+@app.get("/api/five-minute")
+def five_minute_report():
+ try:return {"live":dict(five_min_monitor.state),"accuracy":five_min_monitor.report(execute)}
+ except Exception:return JSONResponse({"status":"unavailable","reason":"Five-minute database unavailable"},status_code=503)
 
 @app.get("/api/quick-accuracy")
 def quick_accuracy_report():
