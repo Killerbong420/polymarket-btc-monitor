@@ -103,6 +103,10 @@ class ForwardEvaluationTests(unittest.TestCase):
         self.assertEqual(g["raw_ai_paired_pct"],0)
         self.assertEqual(g["guarded_vs_ai_pct"],100)
         self.assertEqual(g["hypothetical_hold_net_usd"],40)
+        self.assertEqual(g["by_quality"]["MIXED"]["calls"],2)
+        self.assertEqual(g["by_quality"]["MIXED"]["settled"],1)
+        self.assertEqual(g["by_quality"]["MIXED"]["wins"],1)
+        self.assertEqual(g["by_quality"]["MIXED"]["accuracy_pct"],100)
 
 
 if __name__ == "__main__":
