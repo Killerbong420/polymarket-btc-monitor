@@ -116,6 +116,20 @@ class FiveMinuteTimingTests(unittest.IsolatedAsyncioTestCase):
         forecast.assert_not_called()
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM five_min_predictions', fetch=True)[0][0], 0)
 
+    async def test_late_reference_delay_past_checkpoint_window_cannot_record_call(self):
+        clock=[1000]
+        market={'slug':'test','end':1140,
+                'assetPriceTerms':{'indexSymbol':'BRTI','priceToBeat':100}}
+        self.db.execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?)",
+                        ('test',900,'UP',100,101))
+        async def reference(*_):
+            clock[0]+=25  # started with 140 seconds left; finishes at 115
+            return {'status':'fresh'}
+        with patch.object(five,'forecast_candidate') as forecast:
+            await self.run_cycle(market,clock,reference)
+        forecast.assert_not_called()
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM five_min_late_predictions',fetch=True)[0][0],0)
+
     async def test_incompatible_terms_cannot_fall_through_failed_detail_lookup(self):
         market = {'slug': 'test', 'end': 1300, 'assetPriceTerms': {
             'indexSymbol': 'BRTI', 'priceToBeat': 100, 'marketType': 'OTHER'}}
