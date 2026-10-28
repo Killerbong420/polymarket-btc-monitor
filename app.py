@@ -677,7 +677,8 @@ def accuracy_report():
  return sorted(report.values(),key=lambda x:(x["phase"],x["quality"]))
 
 def research_rows():
- return execute("SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner FROM research_calls ORDER BY created_at DESC LIMIT 10000",fetch=True)
+ """Yield bounded research JSON rows; never fetch thousands into a list."""
+ return iter_query_rows("SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner FROM research_calls ORDER BY created_at DESC LIMIT 10000")
 
 _research_cache={"updated_epoch":0,"report":None}
 def research_report():
@@ -734,12 +735,16 @@ _outcome_feedback_cache={}
 def outcome_feedback(market):
  cached=_outcome_feedback_cache.get(market)
  if cached and time.time()-cached[0]<60:return cached[1]
- rows=[row for row in research_rows() if row[0]!=market and row[5] in ('UP','DOWN')]
- report=summarize(rows)
+ # Two bounded cursor passes avoid retaining thousands of large BRTI JSON
+ # snapshots across every new 15-minute round. Both passes exclude the
+ # current market and any unverified outcome, preserving forward-only audits.
+ def settled_rows():
+  return (row for row in research_rows() if row[0]!=market and row[5] in ('UP','DOWN'))
+ report=summarize(settled_rows())
  feedback={"source":"settled forward prediction log","excluded_market":market,
   "strategies":report.get("strategies",[]),"confidence":report.get("confidence",[]),
   "paired_comparisons":report.get("paired_comparisons",[]),
-  "loss_review":prediction_loss_review(rows),
+  "loss_review":prediction_loss_review(settled_rows()),
   "limitations":"Small observational samples across multiple code versions. Repeated checkpoints share rounds. Confidence labels are not calibrated probabilities. Do not automatically select the highest historical accuracy or infer trading profitability. Official published target overrides reconstructed values."}
  _outcome_feedback_cache.clear();_outcome_feedback_cache[market]=(time.time(),feedback)
  return feedback
