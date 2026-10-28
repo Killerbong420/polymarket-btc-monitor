@@ -91,6 +91,70 @@ class PhaseScoreTests(unittest.TestCase):
             self.assertEqual(forecast.call_count,1)
 
 
+
+class OfficialPricePathPreviewTests(unittest.TestCase):
+    def test_preview_uses_only_verified_past_brtI_and_has_bounded_tick_payload(self):
+        start, end, now = 1000, 1300, 1140
+        observations = [(t, 80000 + (t-start)*.05) for t in range(start, now)]
+        observations += [(now+40, 200000)]  # future tick must never leak
+        reference = {
+            "status":"fresh","source":"Polymarket US BTC reference / BRTI",
+            "window_start":start,"window_end":end,"points":observations}
+        path = {"status":"available","quality":"OBSERVED",
+                "current_reference_usd":80006.95,
+                "forecast_final_mean_usd":80009.20,
+                "downside_scenario_usd":79995,
+                "upside_scenario_usd":80020,
+                "opposing_short_long_slopes":True,"age_seconds":1}
+        with patch("five_min_monitor.forecast_settlement",return_value=path) as estimator:
+            observed=five.visual_forecast(reference,{},80004,160,now)
+        self.assertEqual(observed["status"],"available")
+        self.assertTrue(observed["reversal_warning"])
+        self.assertEqual(observed["projected_gap_usd"],5.2)
+        self.assertEqual(observed["final_minute_start_epoch"],end-60)
+        self.assertEqual(observed["source"],"Polymarket US BTC reference / BRTI")
+        self.assertLessEqual(len(observed["observed_points"]),five.VISUAL_MAX_POINTS+1)
+        self.assertEqual(observed["observed_points"][-1][0],now-1)
+        self.assertTrue(all(start<=t<=now for t,_ in observed["observed_points"]))
+        self.assertNotIn("fair_price",observed)
+        self.assertNotIn("contract_price",observed)
+        self.assertNotIn("probability",observed)
+        estimator.assert_called_once_with(reference,{},80004,160,now=now)
+
+    def test_missing_or_invalid_index_cannot_be_visualized(self):
+        ref={"status":"fresh","source":"Coinbase",
+             "window_start":1000,"window_end":1300,"points":[(1100,80000)]}
+        with patch("five_min_monitor.forecast_settlement") as estimator:
+            self.assertEqual(five.visual_forecast(ref,{},80004,160,1140)["status"],"unavailable")
+            ref["source"]="Polymarket US BTC reference / BRTI"
+            ref["status"]="stale"
+            self.assertEqual(five.visual_forecast(ref,{},80004,160,1140)["status"],"unavailable")
+            estimator.assert_not_called()
+
+    def test_preview_never_changes_the_frozen_early_or_late_prediction(self):
+        db=MemoryDB()
+        try:
+            slug="cpc-btc-updown-5m-2026-10-28-2000z"
+            db.execute("INSERT INTO five_min_predictions VALUES (?,?,?,?,?,?,?)",(slug,1,"UP",100,101,"WIN","UP"))
+            db.execute("INSERT INTO five_min_late_predictions VALUES (?,?,?,?,?,?,?)",(slug,2,"DOWN",100,99,"LOSS","UP"))
+            before=(db.execute("SELECT * FROM five_min_predictions",fetch=True),
+                    db.execute("SELECT * FROM five_min_late_predictions",fetch=True))
+            reference={"status":"fresh","source":"Polymarket US BTC reference / BRTI",
+                       "window_start":1000,"window_end":1300,"points":[(1100,100),(1110,101)]}
+            with patch("five_min_monitor.forecast_settlement",return_value={
+                    "status":"available","current_reference_usd":101,
+                    "forecast_final_mean_usd":102,"downside_scenario_usd":99,
+                    "upside_scenario_usd":104}):
+                five.visual_forecast(reference,{},100,160,1140)
+            after=(db.execute("SELECT * FROM five_min_predictions",fetch=True),
+                   db.execute("SELECT * FROM five_min_late_predictions",fetch=True))
+            self.assertEqual(before,after)
+        finally:
+            db.close()
+
+
+
+
 class CheckpointLoopTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.db=MemoryDB()
