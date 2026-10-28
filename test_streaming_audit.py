@@ -40,6 +40,36 @@ class StreamingAuditTests(unittest.TestCase):
         self.assertEqual(cursor.params, (42,))
         self.assertTrue(cursor.closed)
 
+    def test_postgres_uses_server_side_named_cursor(self):
+        class ServerCursor:
+            def __init__(self):
+                self.closed=False
+                self.rows=[("ok",)]
+            def execute(self, sql, params):
+                self.sql,self.params=sql,params
+            def fetchmany(self, size):
+                batch,self.rows=self.rows[:size],self.rows[size:]
+                return batch
+            def close(self):
+                self.closed=True
+        cursor=ServerCursor()
+        names=[]
+        class Connection:
+            def cursor(self, name=None):
+                names.append(name)
+                return cursor
+        @contextmanager
+        def fake_connect():
+            yield Connection()
+        with patch.object(app, "connect", fake_connect), patch.object(app, "DB", "postgres://test"):
+            rows=list(app.iter_query_rows("SELECT value FROM audit WHERE x=?", (7,), batch_size=2))
+        self.assertEqual(rows, [("ok",)])
+        self.assertEqual(cursor.sql, "SELECT value FROM audit WHERE x=%s")
+        self.assertEqual(cursor.params, (7,))
+        self.assertEqual(len(names), 1)
+        self.assertTrue(names[0].startswith("btc_audit_"))
+        self.assertTrue(cursor.closed)
+
     def test_research_rows_use_bounded_stream_instead_of_fetchall(self):
         records=[("market", "EARLY", "now", "{}", "{}", None)]
         with patch.object(app, "iter_query_rows", return_value=iter(records)) as stream, \
