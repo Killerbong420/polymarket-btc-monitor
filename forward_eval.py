@@ -42,9 +42,13 @@ def evaluate_guarded(rows):
             "paired_path":0,"guarded_path_wins":0,"raw_path_wins":0,
             "price_pairs":0,"guarded_abs_error":0.0,"ai_abs_error":0.0,
             "path_abs_error":0.0,"priced_paper_trades":0,
-            "hypothetical_net_usd":0.0,"cost_blocked":0
+            "hypothetical_net_usd":0.0,"cost_blocked":0,"by_quality":{}
         })
         group["calls"]+=1
+        quality=guarded.get("confidence") or guarded.get("quality")
+        quality=quality if quality in ("STRONG","MIXED","LOW") else "UNRATED"
+        band=group["by_quality"].setdefault(quality,{"calls":0,"settled":0,"wins":0,"losses":0})
+        band["calls"]+=1
         direction=guarded.get("direction")
         if guarded.get("status")!="available" or direction not in ("UP","DOWN"):
             group["abstained"]+=1
@@ -58,6 +62,9 @@ def evaluate_guarded(rows):
         good=(direction==winner)
         group["wins"]+=int(good)
         group["losses"]+=int(not good)
+        band["settled"]+=1
+        band["wins"]+=int(good)
+        band["losses"]+=int(not good)
         ai=calls.get("AI") or {}
         path=calls.get("PRICE_PATH") or {}
         if ai.get("source")=="AI_REVIEW" and ai.get("direction") in ("UP","DOWN"):
@@ -113,10 +120,14 @@ def evaluate_guarded(rows):
             "ai_mae_usd":round(g["ai_abs_error"]/price_n,2) if price_n else None,
             "raw_path_mae_usd":round(g["path_abs_error"]/price_n,2) if price_n else None,
             "cost_blocked":g["cost_blocked"],
+            "by_quality":{quality:{**counts,
+                "accuracy_pct":round(100*counts["wins"]/counts["settled"],1)
+                if counts["settled"] else None}
+                for quality,counts in sorted(g["by_quality"].items())},
             "hypothetical_review_entries":g["priced_paper_trades"],
             "hypothetical_hold_net_usd":round(g["hypothetical_net_usd"],2),
         })
     return {"status":"observed" if output else "collecting_forward_calls",
             "results":sorted(output,key=lambda x:(x["checkpoint"],x["version"])),
             "recent":recent,
-            "limitations":"Versioned, prospectively captured calls only. Paired metrics require the same round/checkpoint. Quote examples are hypothetical held-to-settlement, not executed trades. No calibrated live odds or demonstrated future profitability. Research-only guarded decision does not overwrite the original AI call."}
+            "limitations":"Versioned, prospectively captured calls only. Quality groups are descriptive, not calibrated win probabilities; small samples must not be used to select an unverified edge. Paired metrics require the same round/checkpoint. Quote examples are hypothetical held-to-settlement, not executed trades. No calibrated live odds or demonstrated future profitability. Research-only guarded decision does not overwrite the original AI call."}
