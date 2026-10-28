@@ -149,5 +149,30 @@ class DiagnosticCoverageTests(unittest.TestCase):
         self.assertEqual(snapshot["settlement_task_error"],"timeout")
 
 
+
+class GuardedAuditStreamingTests(unittest.TestCase):
+    def test_guarded_endpoint_streams_official_settlement_rows(self):
+        import json
+        calls={"GUARDED_PRIMARY":{"source":"guarded-path-primary-v1",
+                                  "status":"available","direction":"UP",
+                                  "confidence":"MIXED",
+                                  "forecast_final_mean_usd":101}}
+        rows=[("market-a","LATE","2026-10-28T13:00:00Z","{}",
+               json.dumps(calls),"UP",101.0)]
+        # This endpoint previously used execute(fetch=True), buffering up to
+        # 10,000 large JSON audit records in the 512 MiB Render process.
+        with (patch("app.iter_query_rows",return_value=iter(rows)) as stream,
+              patch("app.execute",side_effect=AssertionError("unbounded fetch forbidden"))):
+            result=app.guarded_performance()
+        self.assertEqual(result["status"],"observed")
+        self.assertEqual(result["results"][0]["settled"],1)
+        self.assertEqual(result["results"][0]["wins"],1)
+        self.assertEqual(result["results"][0]["by_quality"]["MIXED"]["settled"],1)
+        stream.assert_called_once()
+        self.assertIn("OFFICIAL_MARKET_SETTLEMENT",stream.call_args.args[0])
+        self.assertIn("LIMIT 10000",stream.call_args.args[0])
+
+
+
 if __name__=="__main__":
     unittest.main()
