@@ -85,7 +85,7 @@ class ForecastGuardTests(unittest.TestCase):
                "ANCHORED_SHADOW":{"forecast_final_mean_usd":102.0}}
         snapshot={"settlement_forecast":{"current_reference_usd":100.0}}
         row=("HALFWAY",json.dumps(snapshot),json.dumps(calls),100.5)
-        with patch.object(app,"execute",return_value=[row]):
+        with patch.object(app,"iter_query_rows",return_value=[row]):
             report=app.numeric_price_forecast_report()
         counts={v["source"]:v["graded"] for v in report["results"]}
         self.assertEqual(counts["ANCHORED_SHADOW"],1)
@@ -108,7 +108,7 @@ class ForecastGuardTests(unittest.TestCase):
             ("HALFWAY",json.dumps(snap),json.dumps({"AI":{**ai,"source":"INDICATORS_FALLBACK"},"PRICE_PATH":path}),99.0,"DOWN"),
             ("HALFWAY",json.dumps(snap),json.dumps({"AI":ai,"PRICE_PATH":path}),101.0,None),
         ]
-        with patch.object(app,"execute",return_value=rows):
+        with patch.object(app,"iter_query_rows",return_value=rows):
             report=app.numeric_price_forecast_report()
         groups={x["checkpoint"]:x for x in report["paired_direction_comparisons"]}
         self.assertEqual(groups["HALFWAY"]["paired_rounds"],1)
