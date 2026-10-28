@@ -823,7 +823,7 @@ async def loop():
  setup()
  ai_task=None
  settlement_task=None
- last_settlement_check=0.0
+ last_settlement_check=None
  checkpoints={}
  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
   while True:
@@ -929,7 +929,16 @@ async def loop():
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     # Historical settlement can involve 30 remote rounds and must not
     # prevent current 15-minute predictions from refreshing every cycle.
-    if (settlement_task is None or settlement_task.done()) and time.monotonic()-last_settlement_check>=30:
+    # First settlement sweep must start immediately, even when a host's
+    # monotonic clock has been running for less than the 30-second interval.
+    # Read failures from completed tasks so they cannot silently stop grading.
+    if settlement_task is not None and settlement_task.done():
+     try:
+      settlement_error=settlement_task.exception()
+      state["settlement_task_error"]=(type(settlement_error).__name__+": "+str(settlement_error)[:180]) if settlement_error else None
+     except asyncio.CancelledError:
+      state["settlement_task_error"]="cancelled"
+    if (settlement_task is None or settlement_task.done()) and (last_settlement_check is None or time.monotonic()-last_settlement_check>=30):
      settlement_task=track_prediction(asyncio.create_task(settle(client)))
      last_settlement_check=time.monotonic()
     state["settlement_task_running"]=settlement_task is not None and not settlement_task.done()
@@ -1386,7 +1395,7 @@ def lightweight_live():
          "manual_entry_review":state.get("manual_entry_review"),"reversal_evidence":state.get("reversal_evidence"),
          "final_15m":state.get("final_15m"),"last_halfway_ai":state.get("last_halfway_ai"),
          "last_checkpoint":state.get("last_checkpoint"),
-         "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),
+         "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),"settlement_task_error":state.get("settlement_task_error"),
          "server_epoch":time.time()}
 
 @app.get("/api/five-minute")
