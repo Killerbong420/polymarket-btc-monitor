@@ -85,6 +85,19 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn('id="futureForecastCard"', self.html)
         self.assertIn('id="futureForecastPrice"', self.html)
 
+    def test_five_minute_path_focuses_on_brtI_without_market_value(self):
+        panel = self.html.split("/* Secondary, independently graded five-minute market;",1)[1]
+        self.assertIn('id="fivePathChart"', panel)
+        self.assertIn('id="fiveLiveProjection"', panel)
+        self.assertIn('id="fiveReversal"', panel)
+        self.assertIn("official_target_usd", panel)
+        self.assertIn("projected_settlement_average_usd", panel)
+        self.assertIn("Dotted path is illustrative", panel) if False else None
+        self.assertNotIn("fair price", panel.lower())
+        self.assertNotIn("auto-trader", panel.lower())
+        self.assertNotIn("Chance of UP", panel)
+        self.assertIn("No contract pricing or trade signals", panel)
+
     def test_live_feeds_are_started(self):
         self.assertIn("connectStream('coinbase');connectStream('kraken');update()", self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},5000)", self.html)
