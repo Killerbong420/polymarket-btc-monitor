@@ -98,6 +98,48 @@ class StreamingAuditTests(unittest.TestCase):
         finally:
             app._outcome_feedback_cache.clear()
 
+    def test_forecast_diagnostics_streams_bounded_official_rows(self):
+        snapshot = {"version": "v1", "ai_model": "test-model",
+                    "settlement_forecast": {"current_reference_usd": 100.0}}
+        calls = {"AI": {"source": "AI_REVIEW", "direction": "UP",
+                        "forecast_final_mean_usd": 101.0},
+                 "PRICE_PATH": {"direction": "UP",
+                                "forecast_final_mean_usd": 100.5}}
+        row = ("market-a", "LATE", "2026-10-28T15:00:00Z",
+               json.dumps(snapshot), json.dumps(calls), "UP", 101.0)
+        with patch.object(app, "iter_query_rows", return_value=iter([row])) as stream, \
+             patch.object(app, "execute", side_effect=AssertionError("unbounded fetch forbidden")):
+            result = app.forecast_diagnostics()
+        self.assertEqual(result["status"], "observed")
+        self.assertEqual(result["groups"][0]["settled_ai_calls"], 1)
+        self.assertEqual(result["groups"][0]["numeric_ai_scored_rounds"], 1)
+        stream.assert_called_once()
+        self.assertIn("OFFICIAL_MARKET_SETTLEMENT", stream.call_args.args[0])
+        self.assertIn("LIMIT 5000", stream.call_args.args[0])
+
+    def test_training_readiness_streams_verified_rows_without_training(self):
+        snapshot = {"version": "v1", "seconds_left": 450,
+                    "official_target": 100.0,
+                    "reference_price": {
+                        "status": "fresh",
+                        "source": "Polymarket US BTC reference / BRTI",
+                        "price": 100.0},
+                    "settlement_forecast": {
+                        "forecast_final_mean_usd": 100.5},
+                    "chart_pattern": {}}
+        row = ("market-a", "HALFWAY", "2026-10-28T15:00:00Z",
+               json.dumps(snapshot), "{}", "UP", 101.0)
+        with patch.object(app, "iter_query_rows", return_value=iter([row])) as stream, \
+             patch.object(app, "execute", side_effect=AssertionError("unbounded fetch forbidden")):
+            result = app.forecast_training_readiness()
+        self.assertEqual(result["status"], "research_only")
+        self.assertFalse(result["auto_promote"])
+        self.assertEqual(result["cohorts"][0]["graded_complete_rounds"], 1)
+        self.assertEqual(result["cohorts"][0]["status"], "collecting")
+        stream.assert_called_once()
+        self.assertIn("OFFICIAL_MARKET_SETTLEMENT", stream.call_args.args[0])
+        self.assertIn("LIMIT 5000", stream.call_args.args[0])
+
     def test_invalid_batch_size_rejected(self):
         with self.assertRaises(ValueError):
             list(app.iter_query_rows("SELECT 1", batch_size=0))
