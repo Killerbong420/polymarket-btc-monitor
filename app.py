@@ -50,6 +50,25 @@ def execute(sql, params=(), fetch=False):
    if fetch: return cur.fetchall()
   finally:
    cur.close()
+def iter_query_rows(sql, params=(), batch_size=64):
+ """Stream large audit JSON rows instead of loading the full result into RAM.
+
+ Both psycopg and sqlite cursors support fetchmany. The cursor and connection
+ are released when the caller exhausts the iterator.
+ """
+ if not isinstance(batch_size,int) or batch_size<1:
+  raise ValueError("batch_size must be a positive integer")
+ with connect() as conn:
+  cur=conn.cursor()
+  try:
+   cur.execute(sql.replace("?","%s") if DB else sql,params)
+   while True:
+    batch=cur.fetchmany(batch_size)
+    if not batch:break
+    for row in batch:yield row
+  finally:
+   cur.close()
+
 def setup():
  execute("""CREATE TABLE IF NOT EXISTS signals (
  id TEXT PRIMARY KEY, market TEXT NOT NULL, phase TEXT NOT NULL,
@@ -1086,10 +1105,10 @@ def research_csv():
 
 def numeric_price_forecast_report():
  """Observed USD forecast errors against official market settlement metadata."""
- rows=execute("""SELECT checkpoint,snapshot_json,calls_json,final_reference_mean,winner
+ rows=iter_query_rows("""SELECT checkpoint,snapshot_json,calls_json,final_reference_mean,winner
    FROM research_calls WHERE final_reference_mean IS NOT NULL
    AND final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
-   ORDER BY created_at DESC LIMIT 10000""",fetch=True)
+   ORDER BY created_at DESC LIMIT 10000""")
  groups={}
  paired={}
  shadow_paired={}
