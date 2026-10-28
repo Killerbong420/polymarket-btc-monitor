@@ -32,6 +32,7 @@ def checks(state,ai,db,db_error=None,now=None):
         add(code,(intel.get(key) or {}).get('status') not in ('available','partial'),'warning',key.replace('_',' ').title()+' is unavailable or stale.')
     add('PARTIAL_NEWS',(intel.get('news') or {}).get('status')=='partial','warning','Some news publishers are unavailable.')
     add('CHECKPOINT_MISSED',bool(state.get('missed_checkpoints')),'warning','A scheduled checkpoint was missed. The monitor may have started after that checkpoint; no retrospective prediction has been fabricated.')
+    add('SETTLEMENT_WORKER',bool(state.get('settlement_task_error')),'warning','The background settlement worker failed; grading will retry and outcomes may be delayed.')
     add('SETTLEMENT',(state.get('settlement_diagnostic') or {}).get('overdue_markets',0)>0,'warning','Some recorded markets remain unresolved more than 30 minutes after close.')
     return results
 
