@@ -59,10 +59,10 @@ class OfficialNumericPriceTests(unittest.TestCase):
 
     def test_numeric_report_excludes_unverified_legacy_prices(self):
         queries = []
-        def fake_execute(query, *args, **kwargs):
+        def fake_stream(query, *args, **kwargs):
             queries.append(query)
-            return []
-        with patch("app.execute", side_effect=fake_execute):
+            return iter(())
+        with patch("app.iter_query_rows", side_effect=fake_stream):
             report = app.numeric_price_forecast_report()
         self.assertIn("OFFICIAL_MARKET_SETTLEMENT", queries[0])
         self.assertEqual(report["status"], "awaiting_official_settlement_prices")
