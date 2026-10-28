@@ -92,7 +92,6 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn('id="fiveReversal"', panel)
         self.assertIn("official_target_usd", panel)
         self.assertIn("projected_settlement_average_usd", panel)
-        self.assertIn("Dotted path is illustrative", panel) if False else None
         self.assertNotIn("fair price", panel.lower())
         self.assertNotIn("auto-trader", panel.lower())
         self.assertNotIn("Chance of UP", panel)
