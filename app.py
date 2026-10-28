@@ -18,7 +18,7 @@ from quick_forecast import quick_forecast
 import five_min_monitor
 from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
 from forward_training import training_readiness as score_training_readiness
-from monitor_health import checks as health_checks, persist_alerts, alert_history
+from monitor_health import checks as health_checks, persist_alerts, alert_history, diagnostic_extras
 from fastapi import FastAPI, Query, Request
 import paper_trader as paper
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
@@ -1002,7 +1002,7 @@ async def read_only_diagnostics_loop():
      "manual_entry_review":state.get("manual_entry_review"),
      "target_validation":state.get("target_validation"),
      "active_alert_codes":[a.get("code") for a in state.get("alerts",[]) if isinstance(a,dict)]
-    }
+    } | diagnostic_extras(state,five_min_monitor.state,first_five_quick_report)
    summary=await asyncio.to_thread(gather)
    print("BTC_READ_ONLY_DIAG "+json.dumps(summary,default=str,separators=(",",":")),flush=True)
   except Exception as exc:

@@ -36,6 +36,32 @@ def checks(state,ai,db,db_error=None,now=None):
     add('SETTLEMENT',(state.get('settlement_diagnostic') or {}).get('overdue_markets',0)>0,'warning','Some recorded markets remain unresolved more than 30 minutes after close.')
     return results
 
+def diagnostic_extras(state, five_min_state, quick_report_fn):
+    """Read-only bounded health data for private diagnostics; no model changes.
+
+    Keep a failed quick-accuracy SQL query from suppressing the rest of the
+    ten-minute diagnostics. Five-minute accuracy is already maintained by its
+    independent worker and does not require a second database query.
+    """
+    state = state if isinstance(state, dict) else {}
+    five = five_min_state if isinstance(five_min_state, dict) else {}
+    try:
+        quick = quick_report_fn()
+        if not isinstance(quick, dict):
+            quick = {"status": "unavailable", "reason": "Invalid quick audit response"}
+    except Exception as exc:
+        quick = {"status": "unavailable", "reason": type(exc).__name__}
+    five_accuracy = five.get("accuracy")
+    return {
+        "five_minute_accuracy": five_accuracy if isinstance(five_accuracy, dict) else {"status": "collecting"},
+        "quick_accuracy": quick,
+        "feed_health": state.get("feed_health"),
+        "settlement_diagnostic": state.get("settlement_diagnostic"),
+        "settlement_task_error": state.get("settlement_task_error"),
+        "quick_accuracy_error": state.get("quick_accuracy_error"),
+    }
+
+
 def persist_alerts(execute,alerts):
     global _initialized
     if not _initialized:
