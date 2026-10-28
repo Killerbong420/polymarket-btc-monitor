@@ -33,10 +33,18 @@ def validate_official_target(official, reference):
     if value is None or opening is None or samples != 60:
         return out
     gap = round(opening - value, 4)
+    # Public one-second candles are close samples, not necessarily the exact
+    # underlying benchmark observations or rounding behind published terms.
+    # Keep any discrepancy visible, but distinguish a small reconstruction
+    # variation from an operationally material mismatch. Never replace target.
+    material = abs(gap) > max(10.0, value * .00015)
     return {**out,
-        "status": "match" if abs(opening - value) <= .02 else "mismatch",
+        "status": "match" if abs(gap) <= .02 else "mismatch",
         "difference_usd": gap,
-        "note": "A discrepancy never substitutes reconstructed values for the published price-to-beat.",
+        "difference_pct": round(100 * gap / value, 6),
+        "material": material,
+        "classification": "MATERIAL_DIVERGENCE" if material else "RECONSTRUCTION_VARIANCE",
+        "note": "One-second candle closes may differ from benchmark sampling. Published price-to-beat always remains authoritative; investigate material divergence rather than silently substituting reconstructed values.",
     }
 
 
