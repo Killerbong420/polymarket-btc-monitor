@@ -4,6 +4,7 @@ Uses the same verified BRTI feed and official contract settlement as the
 15-minute monitor; never changes its signals or historical statistics.
 """
 import asyncio
+import math
 import time
 from datetime import datetime, timezone, timedelta
 from research import reference_prices, number
@@ -12,6 +13,8 @@ from settlement_forecast import forecast_settlement
 state={"status":"starting","market":None,"direction":"WAIT"}
 _last_market=None
 POLL_SECONDS=5
+VISUAL_REFRESH_SECONDS=15
+VISUAL_MAX_POINTS=120
 LATE_CHECKPOINT_MIN_LEFT=120
 LATE_CHECKPOINT_MAX_LEFT=150
 
@@ -154,6 +157,58 @@ def forecast_candidate(reference, external, target, left, now):
   return None,"Forecast numeric value unavailable"
  return {"direction":"UP" if predicted>=target else "DOWN","forecast":round(predicted,2)},None
 
+def visual_forecast(reference, external, target, seconds_left, now):
+ """Small, read-only official-index preview; never becomes a graded prediction.
+
+ The final value is a forecast of the 60-second settlement *average*, not a
+ future spot-price tick. No odds, contract pricing, or trade calculations.
+ """
+ unavailable={"status":"unavailable","reason":"Fresh verified BRTI projection unavailable"}
+ if not isinstance(reference,dict) or reference.get("status")!="fresh" or reference.get("source")!="Polymarket US BTC reference / BRTI":
+  return {**unavailable,"reason":"Fresh official BRTI reference required"}
+ target=number(target);now=number(now)
+ if target is None or target<=0 or now is None:
+  return {**unavailable,"reason":"Verified official target required"}
+ projection=forecast_settlement(reference,external,target,seconds_left,now=now)
+ if projection.get("status")!="available":
+  return {**unavailable,"reason":str(projection.get("reason") or "Insufficient observed reference history")}
+ start=number(reference.get("window_start"))
+ end=number(reference.get("window_end"))
+ if start is None or end is None or abs((end-now)-seconds_left)>20 or not start<now<end:
+  return {**unavailable,"reason":"Verified round timing required"}
+ observed={}
+ for item in reference.get("points") or []:
+  if not isinstance(item,(list,tuple)) or len(item)!=2:continue
+  t,p=number(item[0]),number(item[1])
+  if t is not None and p is not None and p>0 and start<=t<=now and t<end:
+   observed[int(t)]=float(p)
+ ordered=sorted(observed.items())
+ if not ordered:
+  return {**unavailable,"reason":"No observed official BRTI price path"}
+ stride=max(1,math.ceil(len(ordered)/VISUAL_MAX_POINTS))
+ sampled=ordered[::stride]
+ if sampled[-1]!=ordered[-1]:sampled.append(ordered[-1])
+ final=number(projection.get("forecast_final_mean_usd"))
+ current=number(projection.get("current_reference_usd"))
+ low=number(projection.get("downside_scenario_usd"))
+ high=number(projection.get("upside_scenario_usd"))
+ if any(v is None or v<=0 for v in (final,current,low,high)):
+  return {**unavailable,"reason":"Forecast numbers unavailable"}
+ return {"status":"available","source":"Polymarket US BTC reference / BRTI",
+         "as_of_epoch":round(now,3),"window_start_epoch":int(start),
+         "window_end_epoch":int(end),"final_minute_start_epoch":int(end-60),
+         "observed_points":sampled,"observed_ticks":len(ordered),
+         "current_reference_usd":round(current,2),
+         "official_target_usd":round(target,2),
+         "projected_settlement_average_usd":round(final,2),
+         "projected_gap_usd":round(final-target,2),
+         "downside_scenario_usd":round(low,2),
+         "upside_scenario_usd":round(high,2),
+         "quality":projection.get("quality","LIMITED"),
+         "reversal_warning":bool(projection.get("opposing_short_long_slopes")),
+         "reference_age_seconds":projection.get("age_seconds"),
+         "note":"Read-only projected final 60-second average; scenarios are uncalibrated. Observed prices are official BRTI ticks. Forecasts and historical grading remain frozen and separate."}
+
 async def loop(client,execute,verified_winner,external_state):
  """Keep slow historical settlement requests out of the live forecast cadence."""
  setup(execute)
@@ -177,13 +232,14 @@ async def loop(client,execute,verified_winner,external_state):
 
 async def live_loop(client,execute,external_state):
  global _last_market
+ last_visual_refresh=0.0
  while True:
   try:
    market,reason=await discover(client)
    if not market:
     state.update(status="unavailable",market=None,direction="WAIT",forecast=None,
                  early_direction="WAIT",late_direction="WAIT",phase="UNAVAILABLE",
-                 target=None,reason=reason)
+                 target=None,visual_forecast={"status":"unavailable","reason":"No verified current round"},reason=reason)
    else:
     slug=market["slug"];left=max(0,market["end"]-time.time())
     terms=market.get("assetPriceTerms") or {}
@@ -213,7 +269,9 @@ async def live_loop(client,execute,external_state):
                  url="https://polymarket.us/event/"+slug)
     if slug!=_last_market:
      _last_market=slug
-     state.update(direction="WAIT",forecast=None,early_direction="WAIT",
+     last_visual_refresh=0.0
+     state.update(visual_forecast={"status":"unavailable","reason":"Waiting for fresh BRTI"},
+                  direction="WAIT",forecast=None,early_direction="WAIT",
                   early_forecast=None,late_direction="WAIT",late_forecast=None,
                   early_result=None,late_result=None,
                   phase="EARLY",result="PENDING",reason="Awaiting verified BRTI and official target")
@@ -230,17 +288,23 @@ async def live_loop(client,execute,external_state):
                   reason="Frozen 2:30-left forecast from newer verified BRTI ticks")
     if not valid_target:
      state.update(direction="WAIT",forecast=None,phase="UNVERIFIED_TARGET",
+                  visual_forecast={"status":"unavailable","reason":"Official BRTI target not verified"},
                   reason="Official BRTI target and index terms unavailable")
-    elif left>20:
+    elif left>0:
      # Never fabricate a late checkpoint for a round first seen after 2:30.
-     due_early=not prior
+     due_early=not prior and left>20
      due_late=(not late_prior and bool(prior) and
                eligible_late_checkpoint(left,prior[0][3],market["end"]))
-     if due_early or due_late:
+     preview_due=time.time()-last_visual_refresh>=VISUAL_REFRESH_SECONDS
+     if due_early or due_late or preview_due:
       reference=await reference_prices(client,market)
       captured=time.time()
       left=market["end"]-captured
       state["seconds_left"]=round(max(0,left))
+      if preview_due or due_early or due_late:
+       state["visual_forecast"]=visual_forecast(
+        reference,external_state.get("external") or {},target,left,captured)
+       last_visual_refresh=captured
       candidate,error=(None,"Forecast window closed during reference lookup")
       if left>20 and (due_early or (due_late and
                       eligible_late_checkpoint(left,prior[0][3],market["end"]))):
