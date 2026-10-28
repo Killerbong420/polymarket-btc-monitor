@@ -12,6 +12,13 @@ from settlement_forecast import forecast_settlement
 state={"status":"starting","market":None,"direction":"WAIT"}
 _last_market=None
 POLL_SECONDS=5
+LATE_CHECKPOINT_MIN_LEFT=120
+LATE_CHECKPOINT_MAX_LEFT=150
+
+def eligible_late_checkpoint(seconds_left,early_created,end):
+ """Capture the later forecast only near 2:30, never retrospectively."""
+ return (LATE_CHECKPOINT_MIN_LEFT <= seconds_left <= LATE_CHECKPOINT_MAX_LEFT
+         and early_created <= end-LATE_CHECKPOINT_MAX_LEFT)
 
 def valid_terms(terms):
  """Reject incompatible terms even when the event supplies a positive target."""
@@ -101,14 +108,38 @@ def _counts(execute, table):
  counts=dict(rows);wins=counts.get("WIN",0);losses=counts.get("LOSS",0);n=wins+losses
  return {"wins":wins,"losses":losses,"graded":n,"accuracy_pct":round(100*wins/n,1) if n else None}
 
+def strict_late_counts(execute):
+ """Prospective 2:30 window only. Older late calls outside the window remain auditable.
+
+ Query is bounded; the last 100 eligible settled calls are counted without
+ retroactively treating 20-second-left forecasts as 2:30 forecasts.
+ """
+ rows=execute("SELECT market,created_epoch,result FROM five_min_late_predictions WHERE result IN ('WIN','LOSS') ORDER BY created_epoch DESC LIMIT 1000",fetch=True)
+ wins=losses=0
+ for slug,captured,result in rows:
+  try:
+   stamp=slug.split('btc-updown-5m-',1)[1]
+   start=datetime.strptime(stamp,'%Y-%m-%d-%H%Mz').replace(tzinfo=timezone.utc)
+   remaining=(start+timedelta(minutes=5)).timestamp()-captured
+  except (ValueError,IndexError,TypeError):continue
+  if not LATE_CHECKPOINT_MIN_LEFT <= remaining <= LATE_CHECKPOINT_MAX_LEFT:continue
+  if result=='WIN':wins+=1
+  else:losses+=1
+  if wins+losses>=100:break
+ n=wins+losses
+ return {'wins':wins,'losses':losses,'graded':n,'accuracy_pct':round(100*wins/n,1) if n else None}
+
 def report(execute):
  early=_counts(execute,"five_min_predictions")
  recent=execute("SELECT market,direction,result,winner FROM five_min_predictions ORDER BY created_epoch DESC LIMIT 12",fetch=True)
- late=_counts(execute,"five_min_late_predictions")
+ late=strict_late_counts(execute)
+ late_legacy=_counts(execute,"five_min_late_predictions")
  late_recent=execute("SELECT market,direction,result,winner FROM five_min_late_predictions ORDER BY created_epoch DESC LIMIT 12",fetch=True)
  return {**early,"recent":[{"market":m,"direction":d,"result":r,"winner":w} for m,d,r,w in recent],
          "late":{**late,"recent":[{"market":m,"direction":d,"result":r,"winner":w} for m,d,r,w in late_recent],
-                 "checkpoint_seconds_left":150,"basis":"Frozen calls captured with 20-150 seconds remaining; no backfill"},
+                 "checkpoint_seconds_left":150,"capture_window_seconds_left":[120,150],
+                 "basis":"Only independently graded frozen calls captured 120-150 seconds before expiry; historical off-window calls excluded"},
+         "late_legacy":{**late_legacy,"basis":"Historical late calls captured with 20-150 seconds remaining; retained for audit only"},
          "early_basis":"Original first available frozen 5m predictions; historical records retained unchanged"}
 
 def forecast_candidate(reference, external, target, left, now):
@@ -203,15 +234,16 @@ async def live_loop(client,execute,external_state):
     elif left>20:
      # Never fabricate a late checkpoint for a round first seen after 2:30.
      due_early=not prior
-     due_late=(not late_prior and bool(prior) and 20<left<=150
-               and prior[0][3] <= market["end"]-150)
+     due_late=(not late_prior and bool(prior) and
+               eligible_late_checkpoint(left,prior[0][3],market["end"]))
      if due_early or due_late:
       reference=await reference_prices(client,market)
       captured=time.time()
       left=market["end"]-captured
       state["seconds_left"]=round(max(0,left))
       candidate,error=(None,"Forecast window closed during reference lookup")
-      if left>20:
+      if left>20 and (due_early or (due_late and
+                      eligible_late_checkpoint(left,prior[0][3],market["end"]))):
        candidate,error=forecast_candidate(reference,external_state.get("external") or {},target,left,captured)
       if candidate is None:
        state["reason"]=error
@@ -221,7 +253,7 @@ async def live_loop(client,execute,external_state):
        state.update(direction=candidate["direction"],forecast=candidate["forecast"],
                     early_direction=candidate["direction"],early_forecast=candidate["forecast"],
                     phase="EARLY",result="PENDING",reason="Frozen original early BRTI forecast")
-      elif due_late:
+      elif due_late and eligible_late_checkpoint(left,prior[0][3],market["end"]):
        execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",
                (slug,captured,candidate["direction"],target,candidate["forecast"]))
        state.update(direction=candidate["direction"],forecast=candidate["forecast"],
