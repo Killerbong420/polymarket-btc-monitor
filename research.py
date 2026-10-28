@@ -33,6 +33,8 @@ async def reference_prices(client,market):
         r=await client.get('https://gateway.polymarket.us/v1/asset-prices/history',params={
             'assets':'crypto:btc','from':int(start)-60,'to':0,'bucket':'ASSET_PRICE_BUCKET_1S'},timeout=6)
         r.raise_for_status();series=r.json().get('series',[])
+        # Freshness is measured on receipt, including time spent awaiting HTTP.
+        now=time.time()
         s=next(x for x in series if x.get('asset',{}).get('symbol')=='btc' and x.get('asset',{}).get('assetClass')=='ASSET_CLASS_CRYPTO' and x.get('currency')=='USD')
         points={}
         for x in s.get('candles') or []:
@@ -40,7 +42,7 @@ async def reference_prices(client,market):
             t=number(x.get('timestamp'));p=number(x.get('close'))
             try:tick_count=int(x.get('tickCount') or 0)
             except (ValueError,TypeError,OverflowError):continue
-            if t is not None and p is not None and p>0 and tick_count>0 and start-60<=t<=now:
+            if t is not None and t.is_integer() and p is not None and p>0 and tick_count>0 and start-60<=t<=now:
                 points[int(t)]=p
         ordered=sorted(points.items())
         if not ordered:raise ValueError('No published ticks')
@@ -200,3 +202,4 @@ def summarize(rows):
     return {'version':VERSION,'strategies':[finish(g) for g in groups.values()], 'confidence':[finish(c) for c in confidence.values()],
             'paired_comparisons':list(paired.values()),'recent':recent,
             'note':'Forward observations only. Independent public-indicator bot candidates are unvalidated shadow strategies; compare accuracy AND coverage at the same checkpoint, with no lookahead, AI copying, live orders, or retrospective outcome fitting. Confidence labels are uncalibrated; intervals are descriptive and do not adjust for dependence between rounds. Paper P&L is illustrative only.'}
+

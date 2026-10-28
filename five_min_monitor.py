@@ -11,6 +11,14 @@ from settlement_forecast import forecast_settlement
 
 state={"status":"starting","market":None,"direction":"WAIT"}
 _last_market=None
+POLL_SECONDS=5
+
+def valid_terms(terms):
+ """Reject incompatible terms even when the event supplies a positive target."""
+ if not isinstance(terms,dict):return False
+ target=number(terms.get("priceToBeat"))
+ return (target is not None and target>0 and terms.get("indexSymbol")=="BRTI"
+         and terms.get("marketType") in (None,"ASSET_PRICE_MARKET_TYPE_UP_DOWN"))
 
 def setup(execute):
  execute("""CREATE TABLE IF NOT EXISTS five_min_predictions (
@@ -116,9 +124,28 @@ def forecast_candidate(reference, external, target, left, now):
  return {"direction":"UP" if predicted>=target else "DOWN","forecast":round(predicted,2)},None
 
 async def loop(client,execute,verified_winner,external_state):
- global _last_market
+ """Keep slow historical settlement requests out of the live forecast cadence."""
  setup(execute)
- last_score=0
+ async def score_worker():
+  while True:
+   try:
+    state["settlement_task_running"]=True
+    await score_pending(client,execute,verified_winner)
+    state["settlement_task_error"]=None
+   except asyncio.CancelledError:raise
+   except Exception as exc:
+    state["settlement_task_error"]=type(exc).__name__+": "+str(exc)[:150]
+   finally:state["settlement_task_running"]=False
+   await asyncio.sleep(35)
+ scorer=asyncio.create_task(score_worker())
+ try:
+  await live_loop(client,execute,external_state)
+ finally:
+  scorer.cancel()
+  await asyncio.gather(scorer,return_exceptions=True)
+
+async def live_loop(client,execute,external_state):
+ global _last_market
  while True:
   try:
    market,reason=await discover(client)
@@ -132,8 +159,7 @@ async def loop(client,execute,verified_winner,external_state):
     target=number(terms.get("priceToBeat"))
     # Event summaries may contain a target but omit the BRTI index identity.
     # Always verify full authoritative terms before forecasting.
-    if (target is None or target<=0 or terms.get("indexSymbol")!="BRTI"
-            or terms.get("marketType") not in (None,"ASSET_PRICE_MARKET_TYPE_UP_DOWN")):
+    if not valid_terms(terms):
      for path in ("/v1/markets/"+slug,"/v1/market/slug/"+slug):
       try:
        response=await client.get("https://gateway.polymarket.us"+path,timeout=6)
@@ -144,15 +170,13 @@ async def loop(client,execute,verified_winner,external_state):
        if (detail.get("slug") or detail.get("marketSlug"))!=slug:continue
        verified=detail.get("assetPriceTerms") or {}
        candidate=number(verified.get("priceToBeat"))
-       if (verified.get("indexSymbol")=="BRTI" and
-           verified.get("marketType") in (None,"ASSET_PRICE_MARKET_TYPE_UP_DOWN")
-           and candidate is not None and candidate>0):
+       if valid_terms(verified):
         target=candidate
         market["assetPriceTerms"]=verified
         break
       except Exception:continue
-    valid_target=(target is not None and target>0 and
-                  (market.get("assetPriceTerms") or {}).get("indexSymbol")=="BRTI")
+    valid_target=valid_terms(market.get("assetPriceTerms"))
+    left=max(0,market["end"]-time.time())
     state.update(status="running" if valid_target else "target_unavailable",
                  market=slug,seconds_left=round(left),target=target if valid_target else None,
                  url="https://polymarket.us/event/"+slug)
@@ -160,6 +184,7 @@ async def loop(client,execute,verified_winner,external_state):
      _last_market=slug
      state.update(direction="WAIT",forecast=None,early_direction="WAIT",
                   early_forecast=None,late_direction="WAIT",late_forecast=None,
+                  early_result=None,late_result=None,
                   phase="EARLY",result="PENDING",reason="Awaiting verified BRTI and official target")
     prior=execute("SELECT direction,forecast,result,created_epoch FROM five_min_predictions WHERE market=?",(slug,),fetch=True)
     late_prior=execute("SELECT direction,forecast,result FROM five_min_late_predictions WHERE market=?",(slug,),fetch=True)
@@ -182,26 +207,30 @@ async def loop(client,execute,verified_winner,external_state):
                and prior[0][3] <= market["end"]-150)
      if due_early or due_late:
       reference=await reference_prices(client,market)
-      candidate,error=forecast_candidate(reference,external_state.get("external") or {},target,left,time.time())
+      captured=time.time()
+      left=market["end"]-captured
+      state["seconds_left"]=round(max(0,left))
+      candidate,error=(None,"Forecast window closed during reference lookup")
+      if left>20:
+       candidate,error=forecast_candidate(reference,external_state.get("external") or {},target,left,captured)
       if candidate is None:
        state["reason"]=error
       elif due_early:
        execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",
-               (slug,time.time(),candidate["direction"],target,candidate["forecast"]))
+               (slug,captured,candidate["direction"],target,candidate["forecast"]))
        state.update(direction=candidate["direction"],forecast=candidate["forecast"],
                     early_direction=candidate["direction"],early_forecast=candidate["forecast"],
                     phase="EARLY",result="PENDING",reason="Frozen original early BRTI forecast")
       elif due_late:
        execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",
-               (slug,time.time(),candidate["direction"],target,candidate["forecast"]))
+               (slug,captured,candidate["direction"],target,candidate["forecast"]))
        state.update(direction=candidate["direction"],forecast=candidate["forecast"],
                     late_direction=candidate["direction"],late_forecast=candidate["forecast"],
                     phase="LATE_2M30",result="PENDING",
                     reason="Frozen 2:30-left BRTI forecast; independently scored")
-   if time.monotonic()-last_score>=35:
-    await score_pending(client,execute,verified_winner)
-    last_score=time.monotonic()
    state["accuracy"]=report(execute)
   except asyncio.CancelledError:raise
-  except Exception as e:state.update(status="error",reason=type(e).__name__+": "+str(e)[:150])
-  await asyncio.sleep(5)
+  except Exception as e:state.update(status="error",direction="WAIT",forecast=None,reason=type(e).__name__+": "+str(e)[:150])
+  state["updated_epoch"]=time.time()
+  await asyncio.sleep(POLL_SECONDS)
+
