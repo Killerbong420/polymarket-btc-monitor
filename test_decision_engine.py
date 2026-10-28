@@ -31,9 +31,9 @@ class GuardedDecisionTests(unittest.TestCase):
         self.assertEqual(reversal_evidence(missing, 450)["status"], "unavailable")
 
     def test_far_horizon_shrinks_not_copies_current(self):
-        early=guarded_decision(path(), reference(), 100.3, 720)
-        halfway=guarded_decision(path(), reference(), 100.3, 450)
-        late=guarded_decision(path(), reference(), 100.3, 180)
+        early=guarded_decision(path(), reference(), 100, 720)
+        halfway=guarded_decision(path(), reference(), 100, 450)
+        late=guarded_decision(path(), reference(), 100, 180)
         self.assertEqual(early["status"], "available")
         self.assertEqual(early["forecast_final_mean_usd"], 100.35)
         self.assertEqual(halfway["forecast_final_mean_usd"], 100.75)
@@ -48,9 +48,9 @@ class GuardedDecisionTests(unittest.TestCase):
         self.assertEqual(guarded_decision({**path(),"quality":"LIMITED"},reference(),100,450)["status"], "unavailable")
 
     def test_ai_adjustment_bounded_and_optional(self):
-        base=guarded_decision(path(),reference(),100.3,180)
-        distant=guarded_decision(path(),reference(),100.3,180,ai_forecast=200)
-        close=guarded_decision(path(),reference(),100.3,180,ai_forecast=102)
+        base=guarded_decision(path(),reference(),100,180)
+        distant=guarded_decision(path(),reference(),100,180,ai_forecast=200)
+        close=guarded_decision(path(),reference(),100,180,ai_forecast=102)
         self.assertEqual(base["forecast_final_mean_usd"],distant["forecast_final_mean_usd"])
         self.assertLessEqual(abs(close["forecast_final_mean_usd"]-base["forecast_final_mean_usd"]),.05)
         self.assertFalse(close["calibrated_probability"])
@@ -58,11 +58,11 @@ class GuardedDecisionTests(unittest.TestCase):
     def test_reversal_direction_adjustment_bounded(self):
         signal={"status":"observed","reversal":True,"short_usd_per_min":-10,
                 "long_usd_per_min":2}
-        result=guarded_decision(path(),reference(),100.3,180,reversal=signal)
+        result=guarded_decision(path(),reference(),100,180,reversal=signal)
         self.assertEqual(result["reversal_adjustment_usd"],-.1)
 
     def test_entry_review_is_cost_aware_and_manual(self):
-        candidate=guarded_decision(path(),reference(),100.3,180)
+        candidate=guarded_decision(path(),reference(),100,180)
         quote={"status":"available","market":"m","up_entry":.88,"down_entry":.12}
         expensive=manual_entry_review(candidate,quote,"m")
         self.assertEqual(expensive["action"],"AVOID_HIGH_PRICE")
