@@ -1,4 +1,4 @@
-import asyncio, json, os, sqlite3, time
+import asyncio, json, os, sqlite3, time, uuid
 from pathlib import Path
 from historical_15m import main as collect_15m, START as HISTORY_START, END as HISTORY_END
 from ai_confirmation import confirm, public_state, check_auth, auth_state, halfway_decision, paper_signal_state
@@ -53,13 +53,14 @@ def execute(sql, params=(), fetch=False):
 def iter_query_rows(sql, params=(), batch_size=64):
  """Stream large audit JSON rows instead of loading the full result into RAM.
 
- Both psycopg and sqlite cursors support fetchmany. The cursor and connection
+ PostgreSQL uses a named server-side cursor so psycopg does not buffer the
+ entire result in libpq; SQLite uses fetchmany. The cursor and connection
  are released when the caller exhausts the iterator.
  """
  if not isinstance(batch_size,int) or batch_size<1:
   raise ValueError("batch_size must be a positive integer")
  with connect() as conn:
-  cur=conn.cursor()
+  cur=conn.cursor(name="btc_audit_"+uuid.uuid4().hex) if DB else conn.cursor()
   try:
    cur.execute(sql.replace("?","%s") if DB else sql,params)
    while True:
@@ -677,7 +678,8 @@ def accuracy_report():
  return sorted(report.values(),key=lambda x:(x["phase"],x["quality"]))
 
 def research_rows():
- return execute("SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner FROM research_calls ORDER BY created_at DESC LIMIT 10000",fetch=True)
+ """Yield bounded research JSON rows; never fetch thousands into a list."""
+ return iter_query_rows("SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner FROM research_calls ORDER BY created_at DESC LIMIT 10000")
 
 _research_cache={"updated_epoch":0,"report":None}
 def research_report():
@@ -734,12 +736,16 @@ _outcome_feedback_cache={}
 def outcome_feedback(market):
  cached=_outcome_feedback_cache.get(market)
  if cached and time.time()-cached[0]<60:return cached[1]
- rows=[row for row in research_rows() if row[0]!=market and row[5] in ('UP','DOWN')]
- report=summarize(rows)
+ # Two bounded cursor passes avoid retaining thousands of large BRTI JSON
+ # snapshots across every new 15-minute round. Both passes exclude the
+ # current market and any unverified outcome, preserving forward-only audits.
+ def settled_rows():
+  return (row for row in research_rows() if row[0]!=market and row[5] in ('UP','DOWN'))
+ report=summarize(settled_rows())
  feedback={"source":"settled forward prediction log","excluded_market":market,
   "strategies":report.get("strategies",[]),"confidence":report.get("confidence",[]),
   "paired_comparisons":report.get("paired_comparisons",[]),
-  "loss_review":prediction_loss_review(rows),
+  "loss_review":prediction_loss_review(settled_rows()),
   "limitations":"Small observational samples across multiple code versions. Repeated checkpoints share rounds. Confidence labels are not calibrated probabilities. Do not automatically select the highest historical accuracy or infer trading profitability. Official published target overrides reconstructed values."}
  _outcome_feedback_cache.clear();_outcome_feedback_cache[market]=(time.time(),feedback)
  return feedback
