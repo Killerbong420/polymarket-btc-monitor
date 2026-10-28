@@ -212,7 +212,9 @@ async def market_15m(client):
   for market in markets if isinstance(markets,list) else []:
    if not isinstance(market,dict): continue
    slug=market.get("slug") or market.get("marketSlug")
-   if not isinstance(slug,str) or "btc-updown-15m-" not in slug: continue
+   if slug not in (event_slug,"cpc-"+event_slug): continue
+   if time.time()>=(start+timedelta(minutes=15)).timestamp():
+    return None,"round_expired_during_lookup"
    return {**market,"slug":slug,"end":(start+timedelta(minutes=15)).timestamp()},None
   return None,"event_has_no_matching_15m_contract"
  except Exception as exc: return None,type(exc).__name__
@@ -887,6 +889,12 @@ async def loop():
      ptb=terms.get("priceToBeat") or {}
      target=number(ptb)  # Accept official target whether API supplies a scalar or {"value": ...}.
      reference,quote=await asyncio.gather(reference_prices(client,fifteen),market_quote(client,slug))
+     left15=fifteen["end"]-time.time()
+     if left15<=0:
+      raise ValueError("Round expired during reference lookup")
+     phase="EARLY" if left15>450 else "LATE" if left15<=180 else "MID"
+     state.update(phase=phase,seconds_left=round(left15))
+     state["final_15m"]["seconds_left"]=round(left15)
      # Display-only BRTI reference series from the Polymarket US reference API.
      # Keep raw index ticks in process memory; no CF Benchmarks site scraping.
      ref_points=reference.get("points") or []
@@ -972,6 +980,10 @@ async def loop():
    except Exception as e:
     for key in ("phase","seconds_left","score"): state.pop(key,None)
     state.update(status="feed error",signal="WAIT",flip="WAIT",quick_forecast={"status":"unavailable","reason":"Monitoring feed error"},error=type(e).__name__+": "+str(e)[:200],updated=datetime.now(timezone.utc).isoformat())
+    state.update(reference_price={"status":"unavailable"},market_quote={"status":"unavailable"},
+                 settlement_forecast={"status":"unavailable","reason":"Monitoring feed error"},
+                 guarded_primary={"status":"unavailable","direction":"WAIT"},
+                 manual_entry_review={"status":"unavailable"})
     db_error=None
     try:execute("SELECT 1",fetch=True)
     except Exception:db_error="Database query failed"
@@ -1060,7 +1072,7 @@ async def lifespan(app):
  five_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,history_task,context_task,diagnostics_task,*pending_predictions):
+ for running in (task,history_task,context_task,diagnostics_task,five_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
@@ -1464,6 +1476,7 @@ def status():
 @app.get("/",response_class=HTMLResponse)
 def home():
  return Path(__file__).with_name("terminal.html").read_text(encoding="utf-8")
+
 
 
 
