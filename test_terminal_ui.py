@@ -97,6 +97,19 @@ class TerminalUITest(unittest.TestCase):
         self.assertNotIn("Chance of UP", panel)
         self.assertIn("No contract pricing or trade signals", panel)
 
+    def test_last_36_verified_round_tiles_for_both_markets(self):
+        self.assertIn("LAST 36 VERIFIED 15-MINUTE ROUNDS",self.html)
+        self.assertIn("LAST 36 VERIFIED 5-MINUTE ROUNDS",self.html)
+        self.assertIn("fiveLateTiles",self.html)
+        self.assertIn("fetch('/api/round-tiles'",self.html)
+        self.assertIn("correct call",self.html)
+        self.assertIn("No verified",self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshRoundTiles()},30000)",self.html)
+        tiles=self.html.split("/* Recent verified rounds.",1)[1]
+        self.assertNotIn("fair price",tiles.lower())
+        self.assertNotIn("auto-trader",tiles.lower())
+        self.assertNotIn("market value",tiles.lower())
+
     def test_live_feeds_are_started(self):
         self.assertIn("connectStream('coinbase');connectStream('kraken');update()", self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},5000)", self.html)
