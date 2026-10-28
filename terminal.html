@@ -843,7 +843,7 @@ refresh();setInterval(refresh,8000);
    el('fiveCountdown').textContent=live.seconds_left!=null?Math.floor(live.seconds_left/60)+':'+String(Math.max(0,live.seconds_left%60)).padStart(2,'0')+' left':(live.reason||'Checking');
    el('fiveTarget').textContent='Official target: '+money(live.target);
    el('fiveForecast').textContent=(live.phase==='LATE_2M30'?'FROZEN 2:30 CHECKPOINT':'FROZEN EARLY CHECKPOINT')+' · Projected final 60s BRTI mean: '+money(live.forecast)+' · '+(live.reason||live.status||'Checking official market');
-   const visual=live.visual_forecast||{},verified=visual.status==='available'&&visual.source==='Polymarket US BTC reference / BRTI'&&visual.official_target_usd===live.target;
+   const visual=live.visual_forecast||{},verified=visual.status==='available'&&visual.source==='Polymarket US BTC reference / BRTI'&&Math.abs(Number(visual.official_target_usd)-Number(live.target))<=0.02;
    el('fiveLiveProjection').textContent=verified?'LIVE BRTI · '+money(visual.current_reference_usd)+' · projected final 60s mean '+money(visual.projected_settlement_average_usd):'Live projection unavailable · '+(visual.reason||'Awaiting verified reference');
    el('fiveLead').textContent=verified?'Projected gap vs official target: '+(visual.projected_gap_usd>=0?'+':'')+money(visual.projected_gap_usd).replace('USD ','
    el('fiveScore').textContent='Early 5m accuracy: '+(accuracy.graded?accuracy.accuracy_pct+'%':'collecting')+' · '+(accuracy.wins||0)+' WIN / '+(accuracy.losses||0)+' LOSS · last '+(accuracy.graded||0)+'/100 settled';
