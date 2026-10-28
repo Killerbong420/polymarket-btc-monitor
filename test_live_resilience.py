@@ -78,5 +78,51 @@ class NonblockingSettlementTests(unittest.IsolatedAsyncioTestCase):
             app.POLL=old_poll
 
 
+    async def test_settlement_failure_is_reported_without_stopping_live_cycles(self):
+        calls={"market":0,"settle":0}
+        old_poll=app.POLL
+        old_state=dict(app.state)
+
+        async def market(client):
+            calls["market"]+=1
+            return None,"test_no_current_contract"
+
+        async def failed_settle(client):
+            calls["settle"]+=1
+            raise RuntimeError("settlement endpoint temporarily unavailable")
+
+        intel={"trade_flow":{"status":"unavailable","exchanges":[]},
+               "news":{},"order_book":{}}
+        app.POLL=0.01
+        app.state["settlement_task_error"]=None
+        try:
+            with (patch("app.setup"),
+                  patch("app.market_15m",new=market),
+                  patch("app.spot_data",new=AsyncMock(return_value={"price":None})),
+                  patch("app.check_auth",new=AsyncMock(return_value={})),
+                  patch("app.settle",new=failed_settle),
+                  patch("app.confirm",new=AsyncMock(return_value={})),
+                  patch("app.public_intelligence",return_value=intel),
+                  patch("app.health_checks",return_value=[]),
+                  patch("app.persist_alerts")):
+                task=asyncio.create_task(app.loop())
+                try:
+                    for _ in range(100):
+                        if calls["market"] >= 3 and app.state.get("settlement_task_error"):
+                            break
+                        await asyncio.sleep(0.01)
+                    self.assertGreaterEqual(calls["market"],3)
+                    self.assertEqual(calls["settle"],1)
+                    self.assertIn("RuntimeError",app.state.get("settlement_task_error") or "")
+                finally:
+                    task.cancel()
+                    try: await task
+                    except asyncio.CancelledError: pass
+        finally:
+            app.POLL=old_poll
+            app.state.clear()
+            app.state.update(old_state)
+
+
 if __name__=="__main__":
     unittest.main()
