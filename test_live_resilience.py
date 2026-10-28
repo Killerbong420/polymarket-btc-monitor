@@ -124,5 +124,30 @@ class NonblockingSettlementTests(unittest.IsolatedAsyncioTestCase):
             app.state.update(old_state)
 
 
+class DiagnosticCoverageTests(unittest.TestCase):
+    def test_read_only_audit_includes_five_minute_and_quick_samples(self):
+        from monitor_health import diagnostic_extras
+        five={"accuracy":{"wins":7,"losses":3,"graded":10,"accuracy_pct":70.0}}
+        state={"feed_health":{"status":"FRESH","age_seconds":4},
+               "settlement_diagnostic":{"overdue_markets":0},
+               "settlement_task_error":None,"quick_accuracy_error":None}
+        snapshot=diagnostic_extras(state,five,lambda:{"graded":20,"accuracy_pct":55.0})
+        self.assertEqual(snapshot["five_minute_accuracy"]["graded"],10)
+        self.assertEqual(snapshot["quick_accuracy"]["graded"],20)
+        self.assertEqual(snapshot["feed_health"]["status"],"FRESH")
+        self.assertEqual(snapshot["settlement_diagnostic"]["overdue_markets"],0)
+
+    def test_failed_quick_audit_does_not_hide_five_minute_or_worker_error(self):
+        from monitor_health import diagnostic_extras
+        def broken():
+            raise RuntimeError("database temporarily unavailable")
+        snapshot=diagnostic_extras({"settlement_task_error":"timeout"},
+                                   {"accuracy":{"graded":3,"wins":2}},broken)
+        self.assertEqual(snapshot["five_minute_accuracy"]["graded"],3)
+        self.assertEqual(snapshot["quick_accuracy"]["status"],"unavailable")
+        self.assertEqual(snapshot["quick_accuracy"]["reason"],"RuntimeError")
+        self.assertEqual(snapshot["settlement_task_error"],"timeout")
+
+
 if __name__=="__main__":
     unittest.main()
