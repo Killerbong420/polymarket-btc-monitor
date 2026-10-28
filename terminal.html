@@ -866,32 +866,78 @@ refresh();setInterval(refresh,8000);
  }
  refreshFive();setInterval(()=>{if(!document.hidden)refreshFive()},10000);
 })();
-</script></body></html>
-
-
-
-)+' · heuristic range '+money(visual.downside_scenario_usd)+' to '+money(visual.upside_scenario_usd):'Projected gap versus official target: —';
-   el('fiveReversal').textContent=verified?(visual.reversal_warning?'REVERSAL WATCH · observed short and longer BRTI slopes disagree':'No opposing BRTI slopes detected')+' · '+(visual.quality||'UNRATED')+' data quality · not a probability':'Reversal evidence: unavailable';
-   el('fiveVisualNote').textContent='Official BRTI ticks only · updated '+(verified?Math.round(visual.reference_age_seconds||0)+'s behind latest index':'when fresh')+'. Dashed path is illustrative; settlement uses the final 60-second AVERAGE. No contract pricing or trade signals.';
-   drawFivePath(verified?visual:null);
-   el('fiveScore').textContent='Early 5m accuracy: '+(accuracy.graded?accuracy.accuracy_pct+'%':'collecting')+' · '+(accuracy.wins||0)+' WIN / '+(accuracy.losses||0)+' LOSS · last '+(accuracy.graded||0)+'/100 settled';
-   const late=accuracy.late||{};
-   el('fiveLateScore').textContent='2:30 checkpoint accuracy: '+(late.graded?late.accuracy_pct+'%':'collecting')+' · '+(late.wins||0)+' WIN / '+(late.losses||0)+' LOSS · last '+(late.graded||0)+'/100 settled';
-   el('fiveRecent').replaceChildren();
-   for(const item of (accuracy.recent||[])){
-    const line=document.createElement('div');
-    line.textContent=item.market+' · '+item.direction+' · '+item.result;
-    el('fiveRecent').append(line);
-   }
-   const link=el('fiveMarketLink');link.replaceChildren();
-   if(live.url&&/^https:\/\/polymarket\.us\/event\/(?:cpc-)?btc-updown-5m-[a-zA-Z0-9-]+$/.test(live.url)){
-    const a=document.createElement('a');a.href=live.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='View current 5m market on Polymarket';link.append(a);
-   }
-  }catch(e){el('fiveCountdown').textContent='Feed unavailable';}
+</script><script>
+/* Recent verified rounds. Never uses odds, contract value, or live guessed outcomes. */
+(()=>{
+ const css=document.createElement('style');
+ css.textContent=`
+ .verified-rounds{margin-top:14px;border-top:1px solid #36506b;padding-top:12px}
+ .verified-rounds .round-title{font-size:12px;font-weight:800;letter-spacing:.05em}
+ .verified-rounds .round-meta,.verified-rounds .round-legend{font-size:11px;color:#acc3d8;margin:7px 0;line-height:1.55}
+ .verified-rounds .round-sub{font-size:11px;font-weight:700;color:#d2e4f5;margin:9px 0 5px}
+ .verified-rounds .round-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px}
+ .verified-rounds .round-tile{min-width:0;height:29px;border-radius:5px;border:2px solid transparent;display:flex;justify-content:center;align-items:center;font-weight:900;font-size:14px}
+ .verified-rounds .round-tile.up{background:#059a69;color:#f4fffa}
+ .verified-rounds .round-tile.down{background:#dd3f59;color:white}
+ .verified-rounds .round-tile.right{border-color:#f6fbff}
+ .verified-rounds .round-tile.wrong{opacity:.46}
+ .verified-rounds .round-tile.missing{background:#1a2838;border:2px dashed #516477;color:#91a4b7}
+ `;
+ document.head.append(css);
+ const el=id=>document.getElementById(id);
+ function create(parent,title,id,late){
+  if(!parent)return;
+  const shell=document.createElement('section');shell.className='verified-rounds';
+  const heading=document.createElement('div');heading.className='round-title';heading.textContent=title;
+  const meta=document.createElement('div');meta.className='round-meta';meta.id=id+'Meta';meta.textContent='Collecting verified results…';
+  shell.append(heading,meta);
+  function row(name,gridId){
+   const label=document.createElement('div');label.className='round-sub';label.textContent=name;
+   const grid=document.createElement('div');grid.className='round-grid';grid.id=gridId;grid.setAttribute('aria-label',name+' recent verified outcomes');
+   shell.append(label,grid);
+  }
+  row(late?'EARLY FORECAST':'FINAL AI FORECAST',id);
+  if(late)row('2:30 LEFT FORECAST · SAME ROUNDS','fiveLateTiles');
+  const legend=document.createElement('div');legend.className='round-legend';
+  legend.textContent='▲ Official UP · ▼ Official DOWN · white outline = correct call · faded = incorrect · dashed = no verified call. Oldest → newest.';
+  shell.append(legend);parent.append(shell);
  }
- refreshFive();setInterval(()=>{if(!document.hidden)refreshFive()},10000);
+ create(el('serverHistory'),'LAST 36 VERIFIED 15-MINUTE ROUNDS','fifteenTiles',false);
+ create(el('fiveMinutePanel'),'LAST 36 VERIFIED 5-MINUTE ROUNDS','fiveTiles',true);
+ function draw(id,rounds,phase){
+  const grid=el(id);if(!grid)return;grid.replaceChildren();
+  for(const r of rounds.slice(-36)){
+   if(!['UP','DOWN'].includes(r.winner))continue;
+   const correct=phase==='early'?r.early_correct:phase==='late'?r.late_correct:r.correct;
+   const predicted=phase==='early'?r.early_prediction:phase==='late'?r.late_prediction:r.prediction;
+   const tile=document.createElement('span');tile.className='round-tile';
+   if(correct===null||correct===undefined){tile.classList.add('missing');tile.textContent='–';}
+   else{tile.classList.add(r.winner==='UP'?'up':'down',correct?'right':'wrong');tile.textContent=r.winner==='UP'?'▲':'▼';}
+   tile.title=r.market+' · official '+r.winner+' · '+(correct==null?'No verified '+phase+' call':phase+' predicted '+predicted+' · '+(correct?'RIGHT':'WRONG'));
+   tile.setAttribute('aria-label',tile.title);grid.append(tile);
+  }
+ }
+ let busy=false;
+ async function refreshRoundTiles(){
+  if(busy)return;busy=true;
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),7000);
+  try{
+   const response=await fetch('/api/round-tiles',{cache:'no-store',signal:controller.signal});
+   if(!response.ok)throw Error('History unavailable');
+   const data=await response.json();
+   if(data.status!=='observed'||data.ordering!=='oldest_to_newest')throw Error('Unverified history');
+   const f=data.fifteen||{},m=data.five||{};
+   const fr=Array.isArray(f.rounds)?f.rounds:[],mr=Array.isArray(m.rounds)?m.rounds:[];
+   draw('fifteenTiles',fr,'fifteen');draw('fiveTiles',mr,'early');draw('fiveLateTiles',mr,'late');
+   const fs=f.summary||{},ms=m.summary||{},ls=m.late_summary||{};
+   if(el('fifteenTilesMeta'))el('fifteenTilesMeta').textContent=(fs.rounds||0)+' rounds · '+(fs.up||0)+' UP / '+(fs.down||0)+' DOWN · '+(fs.correct||0)+' right / '+(fs.incorrect||0)+' wrong';
+   if(el('fiveTilesMeta'))el('fiveTilesMeta').textContent=(ms.rounds||0)+' rounds · '+(ms.up||0)+' UP / '+(ms.down||0)+' DOWN · early '+(ms.correct||0)+'/'+(ms.scored||0)+' right · 2:30 '+(ls.correct||0)+'/'+(ls.scored||0)+' right';
+  }catch(e){
+   for(const id of ['fifteenTilesMeta','fiveTilesMeta'])if(el(id))el(id).textContent='Verified history temporarily unavailable; retaining previous tiles';
+  }finally{clearTimeout(timeout);busy=false;}
+ }
+ refreshRoundTiles();
+ setInterval(()=>{if(!document.hidden)refreshRoundTiles()},30000);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshRoundTiles()});
 })();
 </script></body></html>
-
-
-
