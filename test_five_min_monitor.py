@@ -39,7 +39,24 @@ class PhaseScoreTests(unittest.TestCase):
                         (late,2,"DOWN",100,99,"LOSS","UP"))
         result = five.report(self.db.execute)
         self.assertEqual((result["wins"],result["losses"],result["graded"]),(1,0,1))
-        self.assertEqual((result["late"]["wins"],result["late"]["losses"],result["late"]["graded"]),(0,1,1))
+        self.assertEqual((result["late"]["wins"],result["late"]["losses"],result["late"]["graded"]),(0,0,0))
+        self.assertEqual((result["late_legacy"]["wins"],result["late_legacy"]["losses"],result["late_legacy"]["graded"]),(0,1,1))
+
+    def test_strict_late_accuracy_excludes_predictions_made_near_settlement(self):
+        slug1="cpc-btc-updown-5m-2026-10-28-2000z"
+        slug2="cpc-btc-updown-5m-2026-10-28-2005z"
+        import datetime
+        def end(slug):
+            stamp=slug.split("btc-updown-5m-")[1]
+            start=datetime.datetime.strptime(stamp,"%Y-%m-%d-%H%Mz").replace(tzinfo=datetime.timezone.utc)
+            return (start+datetime.timedelta(minutes=5)).timestamp()
+        self.db.execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast,result,winner) VALUES (?,?,?,?,?,?,?)",
+                        (slug1,end(slug1)-135,"UP",100,101,"WIN","UP"))
+        self.db.execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast,result,winner) VALUES (?,?,?,?,?,?,?)",
+                        (slug2,end(slug2)-25,"DOWN",100,99,"LOSS","UP"))
+        report=five.report(self.db.execute)
+        self.assertEqual((report["late"]["wins"],report["late"]["losses"],report["late"]["graded"]),(1,0,1))
+        self.assertEqual((report["late_legacy"]["wins"],report["late_legacy"]["losses"],report["late_legacy"]["graded"]),(1,1,2))
 
     def test_reconciliation_scores_both_snapshots_with_matching_published_event(self):
         slug="cpc-btc-updown-5m-2026-10-27-1900z"
@@ -106,7 +123,7 @@ class CheckpointLoopTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_existing_early_call_gets_distinct_late_checkpoint(self):
         slug="cpc-btc-updown-5m-2026-10-28-1930z"
-        end=time.time()+100
+        end=time.time()+135
         self.db.execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?)",
                         (slug,end-200,"UP",100,101))
         market={"slug":slug,"end":end,"assetPriceTerms":{"indexSymbol":"BRTI","priceToBeat":100}}
@@ -116,6 +133,15 @@ class CheckpointLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(five.state["phase"],"LATE_2M30")
         self.assertEqual(five.state["early_direction"],"UP")
         self.assertEqual(five.state["late_direction"],"DOWN")
+
+    async def test_no_mislabelled_late_call_at_100_seconds_remaining(self):
+        slug="cpc-btc-updown-5m-2026-10-28-1932z"
+        end=time.time()+100
+        self.db.execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?)",
+                        (slug,end-200,"UP",100,101))
+        market={"slug":slug,"end":end,"assetPriceTerms":{"indexSymbol":"BRTI","priceToBeat":100}}
+        await self.run_once(market)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM five_min_late_predictions",fetch=True)[0][0],0)
 
     async def test_no_backfilled_late_call_for_market_first_seen_after_checkpoint(self):
         slug="cpc-btc-updown-5m-2026-10-28-1935z"
