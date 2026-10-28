@@ -14,6 +14,7 @@ from forecast_audit import summarize_forecast_audit
 from forecast_guard import anchored_shadow_forecast, validate_official_target
 from decision_engine import reversal_evidence, guarded_decision, manual_entry_review
 from forward_eval import evaluate_guarded
+from round_tiles import report as recent_round_tiles
 from quick_forecast import quick_forecast
 import five_min_monitor
 from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
@@ -1434,6 +1435,14 @@ def lightweight_live():
          "last_checkpoint":state.get("last_checkpoint"),
          "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),"settlement_task_error":state.get("settlement_task_error"),
          "server_epoch":time.time()}
+
+@app.get("/api/round-tiles")
+def round_tiles_report():
+ """Small isolated official-result query; never affects the live monitor."""
+ try:
+  return recent_round_tiles(execute)
+ except Exception:
+  return JSONResponse({"status":"unavailable","reason":"Verified round history database unavailable"},status_code=503)
 
 @app.get("/api/five-minute")
 def five_minute_report():
