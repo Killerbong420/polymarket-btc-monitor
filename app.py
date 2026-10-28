@@ -1226,10 +1226,10 @@ def numeric_price_forecast_report():
 def guarded_performance():
  """Versioned prospective comparisons only; historical AI outcomes unchanged."""
  try:
-  rows=execute("""SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner,
+  rows=iter_query_rows("""SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner,
       CASE WHEN final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
       THEN final_reference_mean ELSE NULL END
-      FROM research_calls ORDER BY created_at DESC LIMIT 10000""",fetch=True)
+      FROM research_calls ORDER BY created_at DESC LIMIT 10000""")
   return evaluate_guarded(rows)
  except Exception:return JSONResponse({"status":"unavailable","reason":"Guarded audit database unavailable"},status_code=503)
 
