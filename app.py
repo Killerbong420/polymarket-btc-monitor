@@ -12,6 +12,8 @@ from bot_library import study_strategies, consensus
 from settlement_forecast import forecast_settlement, regime_shadow_forecast
 from forecast_audit import summarize_forecast_audit
 from forecast_guard import anchored_shadow_forecast, validate_official_target
+from decision_engine import reversal_evidence, guarded_decision, manual_entry_review
+from forward_eval import evaluate_guarded
 from quick_forecast import quick_forecast
 import five_min_monitor
 from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
@@ -762,6 +764,10 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  # Fixed conservative research shadow: records a bounded blend of the
  # independent BRTI path and AI estimate without modifying the AI call.
  shadow=anchored_shadow_forecast(a_price,path,frozen.get("reference_price"),target)
+ guarded=guarded_decision(path,frozen.get("reference_price"),target,left,a_price,frozen.get("reversal_evidence"))
+ calls["GUARDED_PRIMARY"]={**guarded,"source":guarded.get("version"),
+  "confidence":guarded.get("quality","UNRATED"),
+  "entry_review":manual_entry_review(guarded,quote,slug)}
  calls["ANCHORED_SHADOW"]={
   "direction":shadow.get("projected_direction","WAIT"),
   "source":shadow.get("version"),
@@ -799,6 +805,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
     run("INSERT INTO signals (id,market,phase,direction,flip,score,created_at,quality,quality_reason,decision_source,decision_reason,ai_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,flip,score,captured,quality,quality_reason,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],confidence))
     run("INSERT INTO ai_decisions (id,market,phase,direction,confidence,source,reason,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,confidence,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],captured))
   finally:cur.close()
+ if checkpoint=="HALFWAY":state["last_guarded_primary"]={**calls["GUARDED_PRIMARY"],"market":slug,"checkpoint":checkpoint,"captured_at":captured}
  if checkpoint=="HALFWAY":state["last_halfway_ai"]={"market":slug,"phase":"FINAL_15M","direction":chosen,"price_path_informed":bool(review.get("price_path_informed")),"analysis_context_version":review.get("analysis_context_version") or VERSION,"forecast_final_mean_usd":review.get("forecast_final_mean_usd"),"indicator_direction":fallback,"source":review.get("source"),"reason":review.get("reason"),"ai_confidence":confidence,"updated":captured,"news_assessment":review.get("news_assessment")}
  _research_cache["updated_epoch"]=0
  state["last_checkpoint"]={"market":slug,"checkpoint":checkpoint,"captured_at":captured,"seconds_left":left,"calls":calls}
@@ -887,8 +894,11 @@ async def loop():
       state["quick_accuracy_error"]=type(quick_exc).__name__
      price_path=forecast_settlement(reference,d,target,left15,now=forecast_now)
      regime_shadow=regime_shadow_forecast(reference,d,target,left15,now=forecast_now)
-     d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow,quick_forecast=quick)
-     state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,quick_forecast=quick)
+     reversal=reversal_evidence(reference,left15)
+     guarded_live=guarded_decision(price_path,ref_public,target,left15,reversal=reversal)
+     entry_review=manual_entry_review(guarded_live,quote,slug)
+     d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow,quick_forecast=quick,reversal_evidence=reversal,guarded_primary=guarded_live,manual_entry_review=entry_review)
+     state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,quick_forecast=quick,reversal_evidence=reversal,guarded_primary=guarded_live,manual_entry_review=entry_review)
      try:
       capture_polymarket_quote(quote)
       state["quote_storage_error"]=None
@@ -914,7 +924,7 @@ async def loop():
      for key in ("phase","seconds_left","score"): state.pop(key,None)
      state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No verified Polymarket US 15-minute market: "+str(reason15))
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
-     state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},settlement_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},quick_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},missed_checkpoints=[])
+     state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},settlement_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},quick_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},guarded_primary={"status":"unavailable","direction":"WAIT"},manual_entry_review={"status":"unavailable"},reversal_evidence={"status":"unavailable"},missed_checkpoints=[])
      await confirm(client,None,None,"WAIT","WAIT",0,d)
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     # Historical settlement can involve 30 remote rounds and must not
@@ -979,6 +989,8 @@ async def read_only_diagnostics_loop():
      "paired_accuracy_comparisons":prices.get("paired_comparisons"),
      "shadow_paired_comparisons":prices.get("shadow_paired_comparisons"),
       "paired_direction_comparisons":prices.get("paired_direction_comparisons"),
+     "guarded_primary":state.get("guarded_primary"),
+     "manual_entry_review":state.get("manual_entry_review"),
      "target_validation":state.get("target_validation"),
      "active_alert_codes":[a.get("code") for a in state.get("alerts",[]) if isinstance(a,dict)]
     }
@@ -1086,6 +1098,7 @@ def numeric_price_forecast_report():
    y=number(actual)
    if y is None or y<=0:continue
    candidates={"CURRENT_BRTI_BASELINE":(snap.get("settlement_forecast") or {}).get("current_reference_usd"),
+               "GUARDED_PRIMARY":(calls.get("GUARDED_PRIMARY") or {}).get("forecast_final_mean_usd"),
                "PRICE_PATH":(calls.get("PRICE_PATH") or {}).get("forecast_final_mean_usd"),
                "ANCHORED_SHADOW":(calls.get("ANCHORED_SHADOW") or {}).get("forecast_final_mean_usd"),
                "AI":(calls.get("AI") or {}).get("forecast_final_mean_usd") if (calls.get("AI") or {}).get("source")=="AI_REVIEW" else None}
@@ -1174,6 +1187,17 @@ def numeric_price_forecast_report():
          "status":"observed" if out else "awaiting_official_settlement_prices",
          "results":out,"paired_comparisons":paired_summary,"shadow_paired_comparisons":shadow_paired_summary,"paired_direction_comparisons":directional,"definition":"Error against the authoritative Polymarket US BTC market assetPriceTerms.settlementPrice (official BRTI index). Public chart reconstructions and legacy unverified prices are excluded. Current BRTI at prediction time is a naive baseline; these are not calibrated win probabilities.",
          "note":"Paired numeric comparisons use the same checkpoint and officially settled round; paired direction also requires a published binary winner. Versions may be mixed; do not treat these historical scores as proof of a future edge. Errors are USD, not trade P&L."}
+
+@app.get("/api/guarded-performance")
+def guarded_performance():
+ """Versioned prospective comparisons only; historical AI outcomes unchanged."""
+ try:
+  rows=execute("""SELECT market,checkpoint,created_at,snapshot_json,calls_json,winner,
+      CASE WHEN final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
+      THEN final_reference_mean ELSE NULL END
+      FROM research_calls ORDER BY created_at DESC LIMIT 10000""",fetch=True)
+  return evaluate_guarded(rows)
+ except Exception:return JSONResponse({"status":"unavailable","reason":"Guarded audit database unavailable"},status_code=503)
 
 @app.get("/api/price-forecast/accuracy")
 def price_forecast_accuracy():
@@ -1358,6 +1382,8 @@ def lightweight_live():
          "error":state.get("error"),"external":state.get("external") or {},
          "brti_chart":state.get("brti_chart"),"reference_price":state.get("reference_price"),
          "target_behavior":state.get("target_behavior"),"settlement_forecast":state.get("settlement_forecast"),"quick_forecast":state.get("quick_forecast"),
+         "guarded_primary":state.get("guarded_primary"),"last_guarded_primary":state.get("last_guarded_primary"),
+         "manual_entry_review":state.get("manual_entry_review"),"reversal_evidence":state.get("reversal_evidence"),
          "final_15m":state.get("final_15m"),"last_halfway_ai":state.get("last_halfway_ai"),
          "last_checkpoint":state.get("last_checkpoint"),
          "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),
