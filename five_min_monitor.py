@@ -17,6 +17,10 @@ def setup(execute):
  market TEXT PRIMARY KEY, created_epoch REAL NOT NULL,
  direction TEXT NOT NULL, target REAL NOT NULL, forecast REAL NOT NULL,
  result TEXT NOT NULL DEFAULT 'PENDING', winner TEXT)""")
+ execute("""CREATE TABLE IF NOT EXISTS five_min_late_predictions (
+ market TEXT PRIMARY KEY, created_epoch REAL NOT NULL,
+ direction TEXT NOT NULL, target REAL NOT NULL, forecast REAL NOT NULL,
+ result TEXT NOT NULL DEFAULT 'PENDING', winner TEXT)""")
 
 async def discover(client):
  now=datetime.now(timezone.utc)
@@ -54,7 +58,8 @@ async def discover(client):
 
 async def score_pending(client,execute,verified_winner):
  rows=execute("SELECT market FROM five_min_predictions WHERE result='PENDING' ORDER BY created_epoch DESC LIMIT 24",fetch=True)
- for (slug,) in rows:
+ late_rows=execute("SELECT market FROM five_min_late_predictions WHERE result='PENDING' ORDER BY created_epoch DESC LIMIT 24",fetch=True)
+ for (slug,) in dict.fromkeys(rows+late_rows):
   try:
    stamp=slug.split("btc-updown-5m-",1)[-1]
    start=datetime.strptime(stamp,"%Y-%m-%d-%H%Mz").replace(tzinfo=timezone.utc)
@@ -77,15 +82,38 @@ async def score_pending(client,execute,verified_winner):
    if sr.status_code!=200:continue
    winner=verified_winner(match,sr.json())
    if winner not in ("UP","DOWN"):continue
-   execute("UPDATE five_min_predictions SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END,winner=? WHERE market=? AND result='PENDING'",(winner,winner,slug))
+   for table in ("five_min_predictions","five_min_late_predictions"):
+    execute(f"UPDATE {table} SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END,winner=? WHERE market=? AND result='PENDING'",(winner,winner,slug))
   except Exception:
    continue
 
-def report(execute):
- rows=execute("SELECT result,COUNT(*) FROM (SELECT result FROM five_min_predictions WHERE result IN ('WIN','LOSS') ORDER BY created_epoch DESC LIMIT 100) t GROUP BY result",fetch=True)
+def _counts(execute, table):
+ # Only already-settled markets count. Each phase has its own last 100.
+ rows=execute(f"SELECT result,COUNT(*) FROM (SELECT result FROM {table} WHERE result IN ('WIN','LOSS') ORDER BY created_epoch DESC LIMIT 100) t GROUP BY result",fetch=True)
  counts=dict(rows);wins=counts.get("WIN",0);losses=counts.get("LOSS",0);n=wins+losses
+ return {"wins":wins,"losses":losses,"graded":n,"accuracy_pct":round(100*wins/n,1) if n else None}
+
+def report(execute):
+ early=_counts(execute,"five_min_predictions")
  recent=execute("SELECT market,direction,result,winner FROM five_min_predictions ORDER BY created_epoch DESC LIMIT 12",fetch=True)
- return {"wins":wins,"losses":losses,"graded":n,"accuracy_pct":round(100*wins/n,1) if n else None,"recent":[{"market":m,"direction":d,"result":r,"winner":w} for m,d,r,w in recent]}
+ late=_counts(execute,"five_min_late_predictions")
+ late_recent=execute("SELECT market,direction,result,winner FROM five_min_late_predictions ORDER BY created_epoch DESC LIMIT 12",fetch=True)
+ return {**early,"recent":[{"market":m,"direction":d,"result":r,"winner":w} for m,d,r,w in recent],
+         "late":{**late,"recent":[{"market":m,"direction":d,"result":r,"winner":w} for m,d,r,w in late_recent],
+                 "checkpoint_seconds_left":150,"basis":"Frozen calls captured with 20-150 seconds remaining; no backfill"},
+         "early_basis":"Original first available frozen 5m predictions; historical records retained unchanged"}
+
+def forecast_candidate(reference, external, target, left, now):
+ """Same verified final-minute BRTI forecaster for early and 2:30 checkpoints."""
+ if reference.get("status")!="fresh" or reference.get("source")!="Polymarket US BTC reference / BRTI":
+  return None,"Official BRTI unavailable: "+str(reference.get("reason") or reference.get("status"))
+ forecast=forecast_settlement(reference,external,target,left,now=now)
+ if forecast.get("status")!="available":
+  return None,"Forecast unavailable: "+str(forecast.get("reason") or "insufficient data")
+ predicted=number(forecast.get("forecast_final_mean_usd"))
+ if predicted is None or predicted<=0:
+  return None,"Forecast numeric value unavailable"
+ return {"direction":"UP" if predicted>=target else "DOWN","forecast":round(predicted,2)},None
 
 async def loop(client,execute,verified_winner,external_state):
  global _last_market
@@ -95,21 +123,17 @@ async def loop(client,execute,verified_winner,external_state):
   try:
    market,reason=await discover(client)
    if not market:
-    state.update(status="unavailable",market=None,direction="WAIT",reason=reason)
+    state.update(status="unavailable",market=None,direction="WAIT",forecast=None,
+                 early_direction="WAIT",late_direction="WAIT",phase="UNAVAILABLE",
+                 target=None,reason=reason)
    else:
     slug=market["slug"];left=max(0,market["end"]-time.time())
-    target=number((market.get("assetPriceTerms") or {}).get("priceToBeat"))
-    state.update(status="running" if target is not None and target>0 else "target_unavailable",market=slug,seconds_left=round(left),target=target,
-                 url="https://polymarket.us/event/"+slug)
-    if slug!=_last_market:
-     _last_market=slug
-     state.update(direction="WAIT",forecast=None,reason="Awaiting verified BRTI and official target")
-    prior=execute("SELECT direction,forecast,result FROM five_min_predictions WHERE market=?",(slug,),fetch=True)
-    if prior:
-     direction,forecast,result=prior[0]
-     state.update(direction=direction,forecast=forecast,result=result,reason="Frozen prospective five-minute settlement forecast")
-    if target is None or target<=0:
-     state.update(direction="WAIT",forecast=None,reason="Official priceToBeat absent in event contract; requesting market details")
+    terms=market.get("assetPriceTerms") or {}
+    target=number(terms.get("priceToBeat"))
+    # Event summaries may contain a target but omit the BRTI index identity.
+    # Always verify full authoritative terms before forecasting.
+    if (target is None or target<=0 or terms.get("indexSymbol")!="BRTI"
+            or terms.get("marketType") not in (None,"ASSET_PRICE_MARKET_TYPE_UP_DOWN")):
      for path in ("/v1/markets/"+slug,"/v1/market/slug/"+slug):
       try:
        response=await client.get("https://gateway.polymarket.us"+path,timeout=6)
@@ -118,25 +142,62 @@ async def loop(client,execute,verified_winner,external_state):
        detail=body.get("market",body) if isinstance(body,dict) else {}
        if not isinstance(detail,dict):continue
        if (detail.get("slug") or detail.get("marketSlug"))!=slug:continue
-       terms=detail.get("assetPriceTerms") or {}
-       candidate=number(terms.get("priceToBeat"))
-       if terms.get("indexSymbol")=="BRTI" and candidate is not None and candidate>0:
+       verified=detail.get("assetPriceTerms") or {}
+       candidate=number(verified.get("priceToBeat"))
+       if (verified.get("indexSymbol")=="BRTI" and
+           verified.get("marketType") in (None,"ASSET_PRICE_MARKET_TYPE_UP_DOWN")
+           and candidate is not None and candidate>0):
         target=candidate
-        market["assetPriceTerms"]=terms
-        state.update(target=target,status="running",reason="Official target retrieved from market details")
+        market["assetPriceTerms"]=verified
         break
       except Exception:continue
-    if not prior and target is not None and target>0 and left>20:
-     reference=await reference_prices(client,market)
-     if reference.get("status")!="fresh":state["reason"]="Official BRTI unavailable: "+str(reference.get("reason") or reference.get("status"))
-     if reference.get("status")=="fresh" and reference.get("source")=="Polymarket US BTC reference / BRTI":
-      forecast=forecast_settlement(reference,external_state.get("external") or {},target,left,now=time.time())
-      predicted=number(forecast.get("forecast_final_mean_usd"))
-      if forecast.get("status")!="available":state["reason"]="Forecast unavailable: "+str(forecast.get("reason") or "insufficient data")
-      if forecast.get("status")=="available" and predicted is not None and predicted>0:
-       direction="UP" if predicted>=target else "DOWN"
-       execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",(slug,time.time(),direction,target,predicted))
-       state.update(direction=direction,forecast=round(predicted,2),result="PENDING",reason="Observed BRTI forward settlement forecast")
+    valid_target=(target is not None and target>0 and
+                  (market.get("assetPriceTerms") or {}).get("indexSymbol")=="BRTI")
+    state.update(status="running" if valid_target else "target_unavailable",
+                 market=slug,seconds_left=round(left),target=target if valid_target else None,
+                 url="https://polymarket.us/event/"+slug)
+    if slug!=_last_market:
+     _last_market=slug
+     state.update(direction="WAIT",forecast=None,early_direction="WAIT",
+                  early_forecast=None,late_direction="WAIT",late_forecast=None,
+                  phase="EARLY",result="PENDING",reason="Awaiting verified BRTI and official target")
+    prior=execute("SELECT direction,forecast,result,created_epoch FROM five_min_predictions WHERE market=?",(slug,),fetch=True)
+    late_prior=execute("SELECT direction,forecast,result FROM five_min_late_predictions WHERE market=?",(slug,),fetch=True)
+    if prior:
+     ed,ef,er,early_created=prior[0]
+     state.update(direction=ed,forecast=ef,early_direction=ed,early_forecast=ef,
+                  early_result=er,result=er,phase="EARLY",reason="Frozen early five-minute forecast")
+    if late_prior:
+     ld,lf,lr=late_prior[0]
+     state.update(direction=ld,forecast=lf,late_direction=ld,
+                  late_forecast=lf,late_result=lr,result=lr,phase="LATE_2M30",
+                  reason="Frozen 2:30-left forecast from newer verified BRTI ticks")
+    if not valid_target:
+     state.update(direction="WAIT",forecast=None,phase="UNVERIFIED_TARGET",
+                  reason="Official BRTI target and index terms unavailable")
+    elif left>20:
+     # Never fabricate a late checkpoint for a round first seen after 2:30.
+     due_early=not prior
+     due_late=(not late_prior and bool(prior) and 20<left<=150
+               and prior[0][3] <= market["end"]-150)
+     if due_early or due_late:
+      reference=await reference_prices(client,market)
+      candidate,error=forecast_candidate(reference,external_state.get("external") or {},target,left,time.time())
+      if candidate is None:
+       state["reason"]=error
+      elif due_early:
+       execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",
+               (slug,time.time(),candidate["direction"],target,candidate["forecast"]))
+       state.update(direction=candidate["direction"],forecast=candidate["forecast"],
+                    early_direction=candidate["direction"],early_forecast=candidate["forecast"],
+                    phase="EARLY",result="PENDING",reason="Frozen original early BRTI forecast")
+      elif due_late:
+       execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",
+               (slug,time.time(),candidate["direction"],target,candidate["forecast"]))
+       state.update(direction=candidate["direction"],forecast=candidate["forecast"],
+                    late_direction=candidate["direction"],late_forecast=candidate["forecast"],
+                    phase="LATE_2M30",result="PENDING",
+                    reason="Frozen 2:30-left BRTI forecast; independently scored")
    if time.monotonic()-last_score>=35:
     await score_pending(client,execute,verified_winner)
     last_score=time.monotonic()
