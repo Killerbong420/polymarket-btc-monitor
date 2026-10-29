@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 import httpx
 from market_intelligence import intelligence_loop, public_intelligence
+from market_chart_history import record_brti, snapshot as chart_history_snapshot
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from price_action import analyze_price_action, shadow_price_action
 from bot_library import study_strategies, consensus
@@ -900,6 +901,7 @@ async def loop():
      # Display-only BRTI reference series from the Polymarket US reference API.
      # Keep raw index ticks in process memory; no CF Benchmarks site scraping.
      ref_points=reference.get("points") or []
+     if reference.get("status")=="fresh":record_brti(ref_points,reference.get("source"))
      if reference.get("status") in ("fresh","stale") and ref_points:
       state["brti_chart"]={"market":slug,"source":reference.get("source"),
        "points":[[int(t),round(float(p),2)] for t,p in ref_points if t>=time.time()-16*60][::3],
@@ -1340,6 +1342,18 @@ def historical_csv():
  p=Path("historical_15m_7d.csv")
  if not p.exists(): return JSONResponse({"status":historical_state},status_code=202)
  return FileResponse(str(p),media_type="text/csv",filename="polymarket_us_btc_15m_7d.csv")
+@app.get("/api/market-chart/history")
+def market_chart_history(range: str = Query(default="round")):
+ """Bounded read-only BRTI ticks and historical exchange observations, no extra provider polls."""
+ if range not in ("round","30s","1m","2m","5m","30m","60m"):
+  return JSONResponse({"status":"invalid_range","reason":"Unsupported chart window"},status_code=400)
+ current=state.get("market")
+ ref=state.get("reference_price") or {}
+ start=number(ref.get("window_start"));end=number(ref.get("window_end"))
+ if not current or "btc-updown-15m-" not in current or start is None or end is None or end-start!=900:
+  return {"status":"unavailable","reason":"No verified current 15-minute BRTI round","brti_points":[],"venue_series":[]}
+ return chart_history_snapshot(range,round_start=start,round_end=end,market=current)
+
 @app.get("/api/brti-chart")
 def brti_chart():
   """BRTI reference observations from Polymarket US asset-prices API, not CF site scraping."""

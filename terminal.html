@@ -272,6 +272,17 @@ body:not(.show-advanced) #futureForecastCard p.small{display:none!important}
 #crossExchangePanel details,#checkpointBoard details{margin-top:10px}
 #crossExchangePanel summary,#checkpointBoard summary{font-size:12px;color:#a6d1f3;font-weight:700}
 #checkpointBoard .xempty{color:#e1bf72}
+</style>
+<style>
+#brtiLinePanel{border-top:1px solid #344659;margin-top:10px;padding-top:11px}
+#brtiRangeTabs{display:flex;flex-wrap:nowrap;gap:5px;overflow-x:auto;padding:7px 0 5px;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+#brtiRangeTabs button{flex:0 0 auto;font:600 11px/1.2 ui-monospace,SFMono-Regular,monospace;border:1px solid #334960;background:#0c1422;color:#8fa8c4;border-radius:6px;padding:8px 9px;min-height:35px}
+#brtiRangeTabs button.selected{color:#f1f5fb;border-color:#a5bad0;background:#202d3c}
+#brtiOverlayLegend{margin:5px 0 7px;color:#86b2d4;line-height:1.5;font-size:10px}
+#brtiLineCanvas{height:clamp(280px,62vw,410px);background:#0b151b;border-color:#334653;margin-top:3px}
+#brtiLineLegend{gap:7px 12px}
+#brtiLineStatus{color:#96bdd0}
+@media(max-width:430px){#brtiLineCanvas{height:clamp(265px,78vw,350px)}#brtiRangeTabs button{padding:8px 10px}#brtiLineHead{font-size:10px}}
 </style></head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
 document.getElementById('advancedToggle').addEventListener('click',function(){
  const enabled=document.body.classList.toggle('show-advanced');
@@ -306,7 +317,17 @@ document.getElementById('advancedToggle').addEventListener('click',function(){
 <div class="pm-detail" id="pmApiInfo" aria-live="polite">Awaiting verified current-round index observations</div></section>
 <section id="brtiLinePanel" aria-label="Current 15-minute official BRTI price path">
   <div id="brtiLineHead"><span>OFFICIAL BRTI · 15-MINUTE PRICE PATH</span><span id="brtiLineStatus" aria-live="polite">Waiting for verified index ticks</span></div>
-  <canvas id="brtiLineCanvas" role="img" aria-label="Official Polymarket US BRTI index line, official price to beat, and eligible final-average forecast. No candlesticks or contract values."></canvas>
+  <div id="brtiRangeTabs" role="group" aria-label="Bitcoin chart timeframe">
+<button type="button" class="selected" data-range="round" aria-pressed="true">This round</button>
+<button type="button" data-range="30s" aria-pressed="false">30s</button>
+<button type="button" data-range="1m" aria-pressed="false">1m</button>
+<button type="button" data-range="2m" aria-pressed="false">2m</button>
+<button type="button" data-range="5m" aria-pressed="false">5m</button>
+<button type="button" data-range="30m" aria-pressed="false">30m</button>
+<button type="button" data-range="60m" aria-pressed="false">60m</button>
+</div>
+<div id="brtiOverlayLegend" class="small" aria-live="polite">Exchange overlays collect from real BTC/USD tickers · no fabricated history</div>
+<canvas id="brtiLineCanvas" role="img" aria-label="Official Polymarket US BRTI index line, official price to beat, and eligible final-average forecast. No candlesticks or contract values."></canvas>
   <div id="brtiLineLegend"><span><i></i>BRTI index</span><span><i class="target"></i>Official target</span><span><i class="forecast"></i>Projected final average (when verified)</span></div>
 </section>
 <div class="card" id="patternPanel" style="border-left:4px solid #e5a45d;margin-top:10px"><div class="label">PATTERN ANALYSIS · SERVER SIGNALS</div><div class="value wait" id="patternName">ANALYZING</div><div class="small" id="patternDetails">Waiting for server pattern analysis</div><div class="small" id="minuteForecast">NEXT 60 SECONDS · Awaiting forecast</div><div class="small" id="minuteReversal">REVERSAL WATCH · Awaiting BRTI evidence</div><p class="small">Pattern analysis continues on the server; no calibrated probabilities.</p></div></div><div id="signalTiles"><div class="card" id="fastPanel" style="border-left:4px solid #f6bb45;margin-top:10px"><div class="row" style="justify-content:space-between"><span class="label">⚡ QUICK PREDICTION · UP / DOWN</span><span class="small" id="fastAge">Waiting for stream</span></div><div class="value wait" id="fastSignal">SCANNING</div><div class="small" id="fastReason">Waiting for live price movement</div>
@@ -430,7 +451,7 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
 })();
 </script>
 <script>
-/* Lightweight, read-only 15m BRTI line. Shares existing /api/status requests (no extra fetch). */
+/* Fast trading-style chart: BRTI is authoritative, spot overlays are real observed samples. */
 (()=>{
  'use strict';
  const canvas=document.getElementById('brtiLineCanvas'),status=document.getElementById('brtiLineStatus');
@@ -459,73 +480,153 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
   return {start,end,points,target,projected};
  };
  window.btcBrtiLineModel=model;
- let lastDraw=0;
- const money=v=>v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+ const spans={"30s":30,"1m":60,"2m":120,"5m":300,"30m":1800,"60m":3600};
+ const colors={"Coinbase":"#668fd4","Kraken":"#9277c9","Bitstamp":"#3e9a9e","Gemini":"#bc7da4","Bitfinex":"#83a76a","Binance.US":"#bb9158"};
+ let selected='round',history=null,inFlight=false,lastDraw=0,aborter=null;
+ const money=v=>Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+ const ranges=document.getElementById('brtiRangeTabs'),overlayLegend=document.getElementById('brtiOverlayLegend');
+ function onRange(newRange){
+  if(newRange!=='round'&&!Object.prototype.hasOwnProperty.call(spans,newRange))return;
+  selected=newRange;history=null;lastDraw=0;
+  if(ranges&&typeof ranges.querySelectorAll==='function'){
+   for(const button of ranges.querySelectorAll('button[data-range]')){
+    const active=button.getAttribute('data-range')===selected;
+    button.classList.toggle('selected',active);button.setAttribute('aria-pressed',String(active));
+   }
+  }
+  draw(true);refreshHistory();
+ }
+ if(ranges&&typeof ranges.querySelectorAll==='function')
+  for(const button of ranges.querySelectorAll('button[data-range]'))
+   button.addEventListener('click',()=>onRange(button.getAttribute('data-range')));
+ window.btcChartSelectRange=onRange;
+ async function refreshHistory(){
+  if(document.hidden||typeof fetch!=='function')return;
+  if(inFlight&&aborter)aborter.abort();
+  inFlight=true;
+  const controller=new AbortController();aborter=controller;
+  const requested=selected,timeout=setTimeout(()=>controller.abort(),4500);
+  try{
+   const response=await fetch('/api/market-chart/history?range='+encodeURIComponent(requested),
+    {cache:'no-store',signal:controller.signal});
+   if(!response.ok)throw Error('History temporarily unavailable');
+   const data=await response.json();
+   if(data.range!==requested)return;
+   history=data;draw(true);
+  }catch(e){
+   if(controller===aborter&&overlayLegend)overlayLegend.textContent='Exchange history currently unavailable; official live BRTI remains displayed';
+  }finally{clearTimeout(timeout);if(controller===aborter){inFlight=false;aborter=null;}}
+ }
+ const freshHistory=(d,now)=>history&&history.market===d?.market&&history.range===selected&&
+  finite(Number(history.sampled_at))&&now-Number(history.sampled_at)>=-5&&now-Number(history.sampled_at)<=22;
  function draw(force=false){
   if(document.hidden)return;
-  const now=Date.now();
-  if(!force&&now-lastDraw<1500)return;
-  lastDraw=now;
-  const box=canvas.getBoundingClientRect(),w=box.width,h=box.height;
-  if(w<80||h<90)return;
+  const nowMillis=Date.now(),now=nowMillis/1000;
+  if(!force&&nowMillis-lastDraw<1500)return;
+  lastDraw=nowMillis;
+  const bounds=canvas.getBoundingClientRect(),w=bounds.width,h=bounds.height;
+  if(w<110||h<100)return;
   const ctx=canvas.getContext('2d');if(!ctx)return;
   const ratio=Math.min(window.devicePixelRatio||1,2);
   canvas.width=Math.round(w*ratio);canvas.height=Math.round(h*ratio);
-  ctx.setTransform(ratio,0,0,ratio,0,0);
-  ctx.fillStyle='#0b1624';ctx.fillRect(0,0,w,h);
-  const m=model(window.btcServerStatus,now/1000);
+  ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#0b151b';ctx.fillRect(0,0,w,h);
+  const d=window.btcServerStatus,m=model(d,now);
   if(!m){
-   // Do not throttle the first valid frame after loading or feed recovery.
-   lastDraw=0;
-   status.textContent='Verified BRTI observations unavailable or stale';
-   ctx.fillStyle='#a6b6c8';ctx.font='12px system-ui';
-   ctx.fillText('Waiting for fresh official 15m reference data',13,h/2);
+   lastDraw=0;status.textContent='Verified BRTI observations unavailable or stale';
+   ctx.fillStyle='#acbdcd';ctx.font='12px system-ui';
+   ctx.fillText('Waiting for fresh official BRTI price ticks',13,h/2);
    return;
   }
-  status.textContent='LIVE · official ticks';
-  const left=12,right=80,top=18,bottom=31,pw=w-left-right,ph=h-top-bottom;
-  const vals=m.points.map(p=>p[1]);
-  if(m.target!==null)vals.push(m.target);
-  if(m.projected!==null)vals.push(m.projected);
-  const minimum=Math.min(...vals),maximum=Math.max(...vals),pad=Math.max(2,(maximum-minimum)*.13);
-  const low=minimum-pad,high=maximum+pad;
-  const X=t=>left+(t-m.start)/900*pw,Y=v=>top+(high-v)/(high-low)*ph;
-  ctx.font='10px system-ui';ctx.lineWidth=1;
-  for(let i=0;i<4;i++){
-   const y=top+i*ph/3;
-   ctx.strokeStyle='#283f51';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(w-right,y);ctx.stroke();
-   ctx.fillStyle='#a7bdce';ctx.fillText((high-(high-low)*i/3).toFixed(2),w-right+5,y+3);
+  const hist=freshHistory(d,now)?history:null;
+  const start=selected==='round'?m.start:now-spans[selected];
+  const observedXEnd=selected==='round'?now:m.end>now?now:now;
+  const left=13,right=Math.min(91,Math.max(65,w*.19)),top=23,bottom=32;
+  const pw=w-left-right,ph=h-top-bottom,plotRight=left+pw;
+  const nowX=selected==='round'?left+Math.max(0,Math.min(1,(now-m.start)/900))*pw:left+pw*.76;
+  const X=t=>{
+   if(t<=now||selected==='round')return left+(t-start)/(selected==='round'?900:now-start)*(selected==='round'?pw:nowX-left);
+   return nowX+(t-now)/Math.max(1,m.end-now)*(plotRight-nowX);
+  };
+  const raw=hist&&Array.isArray(hist.brti_points)&&hist.brti_points.length>=2?hist.brti_points:m.points;
+  const points=raw.filter(p=>Array.isArray(p)&&p.length>=2&&finite(Number(p[0]))&&finite(Number(p[1]))&&Number(p[0])>=start&&Number(p[0])<=now&&Number(p[1])>0)
+   .map(p=>[Number(p[0]),Number(p[1])]);
+  const source=points.length>=2?points:m.points.filter(p=>p[0]>=start);
+  if(source.length<2){lastDraw=0;status.textContent='Collecting real BRTI ticks for this range';return;}
+  const venues=hist?((hist.venue_series||[]).filter(v=>v.quote==='USD'&&v.status==='fresh'&&Array.isArray(v.points))):[];
+  const visibleVenues=venues.map(v=>({name:v.source,color:colors[v.source]||'#7186a1',
+   points:v.points.filter(p=>Array.isArray(p)&&finite(Number(p[0]))&&finite(Number(p[1]))&&p[0]>=start&&p[0]<=now&&p[1]>0)
+    .map(p=>[Number(p[0]),Number(p[1])])})).filter(v=>v.points.length>=2);
+  const last=source[source.length-1];
+  const all=source.map(p=>p[1]);
+  if(m.target!==null)all.push(m.target);
+  if(m.projected!==null)all.push(m.projected);
+  // Cross-exchange basis outliers do not flatten the official BRTI path.
+  for(const v of visibleVenues)for(const p of v.points)if(Math.abs(p[1]/last[1]-1)<.02)all.push(p[1]);
+  const min=Math.min(...all),max=Math.max(...all),pad=Math.max(1,(max-min)*.12);
+  const low=min-pad,high=max+pad,Y=p=>top+(high-p)/(high-low)*ph;
+  // Observed and future shading. Final settlement window is the last 60 seconds.
+  ctx.fillStyle='#0d2425';ctx.fillRect(left,top,Math.max(0,nowX-left),ph);
+  ctx.fillStyle='#242823';ctx.fillRect(nowX,top,Math.max(0,plotRight-nowX),ph);
+  const shadeStart=Math.max(now,m.end-60),settlementX=Math.max(nowX,Math.min(plotRight,X(shadeStart)));
+  ctx.fillStyle='rgba(181,117,39,.14)';ctx.fillRect(settlementX,top,plotRight-settlementX,ph);
+  ctx.font='10px ui-monospace,monospace';ctx.lineWidth=1;
+  for(let i=0;i<5;i++){
+   const y=top+i*ph/4;
+   ctx.beginPath();ctx.strokeStyle='#29404b';ctx.moveTo(left,y);ctx.lineTo(plotRight,y);ctx.stroke();
+   ctx.fillStyle='#a5b7c4';ctx.fillText((high-(high-low)*i/4).toFixed(2),plotRight+7,y+3);
   }
   for(let i=0;i<=3;i++){
-   const tick=m.start+i*300;
-   ctx.fillStyle='#8ca5bd';ctx.fillText(new Date(tick*1000).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),Math.max(2,Math.min(w-68,X(tick)-19)),h-9);
+   const t=start+(now-start)*i/3,x=X(t);
+   ctx.beginPath();ctx.strokeStyle='#243943';ctx.moveTo(x,top);ctx.lineTo(x,h-bottom);ctx.stroke();
+   ctx.fillStyle='#91a8b8';ctx.fillText(new Date(t*1000).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),Math.max(1,Math.min(w-63,x-19)),h-10);
   }
-  function line(series,color,width,dashed){
-   ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.setLineDash(dashed||[]);
+  ctx.beginPath();ctx.strokeStyle='#8ca4ae';ctx.lineWidth=1.1;ctx.moveTo(nowX,top);ctx.lineTo(nowX,h-bottom);ctx.stroke();
+  ctx.fillStyle='#d1a063';ctx.font='10px system-ui';
+  ctx.fillText('SETTLEMENT AVG',Math.max(nowX+3,plotRight-95),top+13);
+  function line(series,color,width,dashes,maxGap,limitX){
+   ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.setLineDash(dashes||[]);
    let prev=null;
    for(const [t,p] of series){
-    if(prev!==null&&t-prev>20)ctx.moveTo(X(t),Y(p));
-    else if(prev===null)ctx.moveTo(X(t),Y(p));else ctx.lineTo(X(t),Y(p));
+    if(!finite(t)||!finite(p)||p<=0||t<start||t>m.end)continue;
+    const x=X(t),y=Y(p);
+    if(prev===null||t-prev>maxGap)ctx.moveTo(x,y);else ctx.lineTo(x,y);
     prev=t;
    }
    ctx.stroke();ctx.setLineDash([]);
   }
-  if(m.target!==null)line([[m.start,m.target],[m.end,m.target]],'#d8e1e8',1.4,[5,5]);
-  line(m.points,'#61c2ff',2.2);
-  const last=m.points[m.points.length-1];
-  ctx.beginPath();ctx.arc(X(last[0]),Y(last[1]),3.2,0,Math.PI*2);ctx.fillStyle='#61c2ff';ctx.fill();
-  if(m.projected!==null){
-   line([last,[m.end,m.projected]],'#ffb44a',1.7,[3,5]);
+  // A dashed horizontal official price to beat, not the spot price.
+  if(m.target!==null)line([[start,m.target],[m.end,m.target]],'#dfe5ee',1.4,[6,5],4000);
+  for(const v of visibleVenues){
+   ctx.globalAlpha=.57;line(v.points,v.color,1.0,[],50);ctx.globalAlpha=1;
   }
-  ctx.fillStyle='#d4e8f7';ctx.font='10px system-ui';
-  ctx.fillText('BRTI '+money(last[1]),13,13);
-  if(m.target!==null)ctx.fillText('Target '+money(m.target),Math.max(9,w-140),13);
-  if(m.projected!==null)status.textContent='LIVE · final average projection shown as dotted guide';
+  line(source,'#5fcfff',2.8,[],20);
+  if(m.projected!==null)line([last,[m.end,m.projected]],'#ff9e26',2.5,[4,6],4000);
+  ctx.beginPath();ctx.arc(X(last[0]),Y(last[1]),4,0,Math.PI*2);ctx.fillStyle='#5fcfff';ctx.fill();
+  if(m.projected!==null){ctx.beginPath();ctx.arc(plotRight,Y(m.projected),4,0,Math.PI*2);ctx.fillStyle='#ff9e26';ctx.fill();}
+  // Keep price markers readable even when current, target and forecast overlap.
+  const markers=[{label:'BRTI',price:last[1],fill:'#64c9f9',ink:'#061627'}];
+  if(m.target!==null)markers.push({label:'TARGET',price:m.target,fill:'#edf2f8',ink:'#15202d'});
+  if(m.projected!==null)markers.push({label:'AVG',price:m.projected,fill:'#ffac39',ink:'#241709'});
+  markers.sort((a,b)=>Y(a.price)-Y(b.price));
+  let prior=-99;
+  for(const item of markers){
+   const y0=Y(item.price),y=Math.max(top+10,Math.min(h-bottom-10,Math.max(y0,prior+19)));
+   prior=y;ctx.fillStyle=item.fill;ctx.fillRect(plotRight+2,y-9,right-5,18);
+   ctx.fillStyle=item.ink;ctx.font='bold 10px ui-monospace,monospace';
+   ctx.fillText(money(item.price),plotRight+5,y+3);
+  }
+  ctx.fillStyle='#b4e2f6';ctx.font='bold 11px system-ui';
+  ctx.fillText('BRTI '+money(last[1]),left+2,top-7);
+  status.textContent='LIVE · '+(selected==='round'?'this round':selected)+' · '+(visibleVenues.length||0)+' exchange overlays'+(m.projected!==null?' · forecast guide':'');
+  if(overlayLegend)overlayLegend.textContent=(visibleVenues.length?visibleVenues.map(v=>v.name).join(' · '):'Exchange overlays collecting')+
+   ' · last-price samples, not the settlement index'+(hist&&hist.brti_coverage_seconds<((spans[selected]||now-m.start)-30)?' · history still accumulating':'')+
+   (selected!=='round'?' · future timeline compressed':'');
  }
  window.addEventListener('btc-status-updated',()=>draw());
  window.addEventListener('resize',()=>draw(true));
- document.addEventListener('visibilitychange',()=>{if(!document.hidden)draw(true)});
- draw(true);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden){draw(true);refreshHistory();}});
+ draw(true);refreshHistory();
+ if(typeof setInterval==='function')setInterval(()=>{if(!document.hidden)refreshHistory()},5000);
 })();
 </script><section class="card" id="crossExchangePanel" aria-label="Bitcoin exchange comparison and buy sell pressure">
  <div class="row" style="justify-content:space-between"><strong class="label">BTC EXCHANGE COMPARISON</strong><span id="crossFeedState" class="small">Checking venues</span></div>

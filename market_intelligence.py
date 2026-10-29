@@ -11,6 +11,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 import httpx
 from exchange_prices import fetch_snapshot, public_snapshot
+from market_chart_history import record_exchange
 
 FEEDS = [('CoinDesk','https://www.coindesk.com/arc/outboundfeeds/rss/'),
          ('Cointelegraph','https://cointelegraph.com/rss'),
@@ -161,6 +162,7 @@ async def refresh(client, include_news=True):
                            'exchanges':results[:2],'fetched_epoch':now,'window_seconds':180}
     _state['order_book']=results[2]
     _state['price_comparison']=results[3]
+    record_exchange(results[3],now)
     if include_news:
         items={};feeds=[]
         for headlines,health in results[4:]:

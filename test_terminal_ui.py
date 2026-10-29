@@ -110,6 +110,22 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("USDT", self.html)
         self.assertNotIn('id="costCalculate"', self.html)
 
+    def test_trading_style_chart_preserves_official_brtI_and_stored_exchange_samples(self):
+        self.assertIn('id="brtiRangeTabs"', self.html)
+        for period in ('round','30s','1m','2m','5m','30m','60m'):
+            self.assertIn('data-range="' + period + '"', self.html)
+        self.assertIn('id="brtiLineCanvas"', self.html)
+        self.assertIn('id="brtiOverlayLegend"', self.html)
+        self.assertIn('window.btcBrtiLineModel=model', self.html)
+        self.assertIn('window.btcChartSelectRange=onRange', self.html)
+        self.assertIn('fetch(\'/api/market-chart/history?range=\'+encodeURIComponent(requested)', self.html)
+        self.assertIn('SETTLEMENT AVG', self.html)
+        self.assertIn('m.target!==null', self.html)
+        self.assertIn("if(m.projected!==null)line([last,[m.end,m.projected]]", self.html)
+        self.assertNotIn('id="candleChart"', self.html)
+        self.assertNotIn("fetch('/api/candles'", self.html)
+        self.assertIn("if(typeof setInterval==='function')setInterval", self.html)
+
     def test_ai_scoreboard_explains_100_settled_calls(self):
         self.assertIn("LAST 100 SETTLED PREDICTIONS", self.html)
         self.assertIn("WINS · LAST 100", self.html)
