@@ -17,6 +17,7 @@ from forward_eval import evaluate_guarded
 from round_tiles import report as recent_round_tiles
 from quick_forecast import quick_forecast
 import five_min_monitor
+from checkpoint_scoreboard import build_scoreboard
 from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
 from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history, diagnostic_extras
@@ -1454,6 +1455,24 @@ def quick_accuracy_report():
  try:return first_five_quick_report()
  except Exception:return JSONResponse({"status":"unavailable",
    "error":"First-five-minute quick prediction database unavailable"},status_code=503)
+
+# Cached read-only checkpoint comparison; never alters frozen predictions.
+_checkpoint_display_cache={"updated":0,"data":None}
+
+@app.get("/api/checkpoint-scoreboard")
+def checkpoint_scoreboard_report():
+ try:
+  now=time.time()
+  if _checkpoint_display_cache["data"] is not None and now-_checkpoint_display_cache["updated"]<45:
+   return _checkpoint_display_cache["data"]
+  rows=iter_query_rows("""SELECT market,checkpoint,calls_json,winner FROM research_calls
+     WHERE winner IN ('UP','DOWN') ORDER BY created_at DESC LIMIT 1500""")
+  data=build_scoreboard(rows,five_min_monitor.report(execute))
+  data["updated_epoch"]=now
+  _checkpoint_display_cache.update(updated=now,data=data)
+  return data
+ except Exception:
+  return JSONResponse({"status":"unavailable","reason":"Verified checkpoint history unavailable"},status_code=503)
 
 @app.get("/api/status")
 def status():

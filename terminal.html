@@ -256,6 +256,22 @@ body:not(.show-advanced) #futureForecastCard p.small{display:none!important}
 #brtiLineLegend .target{background:repeating-linear-gradient(90deg,#d8e1e8 0 5px,transparent 5px 8px)}
 #brtiLineLegend .forecast{background:repeating-linear-gradient(90deg,#ffb44a 0 3px,transparent 3px 7px)}
 @media(max-width:390px){#brtiLineCanvas{height:200px}#brtiLineHead{font-size:10px}}
+</style><style>
+/* Read-only cross-venue comparisons; compact by default on iPhone. */
+#crossExchangePanel,#checkpointBoard{border-color:#36516a!important}
+#crossExchangePanel .xnums{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:10px 0}
+#crossExchangePanel .xnums>div{background:#0c192a;border:1px solid #31485b;border-radius:9px;padding:9px 6px;min-width:0}
+#crossExchangePanel .xnums strong{display:block;font-variant-numeric:tabular-nums;font-size:clamp(13px,3vw,20px);overflow-wrap:anywhere;margin-top:4px}
+#crossExchangePanel .xnums small{display:block;color:#aec1d4;font-size:10px;line-height:1.25}
+#crossExchangePanel .xtable,#checkpointBoard table{border-collapse:collapse;width:100%;font-size:11px;font-variant-numeric:tabular-nums}
+#crossExchangePanel .xtable td,#crossExchangePanel .xtable th,#checkpointBoard td,#checkpointBoard th{padding:8px 4px;text-align:left;border-bottom:1px solid #2c4357}
+#crossExchangePanel .xtable td:nth-child(2),#checkpointBoard td:not(:first-child){text-align:right}
+#crossExchangePanel .xtable th:nth-child(2),#checkpointBoard th:not(:first-child){text-align:right}
+#crossExchangePanel .xnote,#checkpointBoard .xnote{font-size:10px;line-height:1.5;color:#9bb2c9;margin-top:9px}
+#crossExchangePanel .xpressure{background:#0c1b2c;padding:10px;border-radius:9px;border:1px solid #2b4358;font-size:12px;margin:7px 0;line-height:1.6}
+#crossExchangePanel details,#checkpointBoard details{margin-top:10px}
+#crossExchangePanel summary,#checkpointBoard summary{font-size:12px;color:#a6d1f3;font-weight:700}
+#checkpointBoard .xempty{color:#e1bf72}
 </style></head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
 document.getElementById('advancedToggle').addEventListener('click',function(){
  const enabled=document.body.classList.toggle('show-advanced');
@@ -511,7 +527,28 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)draw(true)});
  draw(true);
 })();
-</script><section class="card" id="serverHistory"><div class="label">AI ACCURACY · LAST 100 SETTLED PREDICTIONS (15M)</div><div class="row"><span class="status" id="serverState">Connecting…</span><span class="small" id="serverCounts"></span></div><div class="result-grid" aria-label="Server prediction results"><div class="result-tile"><div class="result-number up" id="winCount">0</div><div class="result-label">WINS · LAST 100</div></div><div class="result-tile"><div class="result-number down" id="lossCount">0</div><div class="result-label">LOSSES · LAST 100</div></div><div class="result-tile"><div class="result-number wait" id="pendingCount">0</div><div class="result-label">PENDING · ALL</div></div><div class="result-tile"><div class="result-number" id="winRate">—</div><div class="result-label">LAST 100 ACCURACY</div></div></div><div class="small" id="winLossRatio" aria-live="polite">AI WIN/LOSS RATIO · —</div><div class="small" id="serverLatest" aria-live="polite">Checking saved predictions…</div><div class="result-foot" id="settlementInfo">Settlement verification: checking…</div><p class="small">Win/loss and accuracy use the 100 most recent settled 15-minute AI_REVIEW predictions (or fewer if not yet available). Pending predictions are counted separately and excluded from accuracy. Fallbacks are excluded. Older records remain stored for historical analysis; verified Polymarket settlement is required to score a prediction.</p></section><section class="card" id="peerBotsPanel"><div class="row" style="justify-content:space-between"><div class="label">BOT STRATEGY STUDIES · 15-MIN MARKET</div><span class="status">RESEARCH ONLY</span></div><div id="peerBotsLive" class="small">Waiting for fresh BTC exchange candles…</div><p class="small">MACD trend, Bollinger reversals, ATR breakouts and range/liquidity price action. These are independent public-indicator studies, not another trader's live signals. Compare their settled win rates and prediction coverage under Detailed logs.</p></section><script>(()=>{const $=id=>document.getElementById(id);function safeText(v){return String(v??'—')}
+</script><section class="card" id="crossExchangePanel" aria-label="Bitcoin exchange comparison and buy sell pressure">
+ <div class="row" style="justify-content:space-between"><strong class="label">BTC EXCHANGE COMPARISON</strong><span id="crossFeedState" class="small">Checking venues</span></div>
+ <div class="xnums">
+  <div><small>USD SPOT MEDIAN</small><strong id="crossMedian">—</strong></div>
+  <div><small>USD VENUE SPREAD</small><strong id="crossSpread">—</strong></div>
+  <div><small>BRTI VS USD MEDIAN</small><strong id="crossBRTI">—</strong></div>
+ </div>
+ <div id="crossPressure" class="xpressure">Coinbase/Kraken trade pressure: waiting for sampled buyer/seller initiated trades</div>
+ <div id="crossBook" class="small">Kraken order-book depth: checking</div>
+ <details id="crossVenues"><summary>Show prices and feed health by exchange</summary>
+  <table class="xtable"><thead><tr><th>Source / quote</th><th>Last price</th><th>Feed</th></tr></thead><tbody id="crossExchangeRows"></tbody></table>
+  <div id="crossUsdt" class="xnote">BTC/USDT quotations are separated from BTC/USD.</div>
+ </details>
+ <div class="xnote">Exchange prices confirm broader spot movement but do not replace Polymarket's official BRTI settlement. HTTP response does not prove a recent executed trade. Unavailable and outlier feeds are excluded.</div>
+</section>
+<section class="card" id="checkpointBoard" aria-label="Independently graded Bitcoin checkpoint accuracy">
+ <div class="row" style="justify-content:space-between"><strong class="label">MODEL CHECKPOINT SCOREBOARD</strong><span id="checkpointUpdated" class="small">Reading verified settlements</span></div>
+ <table><thead><tr><th>Forecast / checkpoint</th><th>Wins / calls</th><th>Accuracy</th></tr></thead><tbody id="checkpointRows"><tr><td>Awaiting official settlement history</td><td>—</td><td>—</td></tr></tbody></table>
+ <div id="lateCheckpointAudit" class="xnote">Strict 5-minute 2:30 scoring is separate from legacy late calls.</div>
+ <div class="xnote">Timing matters: later predictions have more information and are not directly comparable to early ones. Only frozen calls with verified settlements are scored; no calibration or profitable trading is implied.</div>
+</section>
+<section class="card" id="serverHistory"><div class="label">AI ACCURACY · LAST 100 SETTLED PREDICTIONS (15M)</div><div class="row"><span class="status" id="serverState">Connecting…</span><span class="small" id="serverCounts"></span></div><div class="result-grid" aria-label="Server prediction results"><div class="result-tile"><div class="result-number up" id="winCount">0</div><div class="result-label">WINS · LAST 100</div></div><div class="result-tile"><div class="result-number down" id="lossCount">0</div><div class="result-label">LOSSES · LAST 100</div></div><div class="result-tile"><div class="result-number wait" id="pendingCount">0</div><div class="result-label">PENDING · ALL</div></div><div class="result-tile"><div class="result-number" id="winRate">—</div><div class="result-label">LAST 100 ACCURACY</div></div></div><div class="small" id="winLossRatio" aria-live="polite">AI WIN/LOSS RATIO · —</div><div class="small" id="serverLatest" aria-live="polite">Checking saved predictions…</div><div class="result-foot" id="settlementInfo">Settlement verification: checking…</div><p class="small">Win/loss and accuracy use the 100 most recent settled 15-minute AI_REVIEW predictions (or fewer if not yet available). Pending predictions are counted separately and excluded from accuracy. Fallbacks are excluded. Older records remain stored for historical analysis; verified Polymarket settlement is required to score a prediction.</p></section><section class="card" id="peerBotsPanel"><div class="row" style="justify-content:space-between"><div class="label">BOT STRATEGY STUDIES · 15-MIN MARKET</div><span class="status">RESEARCH ONLY</span></div><div id="peerBotsLive" class="small">Waiting for fresh BTC exchange candles…</div><p class="small">MACD trend, Bollinger reversals, ATR breakouts and range/liquidity price action. These are independent public-indicator studies, not another trader's live signals. Compare their settled win rates and prediction coverage under Detailed logs.</p></section><script>(()=>{const $=id=>document.getElementById(id);function safeText(v){return String(v??'—')}
 let statusInFlight=false;
 function renderPersistentSignals(d){
  const el=id=>document.getElementById(id), ext=d.external||{}, quality=ext.signal_quality||{};
@@ -716,7 +753,83 @@ document.getElementById('intelNewsStatus').textContent='News: '+(news.status||'u
 const headlines=document.getElementById('intelHeadlines');headlines.replaceChildren();for(const h of news.headlines||[]){const line=document.createElement('div'),link=document.createElement('a');line.style.cssText='padding:8px 0;border-top:1px solid #2a3e55';link.textContent=h.title;try{const url=new URL(h.url);if(!['https:','http:'].includes(url.protocol))continue;link.href=url.href}catch(e){continue}link.target='_blank';link.rel='noopener noreferrer';line.append(link,document.createTextNode(' · '+h.source+' · '+new Date(h.published_at).toLocaleString()));headlines.append(line)}
 const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').textContent='LAST 100 SETTLED · WIN '+(counts.WIN||0)+' · LOSS '+(counts.LOSS||0)+' · PENDING (ALL) '+(counts.PENDING||0);const log=document.getElementById('aiLogRows');log.replaceChildren();for(const x of (d.ai_decision_history||[]).slice(0,12)){const line=document.createElement('div');line.style.cssText='padding:8px 0;border-top:1px solid #2a3e55;line-height:1.5';line.textContent=(x.direction||'?')+' · '+(x.result||'PENDING')+' · '+(x.confidence||'UNRATED')+' · '+(x.source||'UNKNOWN')+' · '+(x.created_at||'')+' — '+(x.reason||'');log.append(line)};const verdict=a.status==='ready'?(a.verdict||'WAIT'):(a.status||'NOT CONFIGURED').replaceAll('_',' ').toUpperCase();const el=document.getElementById('aiVerdict');el.textContent=verdict;el.style.color=verdict==='UP'?'#3de5a5':verdict==='DOWN'?'#ff7777':'#a6b6cb';document.getElementById('aiReason').textContent=(a.confidence?'Confidence: '+a.confidence+' · ':'')+(a.reason||'AI prediction is waiting for valid server-side data.');let stamp=Date.parse(d.updated||''),lastAI=Number(a.updated_epoch||a.captured_epoch||0)*1000;let stale=a.status==='ready'&&(!d.market||a.market!==d.market||!String(a.market).includes('btc-updown-15m-')||!Number.isFinite(stamp)||Date.now()-stamp>45000||!lastAI||Date.now()-lastAI>180000);document.getElementById('aiMeta').textContent=(a.model||'AI')+' · '+(a.market||'No round')+' · '+(a.phase||'')+(stale?' · STALE OR PREVIOUS ROUND — NOT CURRENT':'')+' · Research only; no automatic orders.';if(stale){el.textContent='STALE / WAIT';el.style.color='#ffbd5a'}}catch(e){document.getElementById('aiVerdict').textContent='UNAVAILABLE';document.getElementById('aiReason').textContent='Could not reach AI confirmation on Render.'}}pollAI();setInterval(()=>{if(!document.hidden)pollAI()},20000)})();</script>
 <section class="card terminal-secondary"><div class="label">WHAT NEWS INFLUENCED THE AI?</div><div id="newsInfluence" style="margin-top:10px"></div></section>
-<section class="card" id="researchDashboard"><div class="row" style="justify-content:space-between"><div class="label">FORWARD COMPARISON LOG · 15-MINUTE MARKETS</div><a href="/api/research.csv">Download CSV + evidence</a></div><p class="small" id="researchAsOf">Collecting new observations…</p><p class="small" id="researchError" aria-live="polite"></p><div class="research-scroll" id="strategyTable"></div><p class="small">AI, selective indicators, forced indicator direction, and the current target side share the same saved data snapshot. AI failures are marked no call. Outcomes require official settlement.</p><p class="small">* Paper P&amp;L assumes 100 contracts, 0.5¢ adverse slippage per contract, the recorded top-of-book quote and standard US taker fee. Only calls with valid quotes are priced. No actual trades, rebates, fill-depth guarantees or profitability claims.</p><details open><summary>AI confidence scorecard</summary><div class="research-scroll" id="confidenceTable"></div><p class="small">Confidence is the model's label, not a calibrated probability. Small samples and dependence between rounds limit conclusions.</p></details><details><summary>Earlier logged halfway AI confidence</summary><div class="research-scroll" id="priorConfidence"></div><p class="small">Earlier genuine AI calls only; these do not have matched baseline snapshots.</p></details><details open><summary>Does AI beat the baselines at the same time?</summary><div class="research-scroll" id="pairedTable"></div></details><details><summary>Recent saved calls and news attribution</summary><div id="researchRecent"></div></details></section><script>
+<script>
+(()=>{
+ const el=id=>document.getElementById(id);
+ const money=x=>String.fromCharCode(36)+Number(x).toLocaleString('en-US',{maximumFractionDigits:2,minimumFractionDigits:2});
+ const fnum=x=>typeof x==='number'&&Number.isFinite(x);
+ function put(id,text){const x=el(id);if(x)x.textContent=text}
+ function renderExchange(){
+  const d=window.btcServerStatus||{},intel=d.external?.external_intelligence||{},comparison=intel.price_comparison||{};
+  const age=Date.now()/1000-Number(comparison.as_of_epoch);
+  const fresh=Number.isFinite(age)&&age>=-5&&age<=45&&comparison.status!=='stale';
+  const usd=fresh?comparison.usd||{}:{};
+  const usdt=fresh?comparison.usdt||{}:{};
+  const validUsd=usd.status==='available'&&fnum(usd.median)&&usd.source_count>=3;
+  put('crossFeedState',validUsd?'USD quotes · '+usd.source_count+' venues · '+Math.max(0,Math.round(age))+'s sample age':'Insufficient fresh USD venues');
+  put('crossMedian',validUsd?money(usd.median):'—');
+  put('crossSpread',validUsd?money(usd.spread_usd)+' · '+usd.spread_bps+'bp':'—');
+  const brti=d.reference_price||{},brtiAge=Date.now()/1000-Number(brti.price_epoch);
+  const aligned=validUsd&&d.status==='running'&&brti.status==='fresh'&&fnum(brti.price)&&Number.isFinite(brtiAge)&&brtiAge>=-5&&brtiAge<=15;
+  put('crossBRTI',aligned?(brti.price-usd.median>=0?'+':'')+money(brti.price-usd.median):'—');
+  if(!fresh){put('crossPressure','Trade-flow and venue snapshots unavailable or stale');put('crossBook','Order-book data unavailable');el('crossExchangeRows')?.replaceChildren();return;}
+  const flow=intel.trade_flow||{},book=intel.order_book||{};
+  const samples=(flow.status==='available'?flow.exchanges||[]:[]).filter(x=>x.status==='fresh'&&Number(x.age_seconds)<=45);
+  const buys=samples.reduce((n,x)=>n+Math.max(0,Number(x.buy_usd)||0),0);
+  const sells=samples.reduce((n,x)=>n+Math.max(0,Number(x.sell_usd)||0),0);
+  const total=buys+sells,net=total>0?100*(buys-sells)/total:null;
+  const name=samples.map(x=>x.source).join(' + ');
+  put('crossPressure',net===null?'BUY/SELL PRESSURE · No fresh verified initiator-side trades':
+   'BUY/SELL PRESSURE · '+(net>=0?'+':'')+net.toFixed(1)+'% net buyer-initiated · '+name+
+   ' · '+money(buys)+' buys / '+money(sells)+' sells (sampled, not global volume)');
+  put('crossBook',book.status==='fresh'&&Number(book.age_seconds)<=60&&fnum(book.imbalance)?
+   'KRAKEN BOOK DEPTH · '+(book.imbalance>=0?'+':'')+(book.imbalance*100).toFixed(1)+'% bid-ask imbalance · resting orders, not trades':
+   'KRAKEN BOOK DEPTH · Unavailable or stale');
+  const body=el('crossExchangeRows');if(body){
+   body.replaceChildren();
+   for(const row of comparison.exchanges||[]){
+    const tr=document.createElement('tr');
+    const first=document.createElement('td');first.textContent=row.source+' · '+row.quote;
+    const price=document.createElement('td');price.textContent=row.status==='responding'&&fnum(row.price)?money(row.price):'—';
+    const state=document.createElement('td');
+    state.textContent=row.status==='responding'?(row.trade_timestamp_verified?'Tick observed':'Quote fetched'):row.status||'unavailable';
+    tr.append(first,price,state);body.append(tr);
+   }
+  }
+  put('crossUsdt',usdt.median?'BTC/USDT · separate median '+money(usdt.median)+' across '+usdt.source_count+' venues; USDT ≠ guaranteed USD parity.':
+   'BTC/USDT · separate quote group; no qualified samples');
+ }
+ window.addEventListener('btc-status-updated',renderExchange);
+ renderExchange();
+ let loading=false;
+ async function refreshScoreboard(){
+  if(loading||document.hidden)return;loading=true;
+  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),7000);
+  try{
+   const res=await fetch('/api/checkpoint-scoreboard',{cache:'no-store',signal:ctrl.signal});
+   if(!res.ok)throw Error('Scoreboard HTTP '+res.status);
+   const data=await res.json();
+   if(data.status!=='available')throw Error('Scores unavailable');
+   const rows=el('checkpointRows');rows.replaceChildren();
+   const add=(title,item)=>{
+    const tr=document.createElement('tr'),td=document.createElement('td'),n=document.createElement('td'),rate=document.createElement('td');
+    td.textContent=title;n.textContent=item.graded?item.wins+'/'+item.graded:'—';
+    rate.textContent=item.graded?item.accuracy_pct+'%':'Not graded';
+    if(!item.graded)rate.className='xempty';
+    tr.append(td,n,rate);rows.append(tr);
+   };
+   for(const entry of data.fifteen||[])add('15m '+entry.label+' · '+(entry.method==='PRICE_PATH'?'Price path':'AI'),entry);
+   for(const entry of data.five||[])add('5m '+entry.label,entry);
+   const audit=data.late_audit||{};
+   put('lateCheckpointAudit','Strict 2:30 audit · '+(audit.within_window||0)+' within window / '+(audit.sampled||0)+' sampled; earlier/later captures excluded. The 5-minute late panel shows independently verified calls only.');
+   put('checkpointUpdated','Last 100 settled per checkpoint (or fewer)');
+  }catch(e){put('checkpointUpdated','Verified grading temporarily unavailable');}
+  finally{clearTimeout(timer);loading=false}
+ }
+ refreshScoreboard();setInterval(refreshScoreboard,45000);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshScoreboard()});
+})();
+</script><section class="card" id="researchDashboard"><div class="row" style="justify-content:space-between"><div class="label">FORWARD COMPARISON LOG · 15-MINUTE MARKETS</div><a href="/api/research.csv">Download CSV + evidence</a></div><p class="small" id="researchAsOf">Collecting new observations…</p><p class="small" id="researchError" aria-live="polite"></p><div class="research-scroll" id="strategyTable"></div><p class="small">AI, selective indicators, forced indicator direction, and the current target side share the same saved data snapshot. AI failures are marked no call. Outcomes require official settlement.</p><p class="small">* Paper P&amp;L assumes 100 contracts, 0.5¢ adverse slippage per contract, the recorded top-of-book quote and standard US taker fee. Only calls with valid quotes are priced. No actual trades, rebates, fill-depth guarantees or profitability claims.</p><details open><summary>AI confidence scorecard</summary><div class="research-scroll" id="confidenceTable"></div><p class="small">Confidence is the model's label, not a calibrated probability. Small samples and dependence between rounds limit conclusions.</p></details><details><summary>Earlier logged halfway AI confidence</summary><div class="research-scroll" id="priorConfidence"></div><p class="small">Earlier genuine AI calls only; these do not have matched baseline snapshots.</p></details><details open><summary>Does AI beat the baselines at the same time?</summary><div class="research-scroll" id="pairedTable"></div></details><details><summary>Recent saved calls and news attribution</summary><div id="researchRecent"></div></details></section><script>
 /* Arrange existing live widgets into the requested chart-first terminal layout.
    Move DOM nodes rather than duplicate them, preserving live update handlers. */
 (()=>{
@@ -736,9 +849,12 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  for(const id of ['fastPanel','strongPanel','final15Panel']){const panel=document.getElementById(id);if(panel)cards.append(panel)}
  const primary=document.getElementById('currentSignal')?.closest('.card');if(primary){primary.id='primaryPanel';cards.append(primary)}
  const forecast=document.getElementById('futureForecastCard'),history=document.getElementById('serverHistory');
+ const exchanges=document.getElementById('crossExchangePanel'),checkpoint=document.getElementById('checkpointBoard');
  if(forecast)cards.insertAdjacentElement('afterend',forecast);
- if(history)(forecast||cards).insertAdjacentElement('afterend',history);
- if(ai)(history||forecast||cards).insertAdjacentElement('afterend',ai);
+ if(exchanges)(forecast||cards).insertAdjacentElement('afterend',exchanges);
+ if(history)(exchanges||forecast||cards).insertAdjacentElement('afterend',history);
+ if(checkpoint)(history||exchanges||forecast||cards).insertAdjacentElement('afterend',checkpoint);
+ if(ai)(checkpoint||history||exchanges||forecast||cards).insertAdjacentElement('afterend',ai);
  const pattern=document.getElementById('patternPanel');
  let patternFold=null;
  if(pattern){
