@@ -34,6 +34,7 @@ except ImportError:
 # Fixed requested cadence also overrides legacy Render POLL_SECONDS=15 settings.
 POLL = 5
 DB = os.getenv("DATABASE_URL", "")
+_history_write_version=0
 state = {"status":"starting","signal":"WAIT","flip":"WAIT","market":None,"updated":None,"error":None}
 @contextmanager
 def connect():
@@ -46,11 +47,18 @@ def connect():
   raise
  finally:c.close()
 def execute(sql, params=(), fetch=False):
+ global _history_write_version
  with connect() as c:
   if DB: sql = sql.replace("?", "%s")
   cur = c.cursor()
   try:
    cur.execute(sql, params)
+   # Invalidate cached grading only after writes to the underlying scoring tables.
+   # This avoids serving stale counts immediately after a settlement or new call.
+   operation=sql.lstrip().split(None,1)[0].upper() if sql.strip() else ""
+   if operation in ("INSERT","UPDATE","DELETE","REPLACE","CREATE","DROP","ALTER") and any(
+      name in sql.lower() for name in ("signals","ai_decisions","five_min_","research_calls")):
+    _history_write_version+=1
    if fetch: return cur.fetchall()
   finally:
    cur.close()
@@ -1463,7 +1471,7 @@ def lightweight_live():
          "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),"settlement_task_error":state.get("settlement_task_error"),
          "server_epoch":time.time()}
 
-_round_tiles_cache={"at":0.0,"data":None,"execute_id":None}
+_round_tiles_cache={"at":0.0,"data":None,"execute_id":None,"write_version":None}
 _round_tiles_lock=_HistoryLock()
 @app.get("/api/round-tiles")
 def round_tiles_report():
@@ -1471,21 +1479,21 @@ def round_tiles_report():
  try:
   now=time.monotonic()
   with _round_tiles_lock:
-   if _round_tiles_cache["data"] is None or _round_tiles_cache["execute_id"]!=id(execute) or now-_round_tiles_cache["at"]>30:
-    _round_tiles_cache.update(data=recent_round_tiles(execute),at=now,execute_id=id(execute))
+   if _round_tiles_cache["data"] is None or _round_tiles_cache["execute_id"]!=id(execute) or _round_tiles_cache["write_version"]!=_history_write_version or now-_round_tiles_cache["at"]>30:
+    _round_tiles_cache.update(data=recent_round_tiles(execute),at=now,execute_id=id(execute),write_version=_history_write_version)
    return _round_tiles_cache["data"]
  except Exception:
   return JSONResponse({"status":"unavailable","reason":"Verified round history database unavailable"},status_code=503)
 
-_five_accuracy_cache={"at":0.0,"report":None,"execute_id":None}
+_five_accuracy_cache={"at":0.0,"report":None,"execute_id":None,"write_version":None}
 _five_accuracy_lock=_HistoryLock()
 @app.get("/api/five-minute")
 def five_minute_report():
  try:
   now=time.monotonic()
   with _five_accuracy_lock:
-   if _five_accuracy_cache["report"] is None or _five_accuracy_cache["execute_id"]!=id(execute) or now-_five_accuracy_cache["at"]>=15:
-    _five_accuracy_cache.update(report=five_min_monitor.report(execute),at=now,execute_id=id(execute))
+   if _five_accuracy_cache["report"] is None or _five_accuracy_cache["execute_id"]!=id(execute) or _five_accuracy_cache["write_version"]!=_history_write_version or now-_five_accuracy_cache["at"]>=15:
+    _five_accuracy_cache.update(report=five_min_monitor.report(execute),at=now,execute_id=id(execute),write_version=_history_write_version)
    accuracy=_five_accuracy_cache["report"]
   return {"live":dict(five_min_monitor.state),"accuracy":accuracy}
  except Exception:return JSONResponse({"status":"unavailable","reason":"Five-minute database unavailable"},status_code=503)
@@ -1516,13 +1524,13 @@ def checkpoint_scoreboard_report():
 
 # The historical scoreboard does not change every second; cache SQL reads while
 # keeping state/AI connection information refreshed on each dashboard request.
-_status_cache={"at":0.0,"data":None,"execute_id":None}
+_status_cache={"at":0.0,"data":None,"execute_id":None,"write_version":None}
 _status_cache_lock=_HistoryLock()
 
 def _read_status_history():
  now=time.monotonic()
  with _status_cache_lock:
-  if _status_cache["data"] is not None and _status_cache["execute_id"]==id(execute) and now-_status_cache["at"]<12:
+  if _status_cache["data"] is not None and _status_cache["execute_id"]==id(execute) and _status_cache["write_version"]==_history_write_version and now-_status_cache["at"]<12:
    return _status_cache["data"]
   rows=execute("SELECT result,COUNT(*) FROM signals WHERE phase='FINAL_15M' GROUP BY result",fetch=True)
   recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason,decision_source,decision_reason,ai_confidence FROM signals WHERE phase='FINAL_15M' ORDER BY created_at DESC LIMIT 50",fetch=True)
@@ -1547,7 +1555,7 @@ def _read_status_history():
                   "basis":"Most recent 100 settled genuine AI_REVIEW FINAL_15M predictions; pending calls excluded",
                   "unverified":pending}
   data={"counts":dict(rows),"ai_decision_counts":verified_counts,"ai_verified_counts":verified_counts,"ai_performance":ai_performance,"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
-  _status_cache.update(data=data,at=time.monotonic(),execute_id=id(execute))
+  _status_cache.update(data=data,at=time.monotonic(),execute_id=id(execute),write_version=_history_write_version)
   return data
 
 @app.get("/api/status")
