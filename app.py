@@ -765,6 +765,23 @@ def outcome_feedback(market):
  _outcome_feedback_cache.clear();_outcome_feedback_cache[market]=(time.time(),feedback)
  return feedback
 
+_feedback_task=None
+
+def live_outcome_feedback(market):
+ """Use same-round cached learning without delaying fresh price acquisition."""
+ global _feedback_task
+ cached=_outcome_feedback_cache.get(market)
+ if (not cached or time.time()-cached[0]>=60) and (_feedback_task is None or _feedback_task.done()):
+  async def refresh():
+   try:
+    await asyncio.to_thread(outcome_feedback,market)
+    state["feedback_error"]=None
+   except Exception as exc:
+    state["feedback_error"]=type(exc).__name__
+  _feedback_task=track_prediction(asyncio.create_task(refresh()))
+ return cached[1] if cached else {"status":"collecting","excluded_market":market,
+  "reason":"Historical learning is refreshing independently of live prices"}
+
 async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,market):
  key=slug+":"+checkpoint
  if (await asyncio.to_thread(execute, "SELECT id FROM research_calls WHERE id=?",(key,),fetch=True)):return
@@ -900,7 +917,7 @@ async def loop():
      phase="EARLY" if left15>450 else "LATE" if left15<=180 else "MID"
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(left15),market=slug,external=d,updated=now,error=None)
      state["final_15m"]={"market":slug,"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
-     try:d["outcome_feedback"]=(await asyncio.to_thread(outcome_feedback, slug))
+     try:d["outcome_feedback"]=live_outcome_feedback(slug)
      except Exception:d["outcome_feedback"]={"status":"unavailable"}
      terms=fifteen.get("assetPriceTerms") or {}
      ptb=terms.get("priceToBeat") or {}
@@ -1490,18 +1507,11 @@ def round_tiles_report():
  except Exception:
   return JSONResponse({"status":"unavailable","reason":"Verified round history database unavailable"},status_code=503)
 
-_five_accuracy_cache={"at":0.0,"report":None,"execute_id":None,"write_version":None}
-_five_accuracy_lock=_HistoryLock()
 @app.get("/api/five-minute")
 def five_minute_report():
- try:
-  now=time.monotonic()
-  with _five_accuracy_lock:
-   if _five_accuracy_cache["report"] is None or _five_accuracy_cache["execute_id"]!=id(execute) or _five_accuracy_cache["write_version"]!=_history_write_version or now-_five_accuracy_cache["at"]>=15:
-    _five_accuracy_cache.update(report=five_min_monitor.report(execute),at=now,execute_id=id(execute),write_version=_history_write_version)
-   accuracy=_five_accuracy_cache["report"]
-  return {"live":dict(five_min_monitor.state),"accuracy":accuracy}
- except Exception:return JSONResponse({"status":"unavailable","reason":"Five-minute database unavailable"},status_code=503)
+ """Serve the worker's published snapshot; HTTP polling never repeats SQL."""
+ live=dict(five_min_monitor.state)
+ return {"live":live,"accuracy":live.get("accuracy") or {"status":"collecting"}}
 
 @app.get("/api/quick-accuracy")
 def quick_accuracy_report():
