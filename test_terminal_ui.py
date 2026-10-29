@@ -124,7 +124,19 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("if(m.projected!==null)line([last,[m.end,m.projected]]", self.html)
         self.assertNotIn('id="candleChart"', self.html)
         self.assertNotIn("fetch('/api/candles'", self.html)
-        self.assertIn("if(typeof setInterval==='function')setInterval", self.html)
+        self.assertIn("if(typeof setInterval==='function'){", self.html)
+
+    def test_chart_one_second_ticks_and_fast_default_ui(self):
+        self.assertIn("fetch('/api/market-chart/tip'",self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},1000)",self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)draw()},1000)",self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshHistory()},10000)",self.html)
+        self.assertIn("if(!force&&nowMillis-lastDraw<950)return",self.html)
+        self.assertIn("data.source!=='Polymarket US BTC reference / BRTI'",self.html)
+        self.assertIn("tipMarket!==d.market",self.html)
+        self.assertIn("tipBusy||typeof fetch!=='function'",self.html)
+        self.assertIn("document.body.classList.contains('show-advanced')",self.html)
+        self.assertIn("const legacyActive=()=>!document.hidden",self.html)
 
     def test_ai_scoreboard_explains_100_settled_calls(self):
         self.assertIn("LAST 100 SETTLED PREDICTIONS", self.html)
