@@ -70,6 +70,21 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("if(fiveBusy||document.hidden)return", self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)refreshFive()},2000)", self.html)
 
+    def test_mobile_layout_uses_compact_order_and_expands_advanced_evidence(self):
+        self.assertIn('id="mainTitle"', self.html)
+        self.assertIn('id="mainSubtitle"', self.html)
+        self.assertIn("chart.insertAdjacentElement('beforebegin',title)", self.html)
+        self.assertIn("if(forecast)cards.insertAdjacentElement('afterend',forecast)", self.html)
+        self.assertIn("if(history)(forecast||cards).insertAdjacentElement('afterend',history)", self.html)
+        self.assertIn("if(flip){flip.id='flipPanel';panel.insertAdjacentElement('afterend',flip);}", self.html)
+        self.assertIn("patternFold=document.createElement('details')", self.html)
+        self.assertIn("disclosure.id='fivePathDetails'", self.html)
+        self.assertIn("if(!el('fivePathDetails')?.open)", self.html)
+        self.assertIn("const shell=document.createElement('details');shell.className='verified-rounds'", self.html)
+        self.assertIn("body:not(.show-advanced) #marketDataPanel", self.html)
+        self.assertIn("body:not(.show-advanced) #dataDiagnosticsPanel", self.html)
+        self.assertNotIn("body:not(.show-advanced) .terminal-secondary,\\n\\n#advancedToggle", self.html)
+
     def test_ai_scoreboard_explains_100_settled_calls(self):
         self.assertIn("LAST 100 SETTLED PREDICTIONS", self.html)
         self.assertIn("WINS · LAST 100", self.html)
