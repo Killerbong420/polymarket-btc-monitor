@@ -38,10 +38,18 @@ async function flush(){for(let i=0;i<8;i++)await Promise.resolve()}
 // Round forecasts must disappear on stale data, mismatched markets and rollover.
 {
  const roundScript=scripts.find(s=>s.includes('window.btcRoundChartModel=model'));
- const roundWindow={devicePixelRatio:1},drawing=[],note={};
+ // The real browser supplies window events; the isolated chart VM must
+ // model them so the Polymarket summary listener can be regression-tested.
+ const roundListeners={},roundElements=new Map(),drawing=[],note={};
+ const roundWindow={devicePixelRatio:1,addEventListener:(name,fn)=>roundListeners[name]=fn};
  const ctx=new Proxy({}, {get:(_,key)=>(...args)=>drawing.push([key,...args])});
  const canvas={parentElement:{getBoundingClientRect:()=>({width:390,height:380})},getContext:()=>ctx};
- const doc={getElementById:id=>id==='chart15'?{classList:{contains:()=>true}}:note};
+ const doc={getElementById:id=>{
+  if(id==='chart15')return {classList:{contains:()=>true}};
+  if(id==='roundChartNote')return note;
+  if(!roundElements.has(id))roundElements.set(id,{textContent:'',className:''});
+  return roundElements.get(id);
+ }};
  vm.runInNewContext(roundScript,{window:roundWindow,document:doc,Date});
  const now=Date.now()/1000,start=now-300,end=start+900;
  const points=Array.from({length:100},(_,i)=>[start+i*3,81040-i*.27+Math.sin(i/4)*3]);
@@ -55,6 +63,19 @@ async function flush(){for(let i=0;i<8;i++)await Promise.resolve()}
  assert.equal(model({...d,settlement_forecast:{...d.settlement_forecast,target_usd:80000}},now).forecast,null);
  assert.equal(model({...d,reference_price:{...d.reference_price,status:'stale'}},now).forecast,null);
  roundWindow.btcServerStatus=d;
+ assert.equal(typeof roundListeners['btc-status-updated'],'function');
+ roundListeners['btc-status-updated']();
+ assert.equal(roundElements.get('pmApiFeed').textContent,'REFERENCE STALE');
+ assert.equal(roundElements.get('pmApiTarget').textContent,'—');
+ // Only a fresh, market-matched BRTI tick plus a verified official target
+ // can produce the LIVE label. Exchange spot must never be substituted.
+ roundWindow.btcServerStatus={...d,
+  reference_price:{...d.reference_price,price:81030,price_epoch:now,window_end:end},
+  target_behavior:{...d.target_behavior,status:'available'}};
+ roundListeners['btc-status-updated']();
+ assert.equal(roundElements.get('pmApiFeed').textContent,'LIVE · VERIFIED');
+ assert.equal(roundElements.get('pmApiTarget').textContent,'$81,041.00');
+ assert.equal(roundElements.get('pmApiPrice').textContent,'$81,030.00');
  assert.equal(roundWindow.drawBtcRoundChart(canvas,{bars:[],ema:true,candles:true}),true);
  assert.match(note.textContent,/illustrative guide/);
  assert.ok(drawing.length>100);
