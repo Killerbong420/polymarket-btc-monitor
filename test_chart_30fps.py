@@ -6,10 +6,13 @@ HTML = (Path(__file__).resolve().parent / "terminal.html").read_text(encoding="u
 
 
 class ChartThirtyFpsTests(unittest.TestCase):
-    def test_chart_uses_30fps_cap_and_animation_frames(self):
+    def test_chart_caps_event_driven_draws_without_idle_animation_loop(self):
         self.assertIn("nowMillis-lastDraw<1000/30", HTML)
-        self.assertIn("requestAnimationFrame(animate)", HTML)
-        self.assertIn("if(!document.hidden)draw();", HTML)
+        self.assertNotIn("requestAnimationFrame(animate)", HTML)
+        self.assertIn("setInterval(()=>{if(!document.hidden)draw()},1000)", HTML)
+        self.assertIn("window.addEventListener('btc-status-updated',()=>draw())", HTML)
+        self.assertIn("tipTicks=[...merged.entries()].sort((a,b)=>a[0]-b[0]).slice(-32);", HTML)
+        self.assertNotIn("lastDraw=0;status.textContent", HTML)
 
     def test_chart_preserves_one_second_verified_price_poll(self):
         self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},1000)", HTML)
