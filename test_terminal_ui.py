@@ -94,6 +94,22 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("body:not(.show-advanced) #dataDiagnosticsPanel", self.html)
         self.assertNotIn("body:not(.show-advanced) .terminal-secondary,\\n\\n#advancedToggle", self.html)
 
+    def test_verified_cross_exchange_consensus_and_checkpoints(self):
+        self.assertIn('id="crossExchangePanel"', self.html)
+        self.assertIn('id="crossMedian"', self.html)
+        self.assertIn('id="crossSpread"', self.html)
+        self.assertIn('id="crossBRTI"', self.html)
+        self.assertIn('id="crossExchangeRows"', self.html)
+        self.assertIn('id="crossPressure"', self.html)
+        self.assertIn('id="checkpointBoard"', self.html)
+        self.assertIn('id="checkpointRows"', self.html)
+        self.assertIn("fetch('/api/checkpoint-scoreboard'", self.html)
+        self.assertIn("window.addEventListener('btc-status-updated',renderExchange)", self.html)
+        self.assertIn("if(exchanges)(forecast||cards).insertAdjacentElement('afterend',exchanges)", self.html)
+        self.assertIn("if(checkpoint)(history||exchanges||forecast||cards).insertAdjacentElement('afterend',checkpoint)", self.html)
+        self.assertIn("USDT", self.html)
+        self.assertNotIn('id="costCalculate"', self.html)
+
     def test_ai_scoreboard_explains_100_settled_calls(self):
         self.assertIn("LAST 100 SETTLED PREDICTIONS", self.html)
         self.assertIn("WINS · LAST 100", self.html)
