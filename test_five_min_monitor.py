@@ -186,6 +186,46 @@ class OfficialPricePathPreviewTests(unittest.TestCase):
 
 
 
+class DiscoveryConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_standard_timeout_does_not_delay_independent_cpc_lookup(self):
+        class Response:
+            def __init__(self, status, body):
+                self.status_code, self.body = status, body
+            def json(self):
+                return self.body
+
+        class Client:
+            def __init__(self):
+                self.active = 0
+                self.peak = 0
+                self.calls = []
+            async def get(self, url, **kwargs):
+                self.calls.append((url, kwargs.get("timeout")))
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                # Both lookups must have started before either completes.
+                await asyncio.sleep(0)
+                self.active -= 1
+                slug = url.rsplit("/", 1)[-1]
+                if not slug.startswith("cpc-"):
+                    return Response(404, {})
+                return Response(200, {"event": {"markets": [{
+                    "slug": slug,
+                    "assetPriceTerms": {"indexSymbol": "BRTI",
+                                        "marketType": "ASSET_PRICE_MARKET_TYPE_UP_DOWN",
+                                        "priceToBeat": 81000}
+                }]}})
+
+        client = Client()
+        market, reason = await five.discover(client)
+        self.assertIsNone(reason)
+        self.assertEqual(client.peak, 2)
+        self.assertEqual(len(client.calls), 2)
+        self.assertTrue(all(timeout == 8 for _, timeout in client.calls))
+        self.assertTrue(market["slug"].startswith("cpc-btc-updown-5m-"))
+        self.assertEqual(market["assetPriceTerms"]["indexSymbol"], "BRTI")
+
+
 class CheckpointLoopTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.db=MemoryDB()
