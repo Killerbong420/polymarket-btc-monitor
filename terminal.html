@@ -849,9 +849,12 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  for(const id of ['fastPanel','strongPanel','final15Panel']){const panel=document.getElementById(id);if(panel)cards.append(panel)}
  const primary=document.getElementById('currentSignal')?.closest('.card');if(primary){primary.id='primaryPanel';cards.append(primary)}
  const forecast=document.getElementById('futureForecastCard'),history=document.getElementById('serverHistory');
+ const exchanges=document.getElementById('crossExchangePanel'),checkpoint=document.getElementById('checkpointBoard');
  if(forecast)cards.insertAdjacentElement('afterend',forecast);
- if(history)(forecast||cards).insertAdjacentElement('afterend',history);
- if(ai)(history||forecast||cards).insertAdjacentElement('afterend',ai);
+ if(exchanges)(forecast||cards).insertAdjacentElement('afterend',exchanges);
+ if(history)(exchanges||forecast||cards).insertAdjacentElement('afterend',history);
+ if(checkpoint)(history||exchanges||forecast||cards).insertAdjacentElement('afterend',checkpoint);
+ if(ai)(checkpoint||history||exchanges||forecast||cards).insertAdjacentElement('afterend',ai);
  const pattern=document.getElementById('patternPanel');
  let patternFold=null;
  if(pattern){
