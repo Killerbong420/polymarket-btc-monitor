@@ -193,7 +193,9 @@ class TerminalUITest(unittest.TestCase):
         self.assertNotIn("market value",tiles.lower())
 
     def test_live_feeds_are_started(self):
-        self.assertIn("connectStream('coinbase');connectStream('kraken');update()", self.html)
+        self.assertIn("if(legacyActive())startLegacy();else stopLegacy()", self.html)
+        self.assertIn("for(const which of ['coinbase','kraken'])", self.html)
+        self.assertIn("if(legacyActive())update()", self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},2000)", self.html)
         self.assertIn("renderPersistentSignals(d)", self.html)
         self.assertIn("window.btcPrimaryLocalLive=!!ok", self.html)
