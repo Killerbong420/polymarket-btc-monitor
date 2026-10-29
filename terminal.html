@@ -640,6 +640,9 @@ async function updateServer(){if(statusInFlight)return;statusInFlight=true;const
   if(!r.ok)throw Error('Live HTTP '+r.status);
   const live=await r.json();
   if(!live.updated)throw Error('No live heartbeat yet');
+  // Allow official BRTI graph and target updates even when DB history is slow.
+  window.btcServerStatus=live;
+  window.dispatchEvent(new Event('btc-status-updated'));
   renderPersistentSignals(live);
   renderFutureSettlement(live);
   renderPeerBots(live);
