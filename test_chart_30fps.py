@@ -16,6 +16,16 @@ class ChartThirtyFpsTests(unittest.TestCase):
         self.assertIn("data.source!=='Polymarket US BTC reference / BRTI'", HTML)
         self.assertIn("if(!verified.length)return;", HTML)
 
+    def test_verified_chart_tip_can_outlive_slow_dashboard_status(self):
+        # The chart has its own verified one-second feed. A slow /api/status
+        # heartbeat must not hide newer official BRTI observations.
+        self.assertIn("chart_tip_verified:true", HTML)
+        self.assertIn("!d.chart_tip_verified&&", HTML)
+        self.assertIn("d?.reference_price?.source==='Polymarket US BTC reference / BRTI'", HTML)
+        self.assertIn("d.reference_price?.source!==data.source", HTML)
+        self.assertIn("data.market!==d.market", HTML)
+        self.assertIn("if(!verified.length)return;", HTML)
+
     def test_canvas_dimensions_are_only_reset_when_changed(self):
         self.assertIn("if(canvas.width!==pixelWidth)canvas.width=pixelWidth;", HTML)
         self.assertIn("if(canvas.height!==pixelHeight)canvas.height=pixelHeight;", HTML)
