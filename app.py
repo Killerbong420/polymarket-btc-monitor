@@ -1462,17 +1462,31 @@ def lightweight_live():
          "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),"settlement_task_error":state.get("settlement_task_error"),
          "server_epoch":time.time()}
 
+_round_tiles_cache={"at":0.0,"data":None}
+_round_tiles_lock=_HistoryLock()
 @app.get("/api/round-tiles")
 def round_tiles_report():
- """Small isolated official-result query; never affects the live monitor."""
+ """Official-result display cache: avoid polling identical settled rounds every 10s."""
  try:
-  return recent_round_tiles(execute)
+  now=time.monotonic()
+  with _round_tiles_lock:
+   if _round_tiles_cache["data"] is None or now-_round_tiles_cache["at"]>30:
+    _round_tiles_cache.update(data=recent_round_tiles(execute),at=now)
+   return _round_tiles_cache["data"]
  except Exception:
   return JSONResponse({"status":"unavailable","reason":"Verified round history database unavailable"},status_code=503)
 
+_five_accuracy_cache={"at":0.0,"report":None}
+_five_accuracy_lock=_HistoryLock()
 @app.get("/api/five-minute")
 def five_minute_report():
- try:return {"live":dict(five_min_monitor.state),"accuracy":five_min_monitor.report(execute)}
+ try:
+  now=time.monotonic()
+  with _five_accuracy_lock:
+   if _five_accuracy_cache["report"] is None or now-_five_accuracy_cache["at"]>=15:
+    _five_accuracy_cache.update(report=five_min_monitor.report(execute),at=now)
+   accuracy=_five_accuracy_cache["report"]
+  return {"live":dict(five_min_monitor.state),"accuracy":accuracy}
  except Exception:return JSONResponse({"status":"unavailable","reason":"Five-minute database unavailable"},status_code=503)
 
 @app.get("/api/quick-accuracy")
@@ -1499,9 +1513,17 @@ def checkpoint_scoreboard_report():
  except Exception:
   return JSONResponse({"status":"unavailable","reason":"Verified checkpoint history unavailable"},status_code=503)
 
-@app.get("/api/status")
-def status():
- try:
+# The historical scoreboard does not change every second; cache SQL reads while
+# keeping state/AI connection information refreshed on each dashboard request.
+from threading import RLock as _HistoryLock
+_status_cache={"at":0.0,"data":None}
+_status_cache_lock=_HistoryLock()
+
+def _read_status_history():
+ now=time.monotonic()
+ with _status_cache_lock:
+  if _status_cache["data"] is not None and now-_status_cache["at"]<12:
+   return _status_cache["data"]
   rows=execute("SELECT result,COUNT(*) FROM signals WHERE phase='FINAL_15M' GROUP BY result",fetch=True)
   recent=execute("SELECT market,phase,direction,flip,score,created_at,result,quality,quality_reason,decision_source,decision_reason,ai_confidence FROM signals WHERE phase='FINAL_15M' ORDER BY created_at DESC LIMIT 50",fetch=True)
   ai_rows=execute("SELECT market,phase,direction,confidence,source,reason,created_at,result FROM ai_decisions WHERE phase='FINAL_15M' AND source='AI_REVIEW' ORDER BY created_at DESC LIMIT 50",fetch=True)
@@ -1524,8 +1546,17 @@ def status():
                   "ratio_label":str(wins)+":"+str(losses),
                   "basis":"Most recent 100 settled genuine AI_REVIEW FINAL_15M predictions; pending calls excluded",
                   "unverified":pending}
-  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"counts":dict(rows),"ai_decision_counts":verified_counts,"ai_verified_counts":verified_counts,"ai_performance":ai_performance,"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
+  data={"counts":dict(rows),"ai_decision_counts":verified_counts,"ai_verified_counts":verified_counts,"ai_performance":ai_performance,"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
+  _status_cache.update(data=data,at=time.monotonic())
+  return data
+
+@app.get("/api/status")
+def status():
+ try:
+  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),
+          **_read_status_history()}
  except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
+
 @app.get("/",response_class=HTMLResponse)
 def home():
  return Path(__file__).with_name("terminal.html").read_text(encoding="utf-8")
