@@ -187,18 +187,9 @@ document.getElementById('advancedToggle').addEventListener('click',function(){
  this.setAttribute('aria-expanded',String(enabled));
  this.textContent=enabled?'Hide detailed logs & diagnostics':'Show detailed logs, outside data & diagnostics';
 });
-</script><div id='accuracyNote' style='background:#162a36;color:#c7e8f3;padding:9px 13px;border-bottom:1px solid #31546a;font:12px -apple-system,Arial'>QUICK + CONFIRMED SIGNALS · QUICK is the primary early signal. Slower indicators add confirmation or warnings; WAIT means missing or inconclusive direction. No verified BRTI feed; predictions are experimental.</div><h1>₿ BTC · 15-MINUTE MARKET</h1><p>BRTI Bitcoin reference chart + Polymarket UP/DOWN contract odds · 15-minute market monitoring</p><section class="card" id="monitorHealth"><div class="row" style="justify-content:space-between"><div class="label">MONITOR ALERTS</div><span class="status" id="healthLabel">CHECKING</span></div><div id="healthAlerts" aria-live="polite"></div><details><summary class="small">Alert history</summary><div id="healthHistory"></div></details></section>
+</script><div id='accuracyNote' style='background:#162a36;color:#c7e8f3;padding:9px 13px;border-bottom:1px solid #31546a;font:12px -apple-system,Arial'>QUICK + CONFIRMED SIGNALS · QUICK is the primary early signal. Slower indicators add confirmation or warnings; WAIT means missing or inconclusive direction. No verified BRTI feed; predictions are experimental.</div><h1>₿ BTC · 15-MINUTE MARKET</h1><p>Verified BRTI targets and faster 15-minute / 5-minute predictions · no candle display</p><section class="card" id="monitorHealth"><div class="row" style="justify-content:space-between"><div class="label">MONITOR ALERTS</div><span class="status" id="healthLabel">CHECKING</span></div><div id="healthAlerts" aria-live="polite"></div><details><summary class="small">Alert history</summary><div id="healthHistory"></div></details></section>
 <section class="card" id="targetResearch"><div class="row" style="justify-content:space-between"><div class="label">REFERENCE PRICE &amp; TARGET BEHAVIOR · 15-MINUTE ROUND</div><span class="status" id="referenceStatus">CONNECTING</span></div><div class="grid" style="margin-top:12px"><div><div class="label">BTC reference price</div><div class="value" id="referencePrice">—</div><div class="small" id="referenceMeta"></div></div><div><div class="label">Lead against official target</div><div class="value" id="behaviorGap">—</div><div class="small" id="behaviorDetails"></div></div></div><p class="small" id="behaviorOccupancy"></p><p class="small" id="settlementAverage"></p><div class="small" id="targetValidation"></div><p class="small">BTC settles against the final-minute reference average, not a single spot tick. Gaps and spot fallbacks are labeled.</p><div class="small" id="checkpointStatus">Checkpoints: early at 12:00 left · halfway at 7:30 left · late at 3:00 left. Missed checkpoints are not backfilled.</div></section>
-<section class="card" id="brtiHero" aria-label="Bitcoin BRTI reference index chart">
-<div class="brti-head"><div><div class="brti-eyebrow">BITCOIN REFERENCE · BRTI</div><h2>BTC / USD <span class="brti-source">Reference index</span></h2></div><span class="status" id="brtiStatus">CONNECTING</span></div>
-<div class="brti-current"><strong id="brtiPrice">—</strong><span id="brtiTrendTag" class="status">AWAITING INDEX DATA</span></div>
-<div class="pm-patterns"><div><span>BTC chart formation</span><strong id="brtiPattern">Collecting reference ticks</strong></div><div><span>Pattern confirmation</span><strong id="brtiPatternConfirm">Not confirmed</strong></div></div>
-<div class="brti-stats"><div><span>Short-term trend</span><strong id="brtiTrend">—</strong></div><div><span>Observed support</span><strong id="brtiSupport">—</strong></div><div><span>Observed resistance</span><strong id="brtiResistance">—</strong></div></div>
-<canvas id="brtiCanvas" role="img" aria-label="BRTI Bitcoin reference-price trend, recent observations and official price-to-beat line"></canvas>
-<div class="brti-legend"><span><i class="brti-key" style="background:#67c5ff"></i>BRTI reference</span><span><i class="brti-key" style="background:#a7f0cc"></i>Smoothed trend</span><span><i class="brti-key" style="background:#f5c36d"></i>Price to beat</span></div>
-<div class="small" id="brtiMessage">Waiting for Polymarket US BRTI reference observations.</div>
-<div class="brti-footer">BRTI observations are provided by the Polymarket US reference API—not a direct CF Benchmarks feed or embedded chart. <a target="_blank" rel="noopener noreferrer" href="https://www.cfbenchmarks.com/data/indices/BRTI">View original CF Benchmarks BRTI chart</a>. Index and contract odds are different markets.</div>
-</section>
+
 <section class="card" id="futureForecastCard" style="border-left:4px solid #6db8ff" aria-label="Forecast of final 15-minute Bitcoin settlement value">
   <div class="row" style="justify-content:space-between;align-items:center"><div class="label">FUTURE SETTLEMENT PRICE · 15-MIN ROUND</div><span class="status" id="futureForecastStatus">CALCULATING</span></div>
   <div class="row" style="align-items:flex-end;gap:18px;margin-top:11px">
@@ -222,7 +213,7 @@ document.getElementById('advancedToggle').addEventListener('click',function(){
 <div class="pm-head"><span>POLYMARKET US · 15M REFERENCE</span><span class="pm-feed" id="pmApiFeed">CONNECTING</span></div>
 <div class="pm-numbers"><div><small>OFFICIAL PRICE TO BEAT</small><strong id="pmApiTarget">—</strong></div><div><small>BRTI REFERENCE</small><strong id="pmApiPrice">—</strong></div><div><small>ROUND REMAINING</small><strong id="pmApiCountdown">—</strong></div></div>
 <div class="pm-detail" id="pmApiInfo" aria-live="polite">Awaiting verified current-round index observations</div></section>
-<div class="market-strip">BTC/USD CANDLES · POLYMARKET US REFERENCE · 15-MINUTE MARKET</div><div class="row" style="justify-content:space-between"><div><div class="label">BTC / USD · LIVE PRICE ACTION</div><div class="small">Full 15-minute round · official BRTI · refresh every 5s</div></div><div class="chart-controls"><button class="active" id="chart15" type="button">This round · 15m</button><button id="chart30" type="button">30m</button><button id="chart60" type="button">60m</button><button class="active" id="candleToggle" type="button">Candles</button><button class="active" id="emaToggle" type="button">EMA</button><button class="active" id="bbToggle" type="button">Bollinger</button><button id="volToggle" type="button" disabled hidden>No volume feed</button></div></div><div class="card" id="patternPanel" style="border-left:4px solid #e5a45d;margin-top:10px"><div class="label">CHART PATTERN ANALYSIS · POLYMARKET REFERENCE CANDLES</div><div class="value wait" id="patternName">ANALYZING</div><div class="small" id="patternDetails">Waiting for server chart classification.</div><div class="small" id="minuteForecast" style="margin-top:12px;font-weight:700">NEXT 1 MIN · Awaiting forecast</div><div class="small" id="minuteReversal" style="margin-top:8px">REVERSAL WATCH · Collecting confirmation signals</div><div class="small" id="minuteReversalStats">Reversal outcomes: awaiting verification</div><div class="small" id="minuteAccuracy">Prediction results pending</div><p class="small">Heuristic pattern recognition, not a calibrated win probability. A trend direction may differ from the official Polymarket settlement outcome.</p></div><div class="small" id="roundChartNote" aria-live="polite">15-minute round · awaiting verified reference data</div><div class="chart-wrap candle-wrap"><canvas aria-label="Polymarket US Bitcoin reference candles with EMA and Bollinger Bands" id="candleChart" role="img"></canvas></div><div class="chart-wrap secondary-chart"><canvas aria-label="BTC price history chart" id="priceChart" role="img"></canvas></div><div class="chart-key"><span><i class="dot" style="background:#5da8ff"></i>Polymarket BTC reference</span><span><i class="dot" style="background:#ffcc71"></i>Polymarket official price to beat</span></div><div class="small" id="chartInfo" style="margin-top:8px">Waiting for price history…</div><p class="small">Polymarket US Bitcoin reference candles refresh every 5 seconds. EMA and Bollinger Bands use this reference feed. No trading volume is supplied. Settlement uses the official reference averaging rule; one candle close is not the settlement result.</p></div><div id="signalTiles"><div class="card" id="fastPanel" style="border-left:4px solid #f6bb45;margin-top:10px"><div class="row" style="justify-content:space-between"><span class="label">⚡ QUICK PREDICTION · UP / DOWN</span><span class="small" id="fastAge">Waiting for stream</span></div><div class="value wait" id="fastSignal">SCANNING</div><div class="small" id="fastReason">Waiting for live price movement</div>
+<div class="card" id="patternPanel" style="border-left:4px solid #e5a45d;margin-top:10px"><div class="label">PATTERN ANALYSIS · SERVER SIGNALS</div><div class="value wait" id="patternName">ANALYZING</div><div class="small" id="patternDetails">Waiting for server pattern analysis</div><div class="small" id="minuteForecast">NEXT 60 SECONDS · Awaiting forecast</div><div class="small" id="minuteReversal">REVERSAL WATCH · Awaiting BRTI evidence</div><p class="small">Pattern analysis continues on the server; no calibrated probabilities.</p></div></div><div id="signalTiles"><div class="card" id="fastPanel" style="border-left:4px solid #f6bb45;margin-top:10px"><div class="row" style="justify-content:space-between"><span class="label">⚡ QUICK PREDICTION · UP / DOWN</span><span class="small" id="fastAge">Waiting for stream</span></div><div class="value wait" id="fastSignal">SCANNING</div><div class="small" id="fastReason">Waiting for live price movement</div>
  <div class="small" id="quickAccuracySummary" style="margin-top:10px;font-weight:700">FIRST 5 MIN · Quick prediction accuracy: collecting</div>
  <div class="small" id="quickAccuracyMinutes" style="margin-top:5px">Minutes 1–5: awaiting scored calls</div>
  <details style="margin-top:6px"><summary class="small">Quick prediction log</summary><div id="quickAccuracyRecent" class="small"></div></details><p class="small">Quick prediction prioritizes a fresh 60-second BRTI movement forecast, including reversal warnings. Local Coinbase/Kraken ticks remain a labeled fallback. This is a next-minute price-direction estimate, NOT the 15-minute Polymarket settlement call; quality labels are not win probabilities.</p></div><div class="card" id="strongPanel" style="border-left:4px solid #42c8a0;margin-top:10px"><div class="row" style="justify-content:space-between"><span class="label">🛡️ STRONGER PREDICTION · CONFIRMED TREND</span><span class="small" id="strongAge">Server checking</span></div><div class="value wait" id="strongSignal">CHECKING</div><div class="small" id="strongReason">Requires matching 3-minute and 15-minute momentum, sufficient volume and fresh candles.</div><p class="small">Separate from FAST. A stronger signal is more selective, not a guaranteed winner. WAIT means confirmation is insufficient.</p></div><div class="card" id="final15Panel" style="border-left:4px solid #55aaff;margin-top:10px"><div class="row" style="justify-content:space-between"><span class="label">⏱ FINAL CALL · 15-MIN ROUND · AT 7:30 LEFT</span><span class="small" id="final15Time">Awaiting 15m market</span></div><div class="value wait" id="final15Signal">SCHEDULED</div><div class="small" id="final15Reason">One locked UP/DOWN prediction for the current 15-minute round at 7:30 left. Requires an actual Polymarket US contract.</div></div><div class="terminal-panels"><div class="card"><div class="label">PRIMARY PREDICTION · CURRENT ROUND · INDEPENDENT</div><div class="value wait" id="currentSignal">WAIT</div><div class="small" id="currentReason">Checking feeds</div></div><div class="card"><div class="label">TWO-WAY FLIP WATCH · UP / DOWN TARGET RISK</div><div class="value wait" id="scalp" style="font-size:19px">WAIT</div><div class="small" id="scalpInfo">Insufficient data</div></div></div></div><section class="card terminal-secondary"><h2>POLYMARKET · OFFICIAL PRICE TO BEAT</h2><p id="targetInfo">Fetching official target from Polymarket US…</p><p id="targetDelta">Difference from target: —</p><p class="small">Official Polymarket US contract target; external spot prices are not displayed.</p></section><div class="row"><button class="active" id="m15">15 minutes</button><button id="refresh">Refresh now</button></div><div class="card"><div class="row" style="justify-content:space-between"><span class="status" id="live">Starting…</span><span class="small" id="clock"></span></div><div class="label" style="margin-top:15px">Current round (UTC)</div><div class="value" id="range" style="font-size:20px">—</div><div class="row" style="justify-content:space-between"><span class="small">Time remaining</span><b id="remaining">—</b></div><div class="meter" style="margin:12px 0"><div class="fill" id="progress"></div></div><div class="row"><a class="link" id="currentLink" rel="noopener" target="_blank">Open current market</a><a class="link" id="nextLink" rel="noopener" target="_blank">Open next market</a></div></div><div class="grid"><div class="card"><div class="label">Early / Late</div><div class="value" id="phase" style="font-size:19px">—</div><div class="small" id="phaseInfo">—</div></div></div><div class="card" id="marketDataPanel"><div class="label">Supporting BTC spot (Coinbase; NOT Polymarket official index)</div><div class="value" id="price">—</div><div class="row"><span class="status" id="priceStatus">Not connected</span><span class="small" id="change">—</span></div><div class="label" style="margin-top:15px">Recent trades: buyer-initiated / seller-initiated</div><div class="meter" style="margin:9px 0"><div class="fill" id="pressure"></div></div><div class="small" id="pressureText">Unavailable</div><div class="small" style="margin-top:10px">Trade side uses the exchange-reported side and is only a short-term pressure proxy, not full market depth or blockchain flow.</div></div><div class="card terminal-secondary"><div class="label">Multi-exchange confirmation · live streams</div><div class="value wait" id="crossStatus" style="font-size:19px">CONNECTING</div><div class="small" id="crossDetail">Connecting to Coinbase and Kraken BTC/USD…</div><div class="small" id="crossAge">Only fresh exchange observations count. Exchange prices are NOT Polymarket BRTI.</div><div class="small" id="signalAudit" style="margin-top:10px">Waiting for enough observations…</div></div><div class="card terminal-secondary"><div class="label">Signal validation · local forward test</div><div class="small" id="validation">Collecting timestamped forecasts; no verified accuracy yet.</div><button id="clearValidation" style="margin-top:9px" type="button">Reset local test</button><p class="small">Tracks directional forecasts against later Coinbase spot returns; this is NOT Polymarket settlement backtesting, calibrated probability, or profitability after spreads/fees.</p></div><div class="card terminal-secondary"><div class="label">External exchange order-book depth (Coinbase)</div><div class="value wait" id="depthStatus" style="font-size:18px">CHECKING</div><div class="small" id="depthText">Waiting for live bid/ask depth…</div><p class="small">Top 20 exchange bid and ask levels, sampled every 3 seconds. This is external spot-market liquidity, not Polymarket contract liquidity.</p></div><div class="card"><div class="label">Data diagnostics</div><div class="small" id="diagnostics">Waiting for first update…</div><details><summary>Signal methodology and limitations</summary><p class="small">This monitor prioritizes fast Coinbase/Kraken streaming momentum for preliminary directional calls. Slower indicators are displayed as confirmation or disagreement, not absolute blockers. It fetches Polymarket US UP contract quotes where accessible, and uses Coinbase BTC-USD 1-minute candles, recent trades, and top-of-book depth. It computes 3/10/15-minute momentum and a 5-versus-12-candle moving-average trend, then combines trend agreement and recent trade pressure. Signals are conditional heuristics, not calibrated win probabilities. Current-round momentum calls can appear without a target, but they do not establish which side of the official Polymarket US Price to Beat will settle. Coinbase spot is only a proxy for live BRTI. Next-round signals are directional research indications only and cannot establish profitable contract entry without live order-book prices. WAIT means insufficient, conflicting, stale or missing data.</p></details></div><p class="small">Chart uses real-time Coinbase WebSocket ticks when connected, with 1-second REST fallback; signals and other feeds update every 3 seconds while the tab is active. Network delays may cause slower updates. iOS Safari may pause background tabs. If the fast feed is stale, slower available data may provide a LEAN; missing reliable data defaults to WAIT. No trades are placed. This is not investment advice.</p><script>
@@ -267,7 +258,7 @@ function activeFlip(d,fastFresh){
  if(recent){const dir=flipMemory.crossDirection;el.textContent=(dir==='UP'?'▲':'▼')+' TARGET BREAK '+dir;el.className='value '+(dir==='UP'?'up':'down');info.textContent=details+' · recent '+dir+' crossing';return}
  el.textContent=above?'ABOVE TARGET · WATCH':'BELOW TARGET · WATCH';el.className='value wait';info.textContent='Bullish '+up+'/6 · bearish '+down+'/6 · '+details+' · no calibrated 70% probability';
 }
-function render(){const r=roundUI();crossCheck();targetUI();drawChart();renderTrend();const depthFresh=depth&&Date.now()-depthAt<15000;$('depthStatus').textContent=depthFresh?(depth.imbalance>0.08?'BUY DEPTH LEADS':depth.imbalance<-.08?'SELL DEPTH LEADS':'BALANCED DEPTH'):'DEPTH UNAVAILABLE';$('depthStatus').className='value '+(depthFresh?(depth.imbalance>.08?'up':depth.imbalance<-.08?'down':'wait'):'wait');$('depthText').textContent=depthFresh?`Top 20 levels · Bid ${money(depth.bids)} / Ask ${money(depth.asks)} · Imbalance ${(depth.imbalance*100).toFixed(1)}%`:'Coinbase depth: '+depthError;const age=(Date.now()-fetchedAt)/1000,ok=data&&age<50;window.btcPrimaryLocalLive=!!ok;if(!ok){const early=fastDirection!=='WAIT'&&Date.now()-fastAt<6000;paintSignal('currentSignal','WAIT','Primary prediction requires its own fresh multi-indicator feed; FAST is displayed separately above.');paintSignal('nextSignal','WAIT','Next-round prediction requires fresh supporting data; FAST does not override it.');$('scalp').textContent='DATA STALE';$('scalpInfo').textContent='Fresh feeds required for flip detection';$('live').textContent='● DATA UNAVAILABLE';return}const d=data;$('live').textContent='● COINBASE SUPPORTING FEED · '+Math.floor(age)+'s old';$('price').textContent=money(d.last);$('change').textContent=`3m ${d.m3.toFixed(3)}% · 15m ${d.m15.toFixed(3)}% · 10m ${d.m10.toFixed(3)}%`;$('pressure').style.width=Math.max(0,Math.min(100,50+d.pressure*50))+'%';$('pressureText').textContent=d.total>0?`Buy ${((1+d.pressure)*50).toFixed(1)}% / Sell ${((1-d.pressure)*50).toFixed(1)}% (sampled trades; Coinbase side is maker-side)`:'Recent trade pressure unavailable';$('priceStatus').textContent='Coinbase spot';const rawDir=d.score>=3?'UP':d.score<=-3?'DOWN':'WAIT',strong=Math.abs(d.score)>=4;const confirmed=crossCheck(),depthAgree=depthFresh&&((rawDir==='UP'&&depth.imbalance>0.03)||(rawDir==='DOWN'&&depth.imbalance<-.03));const volatility=Math.abs(d.m3)+Math.abs(d.m15);const freshTrades=d.total>0;const exchangeSpread=(Number.isFinite(streams.coinbase.p)&&Number.isFinite(streams.kraken.p))?Math.abs(streams.coinbase.p-streams.kraken.p)/streams.coinbase.p*100:Infinity;const cleanMarket=volatility>=0.035&&volatility<=1.8&&exchangeSpread<0.12&&freshTrades;const fastFresh=fastDirection!=='WAIT'&&Date.now()-fastAt<6000;
+function render(){const r=roundUI();crossCheck();targetUI();renderTrend();const depthFresh=depth&&Date.now()-depthAt<15000;$('depthStatus').textContent=depthFresh?(depth.imbalance>0.08?'BUY DEPTH LEADS':depth.imbalance<-.08?'SELL DEPTH LEADS':'BALANCED DEPTH'):'DEPTH UNAVAILABLE';$('depthStatus').className='value '+(depthFresh?(depth.imbalance>.08?'up':depth.imbalance<-.08?'down':'wait'):'wait');$('depthText').textContent=depthFresh?`Top 20 levels · Bid ${money(depth.bids)} / Ask ${money(depth.asks)} · Imbalance ${(depth.imbalance*100).toFixed(1)}%`:'Coinbase depth: '+depthError;const age=(Date.now()-fetchedAt)/1000,ok=data&&age<50;window.btcPrimaryLocalLive=!!ok;if(!ok){const early=fastDirection!=='WAIT'&&Date.now()-fastAt<6000;paintSignal('currentSignal','WAIT','Primary prediction requires its own fresh multi-indicator feed; FAST is displayed separately above.');paintSignal('nextSignal','WAIT','Next-round prediction requires fresh supporting data; FAST does not override it.');$('scalp').textContent='DATA STALE';$('scalpInfo').textContent='Fresh feeds required for flip detection';$('live').textContent='● DATA UNAVAILABLE';return}const d=data;$('live').textContent='● COINBASE SUPPORTING FEED · '+Math.floor(age)+'s old';$('price').textContent=money(d.last);$('change').textContent=`3m ${d.m3.toFixed(3)}% · 15m ${d.m15.toFixed(3)}% · 10m ${d.m10.toFixed(3)}%`;$('pressure').style.width=Math.max(0,Math.min(100,50+d.pressure*50))+'%';$('pressureText').textContent=d.total>0?`Buy ${((1+d.pressure)*50).toFixed(1)}% / Sell ${((1-d.pressure)*50).toFixed(1)}% (sampled trades; Coinbase side is maker-side)`:'Recent trade pressure unavailable';$('priceStatus').textContent='Coinbase spot';const rawDir=d.score>=3?'UP':d.score<=-3?'DOWN':'WAIT',strong=Math.abs(d.score)>=4;const confirmed=crossCheck(),depthAgree=depthFresh&&((rawDir==='UP'&&depth.imbalance>0.03)||(rawDir==='DOWN'&&depth.imbalance<-.03));const volatility=Math.abs(d.m3)+Math.abs(d.m15);const freshTrades=d.total>0;const exchangeSpread=(Number.isFinite(streams.coinbase.p)&&Number.isFinite(streams.kraken.p))?Math.abs(streams.coinbase.p-streams.kraken.p)/streams.coinbase.p*100:Infinity;const cleanMarket=volatility>=0.035&&volatility<=1.8&&exchangeSpread<0.12&&freshTrades;const fastFresh=fastDirection!=='WAIT'&&Date.now()-fastAt<6000;
 const supportive=rawDir!=='WAIT'&&rawDir===fastDirection;
 const opposed=rawDir!=='WAIT'&&rawDir!==fastDirection;
 const dir=fastFresh?fastDirection:(rawDir!=='WAIT'?rawDir:'WAIT');
@@ -287,8 +278,7 @@ paintSignal('currentSignal',dir==='WAIT'?'WAIT':(currentLevel==='FAST'?'':curren
 }else{
 paintSignal('currentSignal',dir==='WAIT'?'WAIT':(level==='FAST'?'':level+' ')+dir,dir==='WAIT'?'No fresh direction · official target may be unavailable':`Momentum-only ${level} call · compare with automatically fetched official target`);
 }
-activeFlip(d,fastFresh);$('diagnostics').textContent=`Last update ${new Date(fetchedAt).toLocaleTimeString()} · 1m candles ${d.closes.length} · score ${d.score}/5 · official BTC index unavailable · contract quotes checked separately · external order-book ${depthFresh?"live":"unavailable"}`;}function renderTrend(){/* Trend banner intentionally removed from UI; analysis remains available for signals. */}function drawChart(){if($('heroChart')?.offsetParent===null)return;const canvas=$('priceChart'),wrap=canvas.parentElement,rect=wrap.getBoundingClientRect();if(!rect.width)return;const scale=Math.min(window.devicePixelRatio||1,3),w=rect.width,h=rect.height;canvas.width=Math.round(w*scale);canvas.height=Math.round(h*scale);const c=canvas.getContext('2d');c.scale(scale,scale);c.clearRect(0,0,w,h);const now=Date.now(),points=[...chartCandles.filter(x=>x.t>=now-chartMinutes*60000&&Number.isFinite(x.p)),...liveChartPoints.filter(x=>x.t>=now-chartMinutes*60000&&Number.isFinite(x.p))].sort((a,b)=>a.t-b.t);const left=10,right=68,top=18,bottom=27,plotW=w-left-right,plotH=h-top-bottom;if(points.length<2||plotW<50){c.fillStyle='#aab8d1';c.font='13px -apple-system,Arial';c.fillText('Waiting for live price history…',16,h/2);$('chartInfo').textContent='Price history unavailable';return}const prices=points.map(x=>x.p),targetValue=hasTarget()?target():null;let lo=Math.min(...prices),hi=Math.max(...prices);if(targetValue!==null&&targetValue>lo-(hi-lo)*.25&&targetValue<hi+(hi-lo)*.25){lo=Math.min(lo,targetValue);hi=Math.max(hi,targetValue)}const pad=Math.max((hi-lo)*.12,2);lo-=pad;hi+=pad;const x=t=>left+(t-(now-chartMinutes*60000))/(chartMinutes*60000)*plotW,y=p=>top+(hi-p)/(hi-lo)*plotH;c.lineWidth=1;c.font='11px -apple-system,Arial';for(let i=0;i<=4;i++){const v=lo+(hi-lo)*i/4,yy=y(v);c.strokeStyle='#263852';c.beginPath();c.moveTo(left,yy);c.lineTo(w-right+4,yy);c.stroke();c.fillStyle='#aab8d1';c.fillText('$'+Math.round(v).toLocaleString('en-US'),w-right+8,yy+4)}for(let i=0;i<=3;i++){const tt=now-chartMinutes*60000+(chartMinutes*60000)*i/3;c.fillStyle='#aab8d1';c.fillText(new Date(tt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),Math.min(w-72,x(tt)),h-7)}if(targetValue!==null&&targetValue>=lo&&targetValue<=hi){c.setLineDash([6,5]);c.strokeStyle='#ffcc71';c.lineWidth=1.7;c.beginPath();c.moveTo(left,y(targetValue));c.lineTo(w-right+4,y(targetValue));c.stroke();c.setLineDash([])}c.beginPath();points.forEach((p,i)=>{const xx=x(p.t),yy=y(p.p);if(i===0)c.moveTo(xx,yy);else c.lineTo(xx,yy)});c.strokeStyle='#5da8ff';c.lineWidth=2.5;c.lineJoin='round';c.stroke();const last=points[points.length-1];c.fillStyle='#5da8ff';c.beginPath();c.arc(x(last.t),y(last.p),3.5,0,Math.PI*2);c.fill();$('chartInfo').textContent=chartMinutes+'m chart · '+points.length+' chart points · last '+money(last.p)+' · ticker '+(tickerAt&&Date.now()-tickerAt<5000?'LIVE':tickerError)+(targetValue===null?' · awaiting official target':' · target '+money(targetValue));}let marketCache={};
-async function pmGet(path){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),7000);try{let r;try{r=await fetch('https://gateway.polymarket.us'+path,{cache:'no-store',signal:ctrl.signal})}catch(e){throw Error('Network/CORS: '+e.message)}if(!r.ok)throw Error('HTTP '+r.status+' at '+path);return await r.json()}finally{clearTimeout(timer)}}
+activeFlip(d,fastFresh);$('diagnostics').textContent=`Last update ${new Date(fetchedAt).toLocaleTimeString()} · 1m candles ${d.closes.length} · score ${d.score}/5 · official BTC index unavailable · contract quotes checked separately · external order-book ${depthFresh?"live":"unavailable"}`;}function renderTrend(){/* Trend banner intentionally removed from UI; analysis remains available for signals. */}async function pmGet(path){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),7000);try{let r;try{r=await fetch('https://gateway.polymarket.us'+path,{cache:'no-store',signal:ctrl.signal})}catch(e){throw Error('Network/CORS: '+e.message)}if(!r.ok)throw Error('HTTP '+r.status+' at '+path);return await r.json()}finally{clearTimeout(timer)}}
 async function fetchOfficial(){
  const eventSlug=slug(roundStart());
  try{
@@ -320,9 +310,8 @@ async function fetchOfficial(){
  }catch(e){official=null;officialAt=0;officialError='Polymarket US: '+e.message+' · Coinbase/Kraken analysis continues';}
  render();
 }
-async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?level=2');if(!Array.isArray(book.bids)||!Array.isArray(book.asks))throw Error('Invalid order book');const sum=a=>a.slice(0,20).reduce((n,x)=>n+Number(x[0])*Number(x[1]),0);const bids=sum(book.bids),asks=sum(book.asks);if(!(bids+asks>0))throw Error('Empty order book');depth={bids,asks,imbalance:(bids-asks)/(bids+asks)};depthAt=Date.now();depthError='';}catch(e){depth=null;depthError=e.message}}let lastOfficialAttempt=0;async function update(){if(Date.now()-lastOfficialAttempt>30000){lastOfficialAttempt=Date.now();fetchOfficial()}if(busy)return;busy=true;try{const now=new Date(),start=new Date(Date.now()-45*60000),params=new URLSearchParams({granularity:'60',start:start.toISOString(),end:now.toISOString()});const [raw,trades]=await Promise.all([json('/products/BTC-USD/candles?'+params),json('/products/BTC-USD/trades?limit=100')]);if(!Array.isArray(raw)||!Array.isArray(trades))throw Error('Unexpected response');const candles=raw.filter(x=>Array.isArray(x)&&x.length>=5).sort((a,b)=>a[0]-b[0]).filter(x=>x[0]*1000<Date.now()-60000);data=calc(candles,trades);chartCandles=candles.map(x=>({t:x[0]*1000,p:Number(x[4])}));fetchedAt=Date.now();await fetchDepth();$('diagnostics').textContent='Feed connected'}catch(e){data=null;fetchedAt=0;$('diagnostics').textContent='Coinbase feed failed: '+e.message+'. Safari may block this source; try another network or a hosted data relay.';$('priceStatus').textContent='Feed error';$('price').textContent='—';$('pressureText').textContent='Unavailable'}finally{busy=false;render()}}async function updateTicker(){if(tickerBusy||document.hidden)return;tickerBusy=true;try{const res=await fetch(endpoint+'/products/BTC-USD/ticker',{cache:'no-store'});if(!res.ok)throw Error('HTTP '+res.status);const obj=await res.json(),p=Number(obj.price);if(!Number.isFinite(p)||p<=0)throw Error('Invalid ticker');const t=Date.now();liveChartPoints.push({t,p});liveChartPoints=liveChartPoints.filter(x=>x.t>t-65*60000).slice(-4000);tickerAt=t;tickerError='';drawChart()}catch(e){tickerError='unavailable ('+e.message+')';drawChart()}finally{tickerBusy=false}}function mode(n){n=15;duration=n;data=null;fetchedAt=0;$('m15').classList.toggle('active',n===15);render();update()}for(const n of [15,30,60])$('chart'+n).onclick=()=>{chartMinutes=n;for(const k of [15,30,60])$('chart'+k).classList.toggle('active',k===n);drawChart()};window.addEventListener('resize',drawChart);$('m15').onclick=()=>mode(15);$('refresh').onclick=update;/* Refresh current round, countdown, market links and phase every five seconds. */setInterval(()=>{if(!document.hidden)roundUI()},5000);roundUI();/* Retired legacy Coinbase ticker polling; candle chart uses server candles. */$('clearValidation').onclick=()=>{forecastLog=[];persistLog();validateForecasts()};/* Start the Coinbase/Kraken streams and multi-indicator feed; previously these were never invoked. */connectStream('coinbase');connectStream('kraken');update();setInterval(()=>{if(!document.hidden)update()},15000);setInterval(()=>{if(!document.hidden){fastCall();render()}},5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){for(const which of ['coinbase','kraken']){const ws=streams[which].ws;if(!ws||(ws.readyState!==WebSocket.CONNECTING&&ws.readyState!==WebSocket.OPEN))connectStream(which)}update();fastCall();render()}});})();
+async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?level=2');if(!Array.isArray(book.bids)||!Array.isArray(book.asks))throw Error('Invalid order book');const sum=a=>a.slice(0,20).reduce((n,x)=>n+Number(x[0])*Number(x[1]),0);const bids=sum(book.bids),asks=sum(book.asks);if(!(bids+asks>0))throw Error('Empty order book');depth={bids,asks,imbalance:(bids-asks)/(bids+asks)};depthAt=Date.now();depthError='';}catch(e){depth=null;depthError=e.message}}let lastOfficialAttempt=0;async function update(){if(Date.now()-lastOfficialAttempt>30000){lastOfficialAttempt=Date.now();fetchOfficial()}if(busy)return;busy=true;try{const now=new Date(),start=new Date(Date.now()-45*60000),params=new URLSearchParams({granularity:'60',start:start.toISOString(),end:now.toISOString()});const [raw,trades]=await Promise.all([json('/products/BTC-USD/candles?'+params),json('/products/BTC-USD/trades?limit=100')]);if(!Array.isArray(raw)||!Array.isArray(trades))throw Error('Unexpected response');const candles=raw.filter(x=>Array.isArray(x)&&x.length>=5).sort((a,b)=>a[0]-b[0]).filter(x=>x[0]*1000<Date.now()-60000);data=calc(candles,trades);chartCandles=candles.map(x=>({t:x[0]*1000,p:Number(x[4])}));fetchedAt=Date.now();await fetchDepth();$('diagnostics').textContent='Feed connected'}catch(e){data=null;fetchedAt=0;$('diagnostics').textContent='Coinbase feed failed: '+e.message+'. Safari may block this source; try another network or a hosted data relay.';$('priceStatus').textContent='Feed error';$('price').textContent='—';$('pressureText').textContent='Unavailable'}finally{busy=false;render()}}function mode(n){n=15;duration=n;data=null;fetchedAt=0;$('m15').classList.toggle('active',n===15);render();update()}$('m15').onclick=()=>mode(15);$('refresh').onclick=update;/* Refresh current round, countdown, market links and phase every five seconds. */setInterval(()=>{if(!document.hidden)roundUI()},5000);roundUI();/* Retired legacy Coinbase ticker polling; candle chart uses server candles. */$('clearValidation').onclick=()=>{forecastLog=[];persistLog();validateForecasts()};/* Start the Coinbase/Kraken streams and multi-indicator feed; previously these were never invoked. */connectStream('coinbase');connectStream('kraken');update();setInterval(()=>{if(!document.hidden)update()},15000);setInterval(()=>{if(!document.hidden){fastCall();render()}},5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){for(const which of ['coinbase','kraken']){const ws=streams[which].ws;if(!ws||(ws.readyState!==WebSocket.CONNECTING&&ws.readyState!==WebSocket.OPEN))connectStream(which)}update();fastCall();render()}});})();
 </script><script>
-/* Full verified 15-minute round, with a clearly illustrative settlement guide. */
 (()=>{
  const finite=v=>typeof v==='number'&&Number.isFinite(v);
  function updatePolymarketSummary(d){
@@ -331,7 +320,404 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
   const marketLive=d?.status==='running'&&typeof d?.market==='string'&&d.market.includes('btc-updown-15m-');
   const fresh=marketLive&&r.status==='fresh'&&finite(r.price)&&r.price>0&&finite(referenceAge)&&referenceAge>=-5&&referenceAge<=15&&finite(serverAge)&&serverAge>=-5&&serverAge<=20;
   const target=Number(behavior.target),targetValid=marketLive&&behavior.status==='available'&&finite(target)&&target>0;
-  const money=v=>'$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const money=v=>'
+<section class="card" id="serverHistory"><div class="label">AI ACCURACY · LAST 100 SETTLED PREDICTIONS (15M)</div><div class="row"><span class="status" id="serverState">Connecting…</span><span class="small" id="serverCounts"></span></div><div class="result-grid" aria-label="Server prediction results"><div class="result-tile"><div class="result-number up" id="winCount">0</div><div class="result-label">WINS · LAST 100</div></div><div class="result-tile"><div class="result-number down" id="lossCount">0</div><div class="result-label">LOSSES · LAST 100</div></div><div class="result-tile"><div class="result-number wait" id="pendingCount">0</div><div class="result-label">PENDING · ALL</div></div><div class="result-tile"><div class="result-number" id="winRate">—</div><div class="result-label">LAST 100 ACCURACY</div></div></div><div class="small" id="winLossRatio" aria-live="polite">AI WIN/LOSS RATIO · —</div><div class="small" id="serverLatest" aria-live="polite">Checking saved predictions…</div><div class="result-foot" id="settlementInfo">Settlement verification: checking…</div><p class="small">Win/loss and accuracy use the 100 most recent settled 15-minute AI_REVIEW predictions (or fewer if not yet available). Pending predictions are counted separately and excluded from accuracy. Fallbacks are excluded. Older records remain stored for historical analysis; verified Polymarket settlement is required to score a prediction.</p></section><section class="card" id="peerBotsPanel"><div class="row" style="justify-content:space-between"><div class="label">BOT STRATEGY STUDIES · 15-MIN MARKET</div><span class="status">RESEARCH ONLY</span></div><div id="peerBotsLive" class="small">Waiting for fresh BTC exchange candles…</div><p class="small">MACD trend, Bollinger reversals, ATR breakouts and range/liquidity price action. These are independent public-indicator studies, not another trader's live signals. Compare their settled win rates and prediction coverage under Detailed logs.</p></section><script>(()=>{const $=id=>document.getElementById(id);function safeText(v){return String(v??'—')}
+let statusInFlight=false;
+function renderPersistentSignals(d){
+ const el=id=>document.getElementById(id), ext=d.external||{}, quality=ext.signal_quality||{};
+ const serverAge=Date.now()-Date.parse(d.updated||'');
+ const online=Number.isFinite(serverAge)&&serverAge>=-5000&&serverAge<45000;
+ const validMarket=d.status==='running'&&typeof d.market==='string'&&d.market.includes('btc-updown-15m-');
+ const candleAge=Number(ext.candle_age_seconds);
+ const validCandles=ext.price!=null&&Number.isFinite(candleAge)&&candleAge>=0&&candleAge<120;
+ // A causal next-minute BRTI forecast takes priority over local exchange
+ // momentum, but only while the current-round server state is fresh.
+ const q=d.quick_forecast||{};
+ const pat=ext.chart_pattern||{},patName=el('patternName'),patDetails=el('patternDetails'),minute=el('minuteForecast'),rev=el('minuteReversal');
+ if(patName){patName.textContent=online&&pat.pattern?String(pat.pattern).replaceAll('_',' '):'INDICATORS UNAVAILABLE';patName.className='value '+(pat.bias==='UP'?'up':pat.bias==='DOWN'?'down':'wait');}
+ if(patDetails)patDetails.textContent=online&&pat.pattern?'Server pattern · '+(pat.bias||'MIXED')+' bias':'Waiting for fresh server indicators';
+ if(minute)minute.textContent=online&&q.status==='available'&&['UP','DOWN'].includes(q.direction)&&Number.isFinite(Number(q.forecast_price_60s_usd))&&Number(q.age_seconds)<=12?'NEXT 60 SECONDS · '+q.direction+' · projected $'+Number(q.forecast_price_60s_usd).toFixed(2)+' · '+(q.quality||'UNRATED'):'NEXT 60 SECONDS · Fresh BRTI projection unavailable';
+ if(rev)rev.textContent=online&&q.status==='available'&&q.reversal_watch?'REVERSAL WATCH · '+(q.reversal_direction||'possible flip'):'REVERSAL WATCH · No confirmed BRTI reversal';
+ const quickFresh=online&&validMarket&&serverAge<12000&&
+   q.status==='available'&&['UP','DOWN'].includes(q.direction)&&
+   Number.isFinite(Number(q.age_seconds))&&Number(q.age_seconds)<=12&&
+   Number.isFinite(Number(q.forecast_price_60s_usd));
+ window.btcFastServerPreferred=!!quickFresh;
+ window.btcFastServerUntil=quickFresh?Date.now()+11500:0;
+ if(quickFresh){
+   const fast=el('fastSignal'), move=Number(q.forecast_move_usd),price=Number(q.forecast_price_60s_usd);
+   const fmt=n=>n.toLocaleString('en-US',{style:'currency',currency:'USD'});
+   fast.textContent=(q.direction==='UP'?'▲ ':'▼ ')+q.direction;
+   fast.className='value '+(q.direction==='UP'?'up':'down');
+   el('fastReason').textContent='Next 60s BRTI projection '+fmt(price)+' · '+(move>=0?'+':'')+fmt(move)+
+     ' vs current index · '+(q.reversal_watch?'REVERSAL WATCH '+(q.reversal_direction||'')+' · ':'')+
+     String(q.reason||'Observed multi-horizon momentum');
+   el('fastAge').textContent='BRTI '+Math.round(q.age_seconds)+'s old · '+(q.quality||'LOW')+' quality · uncalibrated';
+ }else if(!window.btcFastLocalLive){
+  const ref=d.brti_chart||{}, points=(Array.isArray(ref.points)?ref.points:[]).filter(p=>Array.isArray(p)&&Number.isFinite(Number(p[0]))&&Number.isFinite(Number(p[1]))&&Number(p[1])>0);
+  const recent=points.length?points[points.length-1]:null;
+  const observedAge=recent?Date.now()/1000-Number(recent[0]):Infinity;
+  const earlier=recent?points.find(p=>Number(recent[0])-Number(p[0])>=12&&Number(recent[0])-Number(p[0])<=40):null;
+  const freshReference=online&&validMarket&&d.reference_price?.status==='fresh'&&observedAge>=-5&&observedAge<=18&&Number(ref.sample_age_seconds||0)<=18;
+  let direction=null, note='', source='';
+  if(freshReference&&earlier){
+   const move=(Number(recent[1])/Number(earlier[1])-1)*100;
+   if(Math.abs(move)>=0.015){direction=move>0?'UP':'DOWN';source='BRTI';note='Reference index moved '+(move>0?'+':'')+move.toFixed(3)+'% in '+Math.round(Number(recent[0])-Number(earlier[0]))+'s · preliminary'}
+   else note='Live reference movement below fast threshold';
+  }
+  // If index observations cannot establish a short-horizon direction, show an explicitly slower fallback.
+  if(!direction&&online&&validMarket&&validCandles){
+   const m=Number(ext.momentum_pct);
+   if(Number.isFinite(m)&&Math.abs(m)>=0.035){
+    direction=m>0?'UP':'DOWN';source='SERVER MOMENTUM';note='3-minute exchange momentum '+(m>0?'+':'')+m.toFixed(3)+'% · slower fallback, not a 10-second tick call';
+   }
+  }
+  const fast=el('fastSignal');
+  fast.textContent=direction?(direction==='UP'?'▲ ':'▼ ')+(source==='BRTI'?'':'LEAN ')+direction:'WAIT · FEED CHECK';
+  fast.className='value '+(direction?(direction==='UP'?'up':'down'):'wait');
+  el('fastReason').textContent=direction?note:(note||(!online?'Server disconnected or stale':!validMarket?'Waiting for verified 15-minute contract':'No reliable directional movement yet'));
+  el('fastAge').textContent=direction?source+' · '+Math.max(0,Math.round(serverAge/1000))+'s server age':'Checking fresh price observations';
+ }
+ const strong=el('strongSignal');
+ const confirmed=online&&validMarket&&validCandles&&quality.status==='CONFIRMED_TREND'&&['UP','DOWN'].includes(d.signal);
+ const volume=Number(quality.volume_ratio);
+ const lowVolume=confirmed&&Number.isFinite(volume)&&volume<0.8;
+ strong.textContent=!online?'SERVER STALE':!validMarket?'MARKET UNAVAILABLE':!validCandles?'CANDLES STALE':confirmed?(lowVolume?'TREND '+d.signal+' · LOW VOLUME':'CONFIRMED '+d.signal):'WAIT · NOT CONFIRMED';
+ strong.className='value '+(confirmed&&!lowVolume?(d.signal==='UP'?'up':'down'):'wait');
+ el('strongAge').textContent=online?(d.updated?'Checked '+new Date(d.updated).toLocaleTimeString():'Checking'):'No fresh server update';
+ el('strongReason').textContent='3m '+(quality.fast_3m_pct??'—')+'% · 15m '+(quality.slow_15m_pct??'—')+'% · volume '+(quality.volume_ratio??'—')+'× · '+(lowVolume?'low-volume warning · ':'')+(quality.status||d.status||'CHECKING')+' · not a calibrated win probability';
+ const f=d.final_15m||{}, recorded=(d.history||[]).find(x=>x.phase==='FINAL_15M'&&x.market===f.market), left=Number(f.seconds_left);
+ const liveLocked=d.last_halfway_ai?.market===f.market&&['UP','DOWN'].includes(d.last_halfway_ai?.direction)?d.last_halfway_ai:null;
+ if(!recorded&&liveLocked){
+  el('final15Signal').textContent='FINAL 15M '+liveLocked.direction;
+  el('final15Signal').className='value '+(liveLocked.direction==='UP'?'up':'down');
+  el('final15Time').textContent='Locked '+new Date(liveLocked.updated).toLocaleTimeString();
+  el('final15Reason').textContent='Server saved this decision; settlement result waits for the history feed.';
+ }else if(!recorded&&f.market&&Number.isFinite(left)&&left<390){
+  el('final15Signal').textContent='CALL NOT RECORDED';
+  el('final15Signal').className='value wait';
+  el('final15Time').textContent='7:30 checkpoint passed';
+  el('final15Reason').textContent='No saved halfway decision found for this round. Check server feed, checkpoint, and database alerts; never invent a late prediction.';
+ }else if(!recorded&&f.market&&Number.isFinite(left)&&left<=450){
+  el('final15Signal').textContent='CAPTURING · 7:30 LEFT';
+  el('final15Time').textContent='Checking saved decision';
+  el('final15Reason').textContent='Server is attempting the checkpoint; awaiting a persisted call.';
+ }
+ // The primary uses an independent momentum threshold and current target-side context,
+ // never copies the stronger prediction verdict to manufacture agreement.
+ if(!window.btcPrimaryLocalLive){
+  const primary=el('currentSignal'),m3=Number(ext.momentum_pct),m15=Number(ext.long_momentum_pct);
+  let direction=null;
+  if(online&&validMarket&&validCandles&&Number.isFinite(m3)&&Number.isFinite(m15)&&Math.abs(m3)>=0.025&&Math.abs(m15)>=0.05&&Math.sign(m3)===Math.sign(m15))
+   direction=m3>0?'UP':'DOWN';
+  const side=d.target_behavior?.side, conflict=direction&&['UP','DOWN'].includes(side)&&direction!==side;
+  primary.textContent=!online?'SERVER STALE':!validMarket?'NO VERIFIED MARKET':!validCandles?'WAIT · FEED STALE':direction?'SERVER LEAN '+direction:'WAIT · MIXED MOMENTUM';
+  primary.className='value '+(direction&&!conflict?(direction==='UP'?'up':'down'):'wait');
+  el('currentReason').textContent=direction?'Independent 3m/15m momentum agreement on '+(ext.source||'exchange data')+' · '+(conflict?'official target side currently conflicts · ':'')+'not a verified settlement prediction':!online?'Cannot predict from a disconnected server':!validMarket?'Waiting for current Polymarket 15-minute contract':!validCandles?'BTC data missing or stale':'Momentum not aligned strongly enough for a call';
+ }
+}
+function renderPeerBots(d){const root=document.getElementById('peerBotsLive');if(!root)return;root.replaceChildren();const studies=d.external?.bot_research_signals||{},price=d.external?.price_action||{};const liveAge=Number(d.external?.candle_age_seconds),fresh=d.status==='running'&&Number.isFinite(liveAge)&&liveAge>=0&&liveAge<=75;
+const checkpoint=d.last_checkpoint||{},saved=checkpoint.market===d.market?checkpoint.calls||{}:{};
+const names=[['BOT_MACD','MACD TREND'],['BOT_BOLLINGER','BOLLINGER REVERSAL'],['BOT_SUPERTREND','ATR BREAKOUT'],['PRICE_ACTION','RANGE / LIQUIDITY'],['BOT_CONSENSUS','BOT + AI AGREEMENT']];
+for(const [key,title] of names){const call=key==='PRICE_ACTION'?price:key==='BOT_CONSENSUS'?saved.BOT_CONSENSUS||{}:studies[key]||{};const row=document.createElement('div');row.style.cssText='padding:8px 1px;border-top:1px solid #2a3e55;display:flex;justify-content:space-between;gap:10px';
+const label=document.createElement('span');const direction=document.createElement('strong');label.textContent=title+' · '+(key==='BOT_CONSENSUS'?'last checkpoint':(key==='PRICE_ACTION'?price.setup||'':'live analysis'))+' · '+(call.reason||'Collecting data');label.style.overflowWrap='anywhere';let verdict=key==='BOT_CONSENSUS'?(saved.BOT_CONSENSUS?.direction||'WAIT'):(fresh?call.direction||'WAIT':'STALE');
+direction.textContent=verdict;direction.style.whiteSpace='nowrap';direction.style.color=verdict==='UP'?'#6ce2d1':verdict==='DOWN'?'#ff927d':'#b5c4d9';row.append(label,direction);root.append(row)}
+if(!fresh){const msg=document.createElement('div');msg.textContent='Reference is exchange proxy only; fresh completed candles required. Current indicators withheld.';root.append(msg)}}
+function renderFutureSettlement(d){
+ const f=d.settlement_forecast||{}, a=d.ai_confirmation||{}, dollar=x=>Number(x).toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2,minimumFractionDigits:2});
+ const show=(id,value)=>{const e=document.getElementById(id);if(e)e.textContent=value};
+ const ok=f.status==='available'&&Number.isFinite(f.forecast_final_mean_usd);
+ show('futureForecastStatus',ok?'FUTURE FORECAST · '+(f.quality||'UNRATED'):String(f.reason||'BRTI evidence unavailable').slice(0,85));
+ show('futureForecastPrice',ok?dollar(f.forecast_final_mean_usd):'—');
+ const dir=document.getElementById('futureForecastDirection');
+ if(dir){dir.textContent=ok?f.projected_direction:'UNAVAILABLE';dir.className='value '+(ok?(f.projected_direction==='UP'?'up':f.projected_direction==='DOWN'?'down':'wait'):'wait');dir.style.fontSize='24px'}
+ show('futureForecastComparison',ok?'Official target '+dollar(f.target_usd)+' · Current BRTI '+dollar(f.current_reference_usd)+' · Forecast future move '+(f.forecast_delta_from_current_usd>0?'+':'')+dollar(f.forecast_delta_from_current_usd)+' · '+(f.seconds_to_settlement??'—')+'s remaining':'No verified numeric future BRTI forecast. Exchange spot is not substituted.');
+ show('futureForecastRange',ok?'Volatility scenario (NOT a calibrated interval): '+dollar(f.downside_scenario_usd)+' to '+dollar(f.upside_scenario_usd)+(f.target_in_scenario_range?' · target inside scenario range':' · target outside range'):'Scenario range unavailable');
+ show('futureForecastEvidence',ok?'Projected net movement speed '+Number(f.net_trend_usd_per_min||0).toFixed(2)+' USD/min · BRTI trend horizons '+(f.slope_inputs||0)+' · Final-minute ticks already observed '+(f.observed_final_minute_seconds||0)+'/60'+(f.missing_past_final_minute_seconds?' · missing '+f.missing_past_final_minute_seconds+' earlier final-minute ticks':''):'Requires fresh official BRTI and target data to forecast forward');
+ const aiValid=ok&&a.status==='ready'&&a.market===d.market&&Number.isFinite(a.forecast_final_mean_usd);
+ const cp=d.last_checkpoint||{}, shadow=cp.market===d.market?(cp.calls||{}).ANCHORED_SHADOW||{}:{};
+ show('futureShadowPrice',shadow.status==='available'&&Number.isFinite(shadow.forecast_final_mean_usd)?'Research-only guarded price: '+dollar(shadow.forecast_final_mean_usd)+' · '+(shadow.direction||'—')+' · independent AI call unchanged':'Research-only price guard: awaiting a current-round checkpoint; AI call unchanged');
+ const gd=d.guarded_primary||{},locked=d.last_guarded_primary?.market===d.market?d.last_guarded_primary:null;
+ show('guardedLive',gd.status==='available'?'GUARDED LIVE RESEARCH · '+gd.direction+' · projected '+dollar(gd.forecast_final_mean_usd)+' · '+gd.regime+' · '+gd.quality+' evidence':'GUARDED LIVE RESEARCH · '+(gd.reason||'Awaiting fresh verified BRTI'));
+ show('guardedLocked',locked&&locked.status==='available'?'Locked halfway guarded call: '+locked.direction+' · projected '+dollar(locked.forecast_final_mean_usd)+' · research only':'Locked candidate: awaiting halfway checkpoint');
+ const rv=d.manual_entry_review||{};
+ show('guardedTrade',rv.status==='estimated'?'MANUAL VALUE CHECK · '+rv.action+' · quote '+Number(rv.entry_price).toFixed(3)+' · breakeven '+Number(rv.required_win_rate_pct).toFixed(1)+'% estimated · no calibrated win odds':'MANUAL VALUE CHECK · '+(rv.reason||'Quote or forecast unavailable'));
+ show('futureAiPrice',aiValid?'AI independent projected final average: '+dollar(a.forecast_final_mean_usd)+' · '+(a.verdict||'?')+' · '+(a.forecast_rationale||'Future movement assessment'):'AI final-price estimate: awaiting a current-round verified BRTI forecast');
+}
+async function updateServer(){if(statusInFlight)return;statusInFlight=true;const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),7000);try{const r=await fetch('/api/status',{cache:'no-store',signal:ctrl.signal});if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json(),performance=d.ai_performance||{},counts=d.ai_verified_counts||d.ai_decision_counts||{},allCounts=d.counts||{};if(d.database_error)throw Error('Prediction database: '+d.database_error);window.btcServerStatus=d;window.dispatchEvent(new Event('btc-status-updated'));renderFutureSettlement(d);const fifteen=d.final_15m||{},fifteenRow=(d.history||[]).find(x=>x.phase==='FINAL_15M'&&x.market===fifteen.market);const fifteenEl=$('final15Signal');if(fifteenRow){fifteenEl.textContent='FINAL 15M '+fifteenRow.direction;fifteenEl.className='value '+(fifteenRow.direction==='UP'?'up':fifteenRow.direction==='DOWN'?'down':'wait');$('final15Time').textContent='Locked '+new Date(fifteenRow.created_at).toLocaleTimeString();$('final15Reason').textContent='Official result: '+fifteenRow.result+' · Score '+fifteenRow.score+' · Locked for this 15-minute round.';}else{fifteenEl.textContent=fifteen.market?'SCHEDULED · 7:30 LEFT':'15M MARKET UNAVAILABLE';fifteenEl.className='value wait';$('final15Time').textContent=fifteen.seconds_left!=null?Math.max(0,Math.ceil(fifteen.seconds_left-450))+'s to trigger':'Awaiting verified contract';$('final15Reason').textContent=fifteen.market?'Server will save one independent 15-minute final call at the first poll reaching 7:30 remaining.':'Polymarket US 15m lookup: '+(fifteen.lookup||'pending');}const strong=$('strongSignal'),strongReason=$('strongReason'),strongAge=$('strongAge'),quality=d.external?.signal_quality||{};const confirmed=d.status==='running'&&quality.status==='CONFIRMED_TREND'&&(d.signal==='UP'||d.signal==='DOWN');strong.textContent=confirmed?'CONFIRMED '+d.signal:'WAIT · NO STRONG CONFIRMATION';strong.className='value '+(confirmed?(d.signal==='UP'?'up':'down'):'wait');strongAge.textContent=d.updated?'Checked '+new Date(d.updated).toLocaleTimeString():'Awaiting server';strongReason.textContent='3m '+(quality.fast_3m_pct??'—')+'% · 15m '+(quality.slow_15m_pct??'—')+'% · volume '+(quality.volume_ratio??'—')+'× · '+(quality.status||d.status||'CHECKING')+' · not a calibrated win probability';const wins=Number.isFinite(Number(performance.wins))?Number(performance.wins):(Number(counts.WIN)||0),losses=Number.isFinite(Number(performance.losses))?Number(performance.losses):(Number(counts.LOSS)||0),pending=Number.isFinite(Number(performance.pending))?Number(performance.pending):(Number(counts.PENDING)||0); $('serverState').textContent=d.status||'UNKNOWN';$('serverCounts').textContent='LAST '+(performance.window_size||100)+' SETTLED · '+(wins+losses)+' available · refreshed '+new Date().toLocaleTimeString();$('winCount').textContent=wins;$('lossCount').textContent=losses;$('pendingCount').textContent=pending;$('winRate').textContent=wins+losses?(100*wins/(wins+losses)).toFixed(1)+'%':'—';$('winLossRatio').textContent='LAST '+(performance.window_size||100)+' WIN/LOSS RATIO · '+wins+':'+losses+(losses?' ('+(wins/losses).toFixed(2)+' wins per loss)':' (no recorded losses)')+' · '+pending+' pending settlement';const info=d.settlement_diagnostic;$('settlementInfo').textContent=info?'Settlement: '+(info.verified||0)+' verified this check · '+(info.unresolved||0)+' unresolved · '+(info.checked||0)+' checked'+((info.errors||[]).length?' · '+info.errors.length+' errors':''):'Settlement: awaiting diagnostics from latest server version';renderPersistentSignals(d);renderPeerBots(d);const box=$('serverLatest');box.replaceChildren();const history=(d.history||[]).filter(x=>x.decision_source==='AI_REVIEW').slice(0,8);if(!history.length){box.textContent='No genuine AI predictions saved in the recent history yet.';return}for(const h of history){const item=document.createElement('div');item.className='history-item';const left=document.createElement('div'),title=document.createElement('div'),meta=document.createElement('div'),status=document.createElement('span');title.className='history-title';title.textContent=safeText(h.phase)+' · '+safeText(h.direction);meta.className='history-meta';meta.textContent=safeText(h.market)+' · '+(h.created_at?new Date(h.created_at).toLocaleString():'');left.append(title,meta);status.textContent=safeText(h.result);status.className=h.result==='WIN'?'up':h.result==='LOSS'?'down':'wait';item.append(left,status);box.append(item)}}catch(e){
+ // A database status timeout must not falsely mark the live monitoring feed dead.
+ const ctrlLive=new AbortController(),liveTimer=setTimeout(()=>ctrlLive.abort(),4000);
+ try{
+  const r=await fetch('/api/live',{cache:'no-store',signal:ctrlLive.signal});
+  if(!r.ok)throw Error('Live HTTP '+r.status);
+  const live=await r.json();
+  if(!live.updated)throw Error('No live heartbeat yet');
+  renderPersistentSignals(live);
+  renderFutureSettlement(live);
+  renderPeerBots(live);
+  const seconds=Math.max(0,Math.round((Date.now()-Date.parse(live.updated))/1000));
+  const healthy=Number.isFinite(seconds)&&seconds<45;
+  $('serverState').textContent=healthy?'LIVE · HISTORY DELAYED':'MONITOR DATA STALE';
+  $('serverCounts').textContent='Last 100 settled: prior verified values · history retrying';
+  $('serverLatest').textContent=healthy?'Live signal updated '+seconds+'s ago · historical scoreboard is temporarily delayed.':'Live endpoint reachable but monitoring cycle '+seconds+'s old. Inspect server health.';
+  $('settlementInfo').textContent='History sync delayed; previously displayed win/loss counts are retained.';
+ }catch(liveError){
+  $('serverState').textContent='Connection interrupted';
+  $('serverLatest').textContent='Could not refresh history or live signals. Retaining last verified counts; retrying.';
+  $('serverCounts').textContent='Reconnecting…';
+  renderPersistentSignals({status:'disconnected',updated:null,external:{},final_15m:{}});
+ }finally{clearTimeout(liveTimer)}
+}finally{clearTimeout(timeout);statusInFlight=false}}async function refreshFutureForecastAudit(){
+ try{
+  const r=await fetch('/api/price-forecast/accuracy',{cache:'no-store'});if(!r.ok)throw Error('not ready');
+  const data=await r.json(), rows=(data.results||[]).filter(x=>x.checkpoint==='HALFWAY');
+  const get=k=>rows.find(x=>x.source===k);
+  const ai=get('AI'),path=get('PRICE_PATH'),naive=get('CURRENT_BRTI_BASELINE');
+  const t=x=>x?x.mean_absolute_error_usd.toLocaleString('en-US',{style:'currency',currency:'USD'})+' ('+x.graded+' rounds)':'awaiting samples';
+  const matched=(data.paired_comparisons||[]).find(x=>x.checkpoint==='HALFWAY');
+  const side=(data.paired_direction_comparisons||[]).find(x=>x.checkpoint==='HALFWAY');
+  const sideText=side?' · Matched settled UP/DOWN: AI '+side.ai_wins+'/'+side.paired_rounds+'; BRTI path '+side.path_wins+'/'+side.paired_rounds+' (not a guarantee)':'';
+  const aud=document.getElementById('futureForecastAudit');
+  aud.textContent=matched?'Matched halfway price accuracy · '+matched.paired_rounds+' identical rounds · AI average miss '+t({mean_absolute_error_usd:matched.ai_mae_usd,graded:matched.paired_rounds})+' · Future path '+t({mean_absolute_error_usd:matched.price_path_mae_usd,graded:matched.paired_rounds})+' · Unchanged-price baseline '+t({mean_absolute_error_usd:matched.unchanged_reference_mae_usd,graded:matched.paired_rounds}) +sideText+' · no hindsight':
+    'Final-price errors (UNPAIRED; samples may differ) · AI '+t(ai)+' · Future path '+t(path)+' · No-movement baseline '+t(naive)+' · 60/60 BRTI ticks required.';
+ }catch(e){document.getElementById('futureForecastAudit').textContent='Price error audit not available yet; pending complete verified final-minute BRTI observations.'}
+}
+async function refreshGuardedAudit(){
+ const el=document.getElementById('guardedAudit');if(!el)return;
+ try{const r=await fetch('/api/guarded-performance',{cache:'no-store'});if(!r.ok)throw Error('unavailable');
+  const data=await r.json(),half=(data.results||[]).find(x=>x.checkpoint==='HALFWAY');
+  el.textContent=half&&half.settled?'GUARDED FORWARD TEST · '+half.wins+'/'+half.settled+' settled ('+half.accuracy_pct+'%) · AI on paired rounds '+(half.raw_ai_paired_pct??'—')+'%':'GUARDED FORWARD TEST · Collecting new official settled predictions; no claimed win rate yet.';
+ }catch(e){el.textContent='GUARDED FORWARD TEST · Evaluation temporarily unavailable.'}
+}
+async function refreshFirstFiveQuickAccuracy(){
+ const summary=document.getElementById('quickAccuracySummary'),mins=document.getElementById('quickAccuracyMinutes'),recent=document.getElementById('quickAccuracyRecent');
+ if(!summary||!mins||!recent)return;
+ try{
+  const response=await fetch('/api/quick-accuracy',{cache:'no-store'});
+  if(!response.ok)throw Error('not available');
+  const data=await response.json(),n=Number(data.graded||0),wins=Number(data.wins||0),losses=Number(data.losses||0);
+  const ratio=n?Number(data.accuracy_pct).toFixed(1)+'%':'collecting';
+  summary.textContent='FIRST 5 MIN · Next-60s quick accuracy '+ratio+' · '+wins+' WIN / '+losses+' LOSS · last '+n+'/100 graded';
+  mins.textContent=(data.minutes||[]).map(x=>'M'+x.minute+' '+(x.graded?x.wins+'/'+x.graded+' ('+x.accuracy_pct+'%)':'—')).join(' · ')+
+   ' · '+(data.pending||0)+' pending · '+(data.no_call||0)+' no-call · '+(data.ties||0)+' tied';
+  recent.replaceChildren();
+  for(const call of (data.recent||[]).slice(0,8)){
+   const line=document.createElement('div');
+   const when=new Date(Number(call.captured_epoch)*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+   line.textContent=when+' · minute '+(Number(call.minute_slot)+1)+' · '+String(call.direction)+' · '+String(call.result);
+   recent.append(line);
+  }
+  if(!(data.recent||[]).length)recent.textContent='No saved quick calls yet. Calls begin during the first five minutes of future rounds.';
+ }catch(error){
+  summary.textContent='FIRST 5 MIN · Quick accuracy unavailable; retaining existing prediction signals';
+  mins.textContent='Historical quick-call database temporarily unavailable';
+ }
+}
+refreshFirstFiveQuickAccuracy();setInterval(()=>{if(!document.hidden)refreshFirstFiveQuickAccuracy()},30000);
+refreshFutureForecastAudit();refreshGuardedAudit();setInterval(()=>{if(!document.hidden){refreshFutureForecastAudit();refreshGuardedAudit()}},120000);
+document.getElementById('advancedToggle')?.addEventListener('click',updateServer);updateServer();setInterval(()=>{if(!document.hidden)updateServer()},2000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)updateServer()})})();</script><section class="card" id="externalIntelPanel"><div class="label">AI OUTSIDE DATA · EXCHANGE FLOW &amp; NEWS</div><div id="intelFlow" class="small" style="margin-top:10px">Loading exchange trades…</div><div id="intelBook" class="small" style="margin-top:8px"></div><div id="intelNewsStatus" class="small" style="margin-top:12px"></div><div id="intelHeadlines" class="small"></div><p class="small">Observed Coinbase/Kraken trade samples and Kraken depth update about every 15 seconds. Selected publisher headlines refresh about every 2 minutes. Coverage is partial; wallet transfers are not verified buys or sells.</p></section><section class="card" id="aiConfirmationPanel" style="margin:14px 0;border:1px solid #354766;border-radius:14px;padding:16px;background:#121d31;color:#e8f0ff"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><strong style="font-size:17px">AI CONFIRMATION · 15-MIN ONLY</strong><span id="aiVerdict" style="font-weight:800">NOT CONFIGURED</span></div><div id="aiReason" style="margin-top:10px;font-size:13px;line-height:1.5;color:#bac9dd">Waiting for server data…</div><div id="aiMeta" style="margin-top:9px;font-size:11px;color:#8ca2bd">AI reviews indicator consistency; it does not predict guaranteed wins or place orders.</div></section><section class="card" id="aiDecisionLog" style="margin:12px 0"><div class="label">AI DECISION HISTORY · 15-MIN FINAL ONLY</div><div class="small" id="aiLogStats" style="margin:8px 0">Awaiting recorded AI decisions…</div><div id="aiLogRows" class="small"></div></section><script>(function(){async function pollAI(){try{const r=await fetch('/api/live',{cache:'no-store'});if(!r.ok)throw Error('Server unavailable');const d=await r.json();const a=d.ai_confirmation||{};const intel=d.external?.external_intelligence||{},flow=intel.trade_flow||{},book=intel.order_book||{},news=intel.news||{};
+const money=n=>'$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0});
+document.getElementById('intelFlow').textContent=(flow.exchanges||[]).map(x=>x.source+': '+(x.status==='fresh'?'buy-initiated '+money(x.buy_usd)+' / sell-initiated '+money(x.sell_usd)+' · '+x.trade_count+' trades · '+x.age_seconds+'s old':x.status||'unavailable')).join(' | ')||'Trade flow: '+(flow.status||'unavailable');
+document.getElementById('intelBook').textContent='Kraken depth: '+(book.status==='fresh'?'imbalance '+(Number(book.imbalance)*100).toFixed(1)+'% · '+book.age_seconds+'s old':book.status||'unavailable');
+document.getElementById('intelNewsStatus').textContent='News: '+(news.status||'unavailable')+' · '+(news.age_seconds!=null?news.age_seconds+'s since feed check':'not checked')+' · '+(news.headlines||[]).length+' recent headlines';
+const headlines=document.getElementById('intelHeadlines');headlines.replaceChildren();for(const h of news.headlines||[]){const line=document.createElement('div'),link=document.createElement('a');line.style.cssText='padding:8px 0;border-top:1px solid #2a3e55';link.textContent=h.title;try{const url=new URL(h.url);if(!['https:','http:'].includes(url.protocol))continue;link.href=url.href}catch(e){continue}link.target='_blank';link.rel='noopener noreferrer';line.append(link,document.createTextNode(' · '+h.source+' · '+new Date(h.published_at).toLocaleString()));headlines.append(line)}
+const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').textContent='LAST 100 SETTLED · WIN '+(counts.WIN||0)+' · LOSS '+(counts.LOSS||0)+' · PENDING (ALL) '+(counts.PENDING||0);const log=document.getElementById('aiLogRows');log.replaceChildren();for(const x of (d.ai_decision_history||[]).slice(0,12)){const line=document.createElement('div');line.style.cssText='padding:8px 0;border-top:1px solid #2a3e55;line-height:1.5';line.textContent=(x.direction||'?')+' · '+(x.result||'PENDING')+' · '+(x.confidence||'UNRATED')+' · '+(x.source||'UNKNOWN')+' · '+(x.created_at||'')+' — '+(x.reason||'');log.append(line)};const verdict=a.status==='ready'?(a.verdict||'WAIT'):(a.status||'NOT CONFIGURED').replaceAll('_',' ').toUpperCase();const el=document.getElementById('aiVerdict');el.textContent=verdict;el.style.color=verdict==='UP'?'#3de5a5':verdict==='DOWN'?'#ff7777':'#a6b6cb';document.getElementById('aiReason').textContent=(a.confidence?'Confidence: '+a.confidence+' · ':'')+(a.reason||'AI prediction is waiting for valid server-side data.');let stamp=Date.parse(d.updated||''),lastAI=Number(a.updated_epoch||a.captured_epoch||0)*1000;let stale=a.status==='ready'&&(!d.market||a.market!==d.market||!String(a.market).includes('btc-updown-15m-')||!Number.isFinite(stamp)||Date.now()-stamp>45000||!lastAI||Date.now()-lastAI>180000);document.getElementById('aiMeta').textContent=(a.model||'AI')+' · '+(a.market||'No round')+' · '+(a.phase||'')+(stale?' · STALE OR PREVIOUS ROUND — NOT CURRENT':'')+' · Research only; no automatic orders.';if(stale){el.textContent='STALE / WAIT';el.style.color='#ffbd5a'}}catch(e){document.getElementById('aiVerdict').textContent='UNAVAILABLE';document.getElementById('aiReason').textContent='Could not reach AI confirmation on Render.'}}pollAI();setInterval(()=>{if(!document.hidden)pollAI()},20000)})();</script><section class="card terminal-secondary"><div class="label">ENTRY COST SCENARIO · NO ORDERS</div><p class="small" id="entryQuote">Fetching contract quotes…</p><div class="research-controls"><label>Direction<select id="costDirection"><option>UP</option><option>DOWN</option></select></label><label>Contracts<input id="costQuantity" type="number" min="1" max="1000000" value="100" step="1"></label><label>Slippage (cents)<input id="costSlippage" type="number" min="0" max="25" value="0.5" step="0.1"></label></div><button id="costCalculate">Calculate scenario</button><p id="entryResult" class="small"></p><p id="entryDetails" class="small"></p><a class="small" href="https://docs.polymarket.us/fees" target="_blank" rel="noopener">US fee schedule · checked October 25, 2026</a></section>
+<section class="card terminal-secondary"><div class="label">WHAT NEWS INFLUENCED THE AI?</div><div id="newsInfluence" style="margin-top:10px"></div></section>
+<section class="card" id="researchDashboard"><div class="row" style="justify-content:space-between"><div class="label">FORWARD COMPARISON LOG · 15-MINUTE MARKETS</div><a href="/api/research.csv">Download CSV + evidence</a></div><p class="small" id="researchAsOf">Collecting new observations…</p><p class="small" id="researchError" aria-live="polite"></p><div class="research-scroll" id="strategyTable"></div><p class="small">AI, selective indicators, forced indicator direction, and the current target side share the same saved data snapshot. AI failures are marked no call. Outcomes require official settlement.</p><p class="small">* Paper P&amp;L assumes 100 contracts, 0.5¢ adverse slippage per contract, the recorded top-of-book quote and standard US taker fee. Only calls with valid quotes are priced. No actual trades, rebates, fill-depth guarantees or profitability claims.</p><details open><summary>AI confidence scorecard</summary><div class="research-scroll" id="confidenceTable"></div><p class="small">Confidence is the model's label, not a calibrated probability. Small samples and dependence between rounds limit conclusions.</p></details><details><summary>Earlier logged halfway AI confidence</summary><div class="research-scroll" id="priorConfidence"></div><p class="small">Earlier genuine AI calls only; these do not have matched baseline snapshots.</p></details><details open><summary>Does AI beat the baselines at the same time?</summary><div class="research-scroll" id="pairedTable"></div></details><details><summary>Recent saved calls and news attribution</summary><div id="researchRecent"></div></details></section><script>
+/* Arrange existing live widgets into the requested chart-first terminal layout.
+   Move DOM nodes rather than duplicate them, preserving live update handlers. */
+(()=>{
+ const chart=document.getElementById('heroChart');
+ const reference=document.getElementById('targetResearch');
+ const ai=document.getElementById('aiConfirmationPanel');
+ const brti=document.getElementById('brtiHero');
+ if(!chart)return;
+ document.body.insertBefore(chart,document.body.firstElementChild);
+ const cards=document.createElement('div');cards.id='terminalQuickCards';
+ chart.insertAdjacentElement('afterend',cards);
+ // The reference panel has no live updater; do not show a permanent CONNECTING placeholder.
+ if(reference)reference.remove();
+ for(const id of ['fastPanel','strongPanel','final15Panel']){const panel=document.getElementById(id);if(panel)cards.append(panel)}
+ const primary=document.getElementById('currentSignal')?.closest('.card');if(primary){primary.id='primaryPanel';cards.append(primary)}
+ if(brti)cards.insertAdjacentElement('afterend',brti);
+ if(ai)cards.insertAdjacentElement('afterend',ai);
+ const toggle=document.getElementById('advancedToggle');if(toggle)cards.insertAdjacentElement('afterend',toggle);
+})();
+</script><script>
+/* Secondary, independently graded five-minute market; primary 15m layout unchanged. */
+(()=>{
+ const primary=document.getElementById('final15Panel');
+ if(!primary)return;
+ const panel=document.createElement('section');
+ panel.id='fiveMinutePanel';
+ panel.className='card';
+ panel.style.cssText='border-left:4px solid #b79aff;margin-top:10px';
+ panel.innerHTML='<div class="row" style="justify-content:space-between"><span class="label">5-MINUTE POLYMARKET · SECONDARY</span><span class="small" id="fiveCountdown">Checking market</span></div><div class="value wait" id="fiveDirection">WAIT</div><div class="small" id="fiveTarget">Official target: awaiting verified contract</div><div class="small" id="fiveForecast">Frozen prediction: awaiting fresh BRTI</div><div class="small" id="fiveLiveProjection" style="margin-top:8px;font-weight:600">Live projected settlement: awaiting verified BRTI</div><div class="small" id="fiveLead">Projected gap versus official target: —</div><div class="small" id="fiveReversal">Reversal evidence: checking</div><svg id="fivePathChart" viewBox="0 0 640 220" role="img" aria-label="Official five-minute BRTI observations, price to beat, and illustrative projected final-minute mean" style="width:100%;height:auto;display:none;max-height:230px;margin-top:10px;background:#0a151c;border-radius:8px"></svg><div class="small" id="fiveVisualNote">Observed official BRTI ticks only. Dotted path is illustrative; final result is the last 60-second average, not the last traded price.</div><div class="small" id="fiveScore" style="margin-top:8px;font-weight:700">Early 5m accuracy: collecting</div><div class="small" id="fiveLateScore" style="margin-top:4px;font-weight:700">2:30 checkpoint accuracy: collecting</div><details style="margin-top:6px"><summary class="small">Last 5m predictions and results</summary><div id="fiveRecent" class="small"></div></details><div class="small" id="fiveMarketLink"></div><p class="small">Independent 5-minute BRTI forecast. Early and 2:30-left calls are frozen and graded separately against verified settlements. The 2:30 call is captured with 120–150 seconds remaining; missed checkpoints are not backfilled. Older off-window calls remain in the audit but are excluded from the strict 2:30 accuracy. Does not affect 15-minute signals or win rate.</p>';
+ primary.insertAdjacentElement('afterend',panel);
+ const el=id=>document.getElementById(id);
+ const money=v=>v!==null&&v!==undefined&&Number.isFinite(Number(v))?'USD '+Number(v).toFixed(2):'—';
+ function drawFivePath(visual){
+  const svg=el('fivePathChart');
+  svg.replaceChildren();
+  const pts=Array.isArray(visual?.observed_points)?visual.observed_points.filter(p=>Array.isArray(p)&&p.length===2&&Number.isFinite(Number(p[0]))&&Number.isFinite(Number(p[1]))&&Number(p[1])>0):[];
+  const start=Number(visual?.window_start_epoch),end=Number(visual?.window_end_epoch);
+  const target=Number(visual?.official_target_usd),mean=Number(visual?.projected_settlement_average_usd);
+  const current=Number(visual?.current_reference_usd);
+  if(visual?.status!=='available'||pts.length<2||!(end>start)||![target,mean,current].every(Number.isFinite)){
+   svg.style.display='none';return;
+  }
+  svg.style.display='block';
+  const width=640,height=220,left=18,right=94,top=18,bottom=25;
+  const values=pts.map(p=>Number(p[1])).concat([target,mean,current]);
+  const min=Math.min(...values),max=Math.max(...values),pad=Math.max(3,(max-min)*.12);
+  const lo=min-pad,hi=max+pad;
+  const X=t=>left+(Math.max(start,Math.min(end,t))-start)/(end-start)*(width-left-right);
+  const Y=p=>top+(hi-p)/(hi-lo)*(height-top-bottom);
+  const ns='http://www.w3.org/2000/svg';
+  const make=(tag,props,text)=>{
+   const n=document.createElementNS(ns,tag);
+   for(const [k,v] of Object.entries(props||{}))n.setAttribute(k,String(v));
+   if(text!==undefined)n.textContent=text;
+   svg.append(n);return n;
+  };
+  make('rect',{x:X(end-60),y:top,width:X(end)-X(end-60),height:height-top-bottom,fill:'#315443','fill-opacity':'.27'});
+  make('line',{x1:X(end-60),y1:top,x2:X(end-60),y2:height-bottom,stroke:'#6fa48a','stroke-dasharray':'3 5','stroke-opacity':'.7'});
+  for(let i=0;i<3;i++){
+   const v=lo+(hi-lo)*(i+1)/4;
+   make('line',{x1:left,y1:Y(v),x2:X(end),y2:Y(v),stroke:'#34434a','stroke-opacity':'.7'});
+  }
+  make('line',{x1:left,y1:Y(target),x2:X(end),y2:Y(target),stroke:'#d7dde4','stroke-width':'1.2','stroke-dasharray':'5 5'});
+  let path='',previous=null;
+  for(const p of pts){
+   const t=Number(p[0]),v=Number(p[1]);
+   path+=(previous===null||t-previous>10?'M':'L')+X(t).toFixed(1)+','+Y(v).toFixed(1)+' ';
+   previous=t;
+  }
+  make('path',{d:path,fill:'none',stroke:'#fb9d37','stroke-width':'2.6','stroke-linecap':'round','stroke-linejoin':'round'});
+  const last=pts[pts.length-1];
+  make('circle',{cx:X(Number(last[0])),cy:Y(Number(last[1])),r:3.2,fill:'#fb9d37'});
+  // The dotted guide is illustrative; its endpoint is a final-minute AVERAGE, not a future spot tick.
+  make('line',{x1:X(Number(last[0])),y1:Y(Number(last[1])),x2:X(end-30),y2:Y(mean),stroke:'#71b8ff','stroke-width':'2','stroke-dasharray':'4 6'});
+  make('line',{x1:X(end-60),y1:Y(mean),x2:X(end),y2:Y(mean),stroke:'#71b8ff','stroke-width':'2.5','stroke-dasharray':'4 4'});
+  make('text',{x:X(end)+6,y:Math.max(13,Math.min(height-20,Y(target)+4)),fill:'#d7dde4','font-size':'13'},target.toFixed(2));
+  make('text',{x:X(end)+6,y:Math.max(13,Math.min(height-20,Y(mean)-6)),fill:'#71b8ff','font-size':'13'},'AVG '+mean.toFixed(2));
+  make('text',{x:X(end-60)+5,y:height-6,fill:'#8aa99b','font-size':'12'},'Final 60s');
+ }
+ let fiveBusy=false;
+ async function refreshFive(){
+ if(fiveBusy||document.hidden)return;
+ fiveBusy=true;
+ const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),4500);
+ try{
+   const response=await fetch('/api/five-minute',{cache:'no-store',signal:controller.signal});
+   if(!response.ok)throw Error('Unavailable');
+   const data=await response.json(),live=data.live||{},accuracy=data.accuracy||{};
+   const dir=['UP','DOWN'].includes(live.direction)?live.direction:'WAIT';
+   el('fiveDirection').textContent=dir;
+   el('fiveDirection').className='value '+(dir==='UP'?'up':dir==='DOWN'?'down':'wait');
+   el('fiveCountdown').textContent=live.seconds_left!=null?Math.floor(live.seconds_left/60)+':'+String(Math.max(0,live.seconds_left%60)).padStart(2,'0')+' left':(live.reason||'Checking');
+   el('fiveTarget').textContent='Official target: '+money(live.target);
+   el('fiveForecast').textContent=(live.phase==='LATE_2M30'?'FROZEN 2:30 CHECKPOINT':'FROZEN EARLY CHECKPOINT')+' · Projected final 60s BRTI mean: '+money(live.forecast)+' · '+(live.reason||live.status||'Checking official market');
+   const visual=live.visual_forecast||{},verified=visual.status==='available'&&visual.source==='Polymarket US BTC reference / BRTI'&&Math.abs(Number(visual.official_target_usd)-Number(live.target))<=0.02;
+   el('fiveLiveProjection').textContent=verified?'LIVE BRTI · '+money(visual.current_reference_usd)+' · projected final 60s mean '+money(visual.projected_settlement_average_usd):'Live projection unavailable · '+(visual.reason||'Awaiting verified reference');
+   el('fiveLead').textContent=verified?'Projected gap vs official target: '+(visual.projected_gap_usd>=0?'+':'')+Number(visual.projected_gap_usd).toFixed(2)+' USD · heuristic range '+money(visual.downside_scenario_usd)+' to '+money(visual.upside_scenario_usd):'Projected gap versus official target: —';
+   el('fiveReversal').textContent=verified?(visual.reversal_warning?'REVERSAL WATCH · observed short and longer BRTI slopes disagree':'No opposing BRTI slopes detected')+' · '+(visual.quality||'UNRATED')+' data quality · not a probability':'Reversal evidence: unavailable';
+   el('fiveVisualNote').textContent='Official BRTI ticks only · updated '+(verified?Math.round(visual.reference_age_seconds||0)+'s behind latest index':'when fresh')+'. Dashed path is illustrative; settlement uses the final 60-second AVERAGE. No contract pricing or trade signals.';
+   drawFivePath(verified?visual:null);
+   el('fiveScore').textContent='Early 5m accuracy: '+(accuracy.graded?accuracy.accuracy_pct+'%':'collecting')+' · '+(accuracy.wins||0)+' WIN / '+(accuracy.losses||0)+' LOSS · last '+(accuracy.graded||0)+'/100 settled';
+   const late=accuracy.late||{};
+   el('fiveLateScore').textContent='2:30 checkpoint accuracy: '+(late.graded?late.accuracy_pct+'%':'collecting')+' · '+(late.wins||0)+' WIN / '+(late.losses||0)+' LOSS · last '+(late.graded||0)+'/100 settled';
+   el('fiveRecent').replaceChildren();
+   for(const item of (accuracy.recent||[])){
+    const line=document.createElement('div');
+    line.textContent=item.market+' · '+item.direction+' · '+item.result;
+    el('fiveRecent').append(line);
+   }
+   const link=el('fiveMarketLink');link.replaceChildren();
+   if(live.url&&/^https:\/\/polymarket\.us\/event\/(?:cpc-)?btc-updown-5m-[a-zA-Z0-9-]+$/.test(live.url)){
+    const a=document.createElement('a');a.href=live.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='View current 5m market on Polymarket';link.append(a);
+   }
+  }catch(e){el('fiveCountdown').textContent='Feed unavailable';}finally{clearTimeout(timeout);fiveBusy=false;}
+ }
+ refreshFive();setInterval(()=>{if(!document.hidden)refreshFive()},2000);
+})();
+</script><script>
+/* Recent verified rounds. Never uses odds, contract value, or live guessed outcomes. */
+(()=>{
+ const css=document.createElement('style');
+ css.textContent=`
+ .verified-rounds{margin-top:14px;border-top:1px solid #36506b;padding-top:12px}
+ .verified-rounds .round-title{font-size:12px;font-weight:800;letter-spacing:.05em}
+ .verified-rounds .round-meta,.verified-rounds .round-legend{font-size:11px;color:#acc3d8;margin:7px 0;line-height:1.55}
+ .verified-rounds .round-sub{font-size:11px;font-weight:700;color:#d2e4f5;margin:9px 0 5px}
+ .verified-rounds .round-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px}
+ .verified-rounds .round-tile{min-width:0;height:29px;border-radius:5px;border:2px solid transparent;display:flex;justify-content:center;align-items:center;font-weight:900;font-size:14px}
+ .verified-rounds .round-tile.up{background:#059a69;color:#f4fffa}
+ .verified-rounds .round-tile.down{background:#dd3f59;color:white}
+ .verified-rounds .round-tile.right{border-color:#f6fbff}
+ .verified-rounds .round-tile.wrong{opacity:.46}
+ .verified-rounds .round-tile.missing{background:#1a2838;border:2px dashed #516477;color:#91a4b7}
+ `;
+ document.head.append(css);
+ const el=id=>document.getElementById(id);
+ function create(parent,title,id,late){
+  if(!parent)return;
+  const shell=document.createElement('section');shell.className='verified-rounds';
+  const heading=document.createElement('div');heading.className='round-title';heading.textContent=title;
+  const meta=document.createElement('div');meta.className='round-meta';meta.id=id+'Meta';meta.textContent='Collecting verified results…';
+  shell.append(heading,meta);
+  function row(name,gridId){
+   const label=document.createElement('div');label.className='round-sub';label.textContent=name;
+   const grid=document.createElement('div');grid.className='round-grid';grid.id=gridId;grid.setAttribute('aria-label',name+' recent verified outcomes');
+   shell.append(label,grid);
+  }
+  row(late?'EARLY FORECAST':'FINAL AI FORECAST',id);
+  if(late)row('2:30 LEFT FORECAST · SAME ROUNDS','fiveLateTiles');
+  const legend=document.createElement('div');legend.className='round-legend';
+  legend.textContent='▲ Official UP · ▼ Official DOWN · white outline = correct call · faded = incorrect · dashed = no verified call. Oldest → newest.';
+  shell.append(legend);parent.append(shell);
+ }
+ create(el('serverHistory'),'LAST 36 VERIFIED 15-MINUTE ROUNDS','fifteenTiles',false);
+ create(el('fiveMinutePanel'),'LAST 36 VERIFIED 5-MINUTE ROUNDS','fiveTiles',true);
+ function draw(id,rounds,phase){
+  const grid=el(id);if(!grid)return;grid.replaceChildren();
+  for(const r of rounds.slice(-36)){
+   if(!['UP','DOWN'].includes(r.winner))continue;
+   const correct=phase==='early'?r.early_correct:phase==='late'?r.late_correct:r.correct;
+   const predicted=phase==='early'?r.early_prediction:phase==='late'?r.late_prediction:r.prediction;
+   const tile=document.createElement('span');tile.className='round-tile';
+   if(correct===null||correct===undefined){tile.classList.add('missing');tile.textContent='–';}
+   else{tile.classList.add(r.winner==='UP'?'up':'down',correct?'right':'wrong');tile.textContent=r.winner==='UP'?'▲':'▼';}
+   tile.title=r.market+' · official '+r.winner+' · '+(correct==null?'No verified '+phase+' call':phase+' predicted '+predicted+' · '+(correct?'RIGHT':'WRONG'));
+   tile.setAttribute('aria-label',tile.title);grid.append(tile);
+  }
+ }
+ let busy=false;
+ async function refreshRoundTiles(){
+  if(busy)return;busy=true;
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),7000);
+  try{
+   const response=await fetch('/api/round-tiles',{cache:'no-store',signal:controller.signal});
+   if(!response.ok)throw Error('History unavailable');
+   const data=await response.json();
+   if(data.status!=='observed'||data.ordering!=='oldest_to_newest')throw Error('Unverified history');
+   const f=data.fifteen||{},m=data.five||{};
+   const fr=Array.isArray(f.rounds)?f.rounds:[],mr=Array.isArray(m.rounds)?m.rounds:[];
+   draw('fifteenTiles',fr,'fifteen');draw('fiveTiles',mr,'early');draw('fiveLateTiles',mr,'late');
+   const fs=f.summary||{},ms=m.summary||{},ls=m.late_summary||{};
+   if(el('fifteenTilesMeta'))el('fifteenTilesMeta').textContent=(fs.rounds||0)+' rounds · '+(fs.up||0)+' UP / '+(fs.down||0)+' DOWN · '+(fs.correct||0)+' right / '+(fs.incorrect||0)+' wrong';
+   if(el('fiveTilesMeta'))el('fiveTilesMeta').textContent=(ms.rounds||0)+' rounds · '+(ms.up||0)+' UP / '+(ms.down||0)+' DOWN · early '+(ms.correct||0)+'/'+(ms.scored||0)+' right · 2:30 '+(ls.correct||0)+'/'+(ls.scored||0)+' right';
+  }catch(e){
+   for(const id of ['fifteenTilesMeta','fiveTilesMeta'])if(el(id))el(id).textContent='Verified history temporarily unavailable; retaining previous tiles';
+  }finally{clearTimeout(timeout);busy=false;}
+ }
+ refreshRoundTiles();
+ setInterval(()=>{if(!document.hidden)refreshRoundTiles()},10000);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshRoundTiles()});
+})();
+</script></body></html>
+
++v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   el('pmApiTarget').textContent=targetValid?money(target):'—';
   el('pmApiPrice').textContent=fresh?money(r.price):'—';
   const left=Number(r.window_end)-now;
@@ -339,75 +725,9 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
   const live=fresh&&targetValid,feed=el('pmApiFeed');
   feed.textContent=live?'LIVE · VERIFIED':!marketLive?'NO MARKET':!fresh?'REFERENCE STALE':'TARGET MISSING';
   feed.className='pm-feed'+(live?' live':'');
-  el('pmApiInfo').textContent=live?'Official BRTI tick '+Math.max(0,Math.round(referenceAge))+'s old · refresh every 5s':!marketLive?'Awaiting verified Polymarket 15-minute contract':!fresh?'Waiting for fresh official BRTI; exchange spot is not substituted':'Official target is not verified';
+  el('pmApiInfo').textContent=live?'Official BRTI tick '+Math.max(0,Math.round(referenceAge))+'s old · display refresh every 2s':!marketLive?'Awaiting verified Polymarket 15-minute contract':!fresh?'Waiting for fresh official BRTI; exchange spot is not substituted':'Official target is not verified';
  }
  window.addEventListener('btc-status-updated',()=>updatePolymarketSummary(window.btcServerStatus));
- function model(d,now){
-  const r=d?.reference_price||{},b=d?.brti_chart||{},f=d?.settlement_forecast||{};
-  const start=r.window_start,end=r.window_end,age=now-Date.parse(d?.updated||'')/1000;
-  if(d?.status!=='running'||!d.market?.includes('btc-updown-15m-')||b.market!==d.market||!finite(start)||!finite(end)||end-start!==900||now<start||now>=end)return null;
-  const points=(b.points||[]).filter(p=>Array.isArray(p)&&finite(p[0])&&finite(p[1])&&p[1]>0&&p[0]>=start&&p[0]<=now).sort((a,b)=>a[0]-b[0]);
-  const target=d.target_behavior?.target;
-  const fresh=r.status==='fresh'&&age>=-5&&age<20&&points.length>0&&now-points.at(-1)[0]<=15;
-  const forecast=fresh&&f.status==='available'&&finite(f.forecast_final_mean_usd)&&f.forecast_final_mean_usd>0&&finite(target)&&Math.abs(f.target_usd-target)<.02&&Math.abs(f.seconds_to_settlement-(end-now))<20?f.forecast_final_mean_usd:null;
-  return {start,end,points,target:finite(target)&&target>0?target:null,forecast,fresh,f};
- }
- window.btcRoundChartModel=model;
- window.drawBtcRoundChart=(canvas,state)=>{
-  if(!document.getElementById('chart15').classList.contains('active'))return false;
-  const rect=canvas.parentElement.getBoundingClientRect(),w=rect.width,h=rect.height;
-  if(w<50)return true;
-  const c=canvas.getContext('2d');if(!c)return true;
-  const scale=Math.min(window.devicePixelRatio||1,2);canvas.width=w*scale;canvas.height=h*scale;c.setTransform(scale,0,0,scale,0,0);
-  c.fillStyle='#0c1216';c.fillRect(0,0,w,h);c.font='11px ui-monospace,monospace';
-  const m=model(window.btcServerStatus,Date.now()/1000),note=document.getElementById('roundChartNote');
-  if(!m||!m.points.length){c.fillStyle='#a5b3bf';c.fillText('Waiting for current-round BRTI observations',12,h/2);if(note)note.textContent='15-minute round · awaiting verified reference data';return true;}
-  const {start,end,points,target,forecast,fresh,f}=m,left=10,right=83,top=24,bottom=30,pw=w-left-right,ph=h-top-bottom;
-  const values=points.map(p=>p[1]);if(target!==null)values.push(target);if(forecast!==null)values.push(forecast);
-  const low=Math.min(...values),high=Math.max(...values),pad=Math.max(3,(high-low)*.12),lo=low-pad,hi=high+pad;
-  const X=t=>left+(t-start)/900*pw,Y=p=>top+(hi-p)/(hi-lo)*ph;
-  if(target!==null){c.fillStyle='#12372d44';c.fillRect(left,top,pw,Y(target)-top);c.fillStyle='#40212944';c.fillRect(left,Y(target),pw,h-bottom-Y(target));}
-  c.fillStyle='#b7782424';c.fillRect(X(end-60),top,pw/15,ph);
-  c.strokeStyle='#273137';c.lineWidth=1;
-  for(let i=0;i<=4;i++){const yy=top+ph*i/4;c.beginPath();c.moveTo(left,yy);c.lineTo(w-right,yy);c.stroke();c.fillStyle='#75838a';c.fillText((hi-(hi-lo)*i/4).toFixed(2),w-right+5,yy+4);}
-  const divisions=w<450?3:5;
-  for(let i=0;i<=divisions;i++){const t=start+900*i/divisions,xx=X(t);c.beginPath();c.moveTo(xx,top);c.lineTo(xx,h-bottom);c.stroke();c.fillStyle='#819097';c.fillText(new Date(t*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),Math.max(2,xx-22),h-10);}
-  function line(series,color,width,dash=[]){c.strokeStyle=color;c.lineWidth=width;c.setLineDash(dash);c.beginPath();let prev=null;for(const [t,p] of series){if(prev===null||(!dash.length&&t-prev>10))c.moveTo(X(t),Y(p));else c.lineTo(X(t),Y(p));prev=t;}c.stroke();c.setLineDash([]);}
-  if(target!==null)line([[start,target],[end,target]],'#c0c8cc',1,[5,5]);
-  // Construct 1-minute OHLC from this round's official BRTI index ticks only.
-  // Do not overlay exchange candles as if they were Polymarket data.
-  const minutes=Array.from({length:15},(_,i)=>({t:start+i*60,n:0,o:null,h:-Infinity,l:Infinity,c:null}));
-  for(const [t,p] of points){
-   const i=Math.floor((t-start)/60);if(i<0||i>=15)continue;
-   const b=minutes[i];if(!b.n)b.o=p;b.h=Math.max(b.h,p);b.l=Math.min(b.l,p);b.c=p;b.n++;
-  }
-  const candles=minutes.filter(b=>b.n>=2);
-  if(state.candles){
-   const bw=Math.max(3,Math.min(24,pw/15*.62));
-   for(const b of candles){
-    const xx=X(b.t+30),color=b.c>=b.o?'#22c78b':'#f36b79';
-    c.strokeStyle=color;c.fillStyle=color;c.lineWidth=1.5;c.beginPath();
-    c.moveTo(xx,Y(b.h));c.lineTo(xx,Y(b.l));c.stroke();
-    c.fillRect(xx-bw/2,Math.min(Y(b.o),Y(b.c)),bw,Math.max(1.5,Math.abs(Y(b.o)-Y(b.c))));
-   }
-  }
-  line(points,state.candles?'#9aacb7':'#dce5ec',state.candles?.7:1.6);
-  if(state.ema&&candles.length){
-   let ema=candles[0].c,prior=null;
-   const smooth=candles.map(b=>{ema=prior!==null&&b.t-prior>60?b.c:ema+0.2*(b.c-ema);prior=b.t;return [b.t+30,ema]});
-   line(smooth,'#f3a032',2);
-  }
-  const last=points.at(-1);
-  if(forecast!==null){line([last,[end,forecast]],'#f3a032',2,[3,5]);c.fillStyle='#f3a032';c.beginPath();c.arc(X(last[0]),Y(last[1]),3,0,Math.PI*2);c.fill();}
-  const labels=[{v:last[1],text:last[1].toFixed(2),color:'#dce5ec'}];
-  if(target!==null)labels.push({v:target,text:target.toFixed(2),color:'#b9c5cc'});
-  if(forecast!==null)labels.push({v:forecast,text:forecast.toFixed(2),color:'#f3a032'});
-  labels.sort((a,b)=>Y(a.v)-Y(b.v));let prior=top-19;
-  labels.forEach((a,i)=>{const yy=Math.max(prior+19,Math.min(h-bottom-8-(labels.length-1-i)*19,Y(a.v)));prior=yy;c.fillStyle=a.color;c.fillRect(w-right+2,yy-9,right-4,17);c.fillStyle='#0c1216';c.fillText(a.text,w-right+5,yy+3);});
-  c.fillStyle='#ad8b51';c.fillText('Final 60s',Math.max(left,X(end-60)-40),14);
-  if(note)note.textContent=(fresh?'LIVE':'STALE OBSERVATIONS')+' · green/red: BRTI index candles (1m) · orange: EMA9 · gray: index ticks'+(forecast!==null?' · dotted: illustrative guide to final average '+forecast.toFixed(2)+' · '+(f.observed_final_minute_seconds||0)+'/60 final-second observations':' · projection unavailable')+' · dashed: official target. No calibrated probability.';
-  return true;
- };
 })();
 </script>
 <script>
