@@ -626,7 +626,7 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
  window.addEventListener('resize',()=>draw(true));
  document.addEventListener('visibilitychange',()=>{if(!document.hidden){draw(true);refreshHistory();}});
  draw(true);refreshHistory();
- setInterval(()=>{if(!document.hidden)refreshHistory()},5000);
+ if(typeof setInterval==='function')setInterval(()=>{if(!document.hidden)refreshHistory()},5000);
 })();
 </script><section class="card" id="crossExchangePanel" aria-label="Bitcoin exchange comparison and buy sell pressure">
  <div class="row" style="justify-content:space-between"><strong class="label">BTC EXCHANGE COMPARISON</strong><span id="crossFeedState" class="small">Checking venues</span></div>
