@@ -714,16 +714,27 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
   }catch(e){window.btcNoteRequest?.('BRTI tip',Date.now()-started,false);/* Keep last verified observations; never synthesize a point. */}
   finally{clearTimeout(timeout);tipBusy=false;}
  }
- window.addEventListener('btc-status-updated',()=>draw());
+ // Animate the time axis and chart geometry at up to 30 FPS while using
+ // only real, verified BRTI observations. No interpolated or fake price ticks.
+ let frameHandle=0,frameLast=0;
+ function animateChart(stamp){
+  frameHandle=0;
+  if(document.hidden)return;
+  if(stamp-frameLast>=1000/30){frameLast=stamp;draw();}
+  frameHandle=requestAnimationFrame(animateChart);
+ }
+ function startChartAnimation(){
+  if(!document.hidden&&!frameHandle&&typeof requestAnimationFrame==='function')
+   frameHandle=requestAnimationFrame(animateChart);
+ }
+ window.addEventListener('btc-status-updated',()=>{draw();startChartAnimation()});
  window.addEventListener('resize',()=>draw(true));
- document.addEventListener('visibilitychange',()=>{if(!document.hidden){draw(true);refreshHistory();}});
- draw(true);refreshHistory();refreshTip();
+ document.addEventListener('visibilitychange',()=>{if(document.hidden){if(frameHandle)cancelAnimationFrame(frameHandle);frameHandle=0;}else{draw(true);refreshHistory();startChartAnimation();}});
+ draw(true);refreshHistory();refreshTip();startChartAnimation();
  if(typeof setInterval==='function'){
   setInterval(()=>{if(!document.hidden)refreshTip()},1000);
-  // Render only on fresh BRTI tips, dashboard changes, history or resize.
-  // A low-frequency heartbeat advances the time axis and expires stale ticks;
-  // never redraw an unchanged canvas 30 times per second on mobile Safari.
-  setInterval(()=>{if(!document.hidden)draw()},1000);
+  // RAF animates at up to 30 FPS; keep a 1s fallback where RAF is unavailable.
+  if(typeof requestAnimationFrame!=='function')setInterval(()=>{if(!document.hidden)draw()},1000);
   setInterval(()=>{if(!document.hidden)refreshHistory()},10000);
  }
 })();
