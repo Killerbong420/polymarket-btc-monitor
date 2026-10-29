@@ -33,3 +33,32 @@ async function flush(){for(let i=0;i<8;i++)await Promise.resolve()}
  assert.equal(JSON.parse(storage.get('btcReferenceMinuteCallsV2')).length,1);
  console.log('PASS: all inline JS parses; chart render, forecast, feed failure, resume/recovery');
 })().catch(e=>{console.error(e);process.exitCode=1});
+
+
+// Round forecasts must disappear on stale data, mismatched markets and rollover.
+{
+ const roundScript=scripts.find(s=>s.includes('window.btcRoundChartModel=model'));
+ const roundWindow={devicePixelRatio:1},drawing=[],note={};
+ const ctx=new Proxy({}, {get:(_,key)=>(...args)=>drawing.push([key,...args])});
+ const canvas={parentElement:{getBoundingClientRect:()=>({width:390,height:380})},getContext:()=>ctx};
+ const doc={getElementById:id=>id==='chart15'?{classList:{contains:()=>true}}:note};
+ vm.runInNewContext(roundScript,{window:roundWindow,document:doc,Date});
+ const now=Date.now()/1000,start=now-300,end=start+900;
+ const points=Array.from({length:100},(_,i)=>[start+i*3,81040-i*.27+Math.sin(i/4)*3]);
+ const d={status:'running',market:'btc-updown-15m-example',updated:new Date().toISOString(),reference_price:{status:'fresh',window_start:start,window_end:end},brti_chart:{market:'btc-updown-15m-example',points},target_behavior:{target:81041},settlement_forecast:{status:'available',target_usd:81041,forecast_final_mean_usd:81001,seconds_to_settlement:600}};
+ const model=roundWindow.btcRoundChartModel;
+ assert.equal(model(d,now).forecast,81001);
+ assert.equal(model({...d,updated:new Date((now-60)*1000).toISOString()},now).forecast,null);
+ assert.equal(model(d,end),null);
+ assert.equal(model({...d,brti_chart:{...d.brti_chart,market:'old'}},now),null);
+ assert.equal(model({...d,target_behavior:{target:null}},now).forecast,null);
+ assert.equal(model({...d,settlement_forecast:{...d.settlement_forecast,target_usd:80000}},now).forecast,null);
+ assert.equal(model({...d,reference_price:{...d.reference_price,status:'stale'}},now).forecast,null);
+ roundWindow.btcServerStatus=d;
+ assert.equal(roundWindow.drawBtcRoundChart(canvas,{bars:[],ema:true,candles:true}),true);
+ assert.match(note.textContent,/illustrative guide/);
+ assert.ok(drawing.length>100);
+ assert.ok(drawing.every(call=>call.every(v=>typeof v!=='number'||Number.isFinite(v))));
+ assert.ok(drawing.some(call=>call[0]==='fillText'&&call[1]==='Final 60s'));
+ console.log('PASS: round renderer at 390px; stale/target/market/rollover guards; finite canvas geometry');
+}
