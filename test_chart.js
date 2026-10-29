@@ -76,6 +76,7 @@ assert.equal(element('pmApiTarget').textContent,'—');
  assert.equal(model({...obj,target_behavior:{status:'unavailable',target:null}},nowSec).target,null);
  assert.equal(model({...obj,settlement_forecast:{...obj.settlement_forecast,target_usd:80000}},nowSec).projected,null);
  assert.equal(model(obj,end),null);
+ assert.match(graphStatus.textContent,/stale/,'initial empty chart should be marked stale');
  browser.btcServerStatus=obj;
  handlers['btc-status-updated']();
  assert.match(graphStatus.textContent,/LIVE/);
