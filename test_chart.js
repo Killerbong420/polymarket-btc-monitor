@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm');
 const html=fs.readFileSync(__dirname+'/terminal.html','utf8');
-const scripts=[...html.matchAll(/<script[^>]*>([\\s\\S]*?)<\\/script>/g)].map(x=>x[1]);
+const scripts=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(x=>x[1]);
 assert.ok(scripts.length>=4);
 for(const script of scripts)new vm.Script(script);
 for(const id of ['candleChart','priceChart','brtiCanvas']){
@@ -10,12 +10,12 @@ for(const id of ['candleChart','priceChart','brtiCanvas']){
 for(const endpoint of ['/api/candles','/api/brti-chart']){
  assert.ok(!html.includes("fetch('"+endpoint+"'"),endpoint+' must not be polled by the browser');
 }
-assert.match(html,/setInterval\\(\\(\\)=>\\{if\\(!document.hidden\\)updateServer\\(\\)\\},2000\\)/);
-assert.match(html,/setInterval\\(\\(\\)=>\\{if\\(!document.hidden\\)refreshFive\\(\\)\\},2000\\)/);
-assert.match(html,/if\\(statusInFlight\\)return/);
-assert.match(html,/if\\(fiveBusy\\|\\|document.hidden\\)return/);
-assert.match(html,/finally\\{clearTimeout\\(timeout\\);fiveBusy=false;\\}/);
-assert.match(html,/setInterval\\(\\(\\)=>\\{if\\(!document.hidden\\)refreshRoundTiles\\(\\)\\},10000\\)/);
+assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)updateServer\(\)\},2000\)/);
+assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)refreshFive\(\)\},2000\)/);
+assert.match(html,/if\(statusInFlight\)return/);
+assert.match(html,/if\(fiveBusy\|\|document.hidden\)return/);
+assert.match(html,/finally\{clearTimeout\(timeout\);fiveBusy=false;\}/);
+assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)refreshRoundTiles\(\)\},10000\)/);
 const summaryScript=scripts.find(s=>s.includes('function updatePolymarketSummary(d)'));
 assert.ok(summaryScript,'official market summary updater is retained');
 const elements=new Map(),listeners={};
