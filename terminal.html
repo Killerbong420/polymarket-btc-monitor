@@ -565,7 +565,7 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
     points:[...((d.brti_chart||{}).points||[]),...latestTip]}}:d;
   const m=model(graphState,now);
   if(!m){
-   lastDraw=0;status.textContent='Verified BRTI observations unavailable or stale';
+   status.textContent='Verified BRTI observations unavailable or stale';
    ctx.fillStyle='#acbdcd';ctx.font='12px system-ui';
    ctx.fillText('Waiting for fresh official BRTI price ticks',13,h/2);
    return;
@@ -685,14 +685,10 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
  draw(true);refreshHistory();refreshTip();
  if(typeof setInterval==='function'){
   setInterval(()=>{if(!document.hidden)refreshTip()},1000);
-  if(typeof requestAnimationFrame==='function'){
-   let animationActive=true;
-   const animate=()=>{
-    if(!document.hidden)draw();
-    requestAnimationFrame(animate);
-   };
-   requestAnimationFrame(animate);
-  }else setInterval(()=>{if(!document.hidden)draw()},1000);
+  // Render only on fresh BRTI tips, dashboard changes, history or resize.
+  // A low-frequency heartbeat advances the time axis and expires stale ticks;
+  // never redraw an unchanged canvas 30 times per second on mobile Safari.
+  setInterval(()=>{if(!document.hidden)draw()},1000);
   setInterval(()=>{if(!document.hidden)refreshHistory()},10000);
  }
 })();
