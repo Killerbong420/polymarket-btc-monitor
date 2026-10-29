@@ -80,8 +80,8 @@ async def discover(client):
  return None,"no_verified_contract_or_metadata"
 
 async def score_pending(client,execute,verified_winner):
- rows=execute("SELECT market FROM five_min_predictions WHERE result='PENDING' ORDER BY created_epoch DESC LIMIT 24",fetch=True)
- late_rows=execute("SELECT market FROM five_min_late_predictions WHERE result='PENDING' ORDER BY created_epoch DESC LIMIT 24",fetch=True)
+ rows=(await asyncio.to_thread(execute, "SELECT market FROM five_min_predictions WHERE result='PENDING' ORDER BY created_epoch DESC LIMIT 24",fetch=True))
+ late_rows=(await asyncio.to_thread(execute, "SELECT market FROM five_min_late_predictions WHERE result='PENDING' ORDER BY created_epoch DESC LIMIT 24",fetch=True))
  for (slug,) in dict.fromkeys(rows+late_rows):
   try:
    stamp=slug.split("btc-updown-5m-",1)[-1]
@@ -106,7 +106,7 @@ async def score_pending(client,execute,verified_winner):
    winner=verified_winner(match,sr.json())
    if winner not in ("UP","DOWN"):continue
    for table in ("five_min_predictions","five_min_late_predictions"):
-    execute(f"UPDATE {table} SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END,winner=? WHERE market=? AND result='PENDING'",(winner,winner,slug))
+    (await asyncio.to_thread(execute, f"UPDATE {table} SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END,winner=? WHERE market=? AND result='PENDING'",(winner,winner,slug)))
   except Exception:
    continue
 
@@ -233,7 +233,7 @@ def visual_forecast(reference, external, target, seconds_left, now):
 
 async def loop(client,execute,verified_winner,external_state):
  """Keep slow historical settlement requests out of the live forecast cadence."""
- setup(execute)
+ (await asyncio.to_thread(setup, execute))
  async def score_worker():
   while True:
    try:
@@ -297,8 +297,8 @@ async def live_loop(client,execute,external_state):
                   early_forecast=None,late_direction="WAIT",late_forecast=None,
                   early_result=None,late_result=None,
                   phase="EARLY",result="PENDING",reason="Awaiting verified BRTI and official target")
-    prior=execute("SELECT direction,forecast,result,created_epoch FROM five_min_predictions WHERE market=?",(slug,),fetch=True)
-    late_prior=execute("SELECT direction,forecast,result,created_epoch FROM five_min_late_predictions WHERE market=?",(slug,),fetch=True)
+    prior=(await asyncio.to_thread(execute, "SELECT direction,forecast,result,created_epoch FROM five_min_predictions WHERE market=?",(slug,),fetch=True))
+    late_prior=(await asyncio.to_thread(execute, "SELECT direction,forecast,result,created_epoch FROM five_min_late_predictions WHERE market=?",(slug,),fetch=True))
     if prior:
      ed,ef,er,early_created=prior[0]
      state.update(direction=ed,forecast=ef,early_direction=ed,early_forecast=ef,
@@ -340,19 +340,19 @@ async def live_loop(client,execute,external_state):
        # A visual-only refresh must not overwrite the frozen call explanation.
        if due_early or due_late:state["reason"]=error
       elif due_early:
-       execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",
-               (slug,captured,candidate["direction"],target,candidate["forecast"]))
+       (await asyncio.to_thread(execute, "INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",
+               (slug,captured,candidate["direction"],target,candidate["forecast"])))
        state.update(direction=candidate["direction"],forecast=candidate["forecast"],
                     early_direction=candidate["direction"],early_forecast=candidate["forecast"],
                     phase="EARLY",result="PENDING",reason="Frozen original early BRTI forecast")
       elif due_late and eligible_late_checkpoint(left,prior[0][3],market["end"]):
-       execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",
-               (slug,captured,candidate["direction"],target,candidate["forecast"]))
+       (await asyncio.to_thread(execute, "INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",
+               (slug,captured,candidate["direction"],target,candidate["forecast"])))
        state.update(direction=candidate["direction"],forecast=candidate["forecast"],
                     late_direction=candidate["direction"],late_forecast=candidate["forecast"],
                     phase="LATE_2M30",result="PENDING",
                     reason="Frozen 2:30-left BRTI forecast; independently scored")
-   state["accuracy"]=report(execute)
+   state["accuracy"]=(await asyncio.to_thread(report, execute))
   except asyncio.CancelledError:raise
   except Exception as e:state.update(status="error",direction="WAIT",forecast=None,reason=type(e).__name__+": "+str(e)[:150])
   state["updated_epoch"]=time.time()

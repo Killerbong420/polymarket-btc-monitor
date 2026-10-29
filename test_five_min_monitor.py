@@ -1,6 +1,7 @@
 """Regression coverage for five-minute early versus 2:30 BRTI snapshots."""
 import asyncio
 import sqlite3
+from threading import RLock
 import time
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -10,14 +11,16 @@ import five_min_monitor as five
 
 class MemoryDB:
     def __init__(self):
-        self.db = sqlite3.connect(":memory:")
+        self.db = sqlite3.connect(":memory:", check_same_thread=False)
+        self.lock = RLock()
         five.setup(self.execute)
 
     def execute(self, sql, args=(), fetch=False):
-        cur = self.db.execute(sql, args)
-        result = cur.fetchall() if fetch else None
-        self.db.commit()
-        return result
+        with self.lock:
+            cur = self.db.execute(sql, args)
+            result = cur.fetchall() if fetch else None
+            self.db.commit()
+            return result
 
     def close(self):
         self.db.close()

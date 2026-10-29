@@ -517,10 +517,10 @@ async def retry_numeric_final_means(client, max_requests=3, now=None):
  """
  now=time.time() if now is None else now
  result={"status":"checked","requested":0,"graded":0,"incomplete":0}
- rows=execute("""SELECT DISTINCT market,winner FROM research_calls
+ rows=(await asyncio.to_thread(execute, """SELECT DISTINCT market,winner FROM research_calls
       WHERE winner IN ('UP','DOWN')
       AND (final_reference_mean IS NULL OR final_reference_source!='OFFICIAL_MARKET_SETTLEMENT')
-      ORDER BY market DESC LIMIT 150""",fetch=True)
+      ORDER BY market DESC LIMIT 150""",fetch=True))
  for market,win in rows:
   start=market_start(market)
   if start is None or not (start+960<=now<=start+8*86400):continue
@@ -542,9 +542,9 @@ async def retry_numeric_final_means(client, max_requests=3, now=None):
     result["incomplete"]+=1
     _reference_retry_after[market]=now+600
     continue
-   execute("""UPDATE research_calls SET final_reference_mean=?,
+   (await asyncio.to_thread(execute, """UPDATE research_calls SET final_reference_mean=?,
        final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
-       WHERE market=? AND winner=?""",(official,market,win))
+       WHERE market=? AND winner=?""",(official,market,win)))
    result["graded"]+=1
    _reference_retry_after.pop(market,None)
   except Exception:
@@ -560,7 +560,7 @@ async def settle(client):
  # Resolve the original event when the market-slug endpoint is unavailable.
  # Never infer official outcomes from Coinbase spot candles.
  from datetime import timedelta
- pending=execute("SELECT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE ? UNION SELECT market FROM ai_decisions WHERE result='PENDING' AND phase='FINAL_15M' AND source='AI_REVIEW' UNION SELECT market FROM research_calls WHERE winner IS NULL UNION SELECT market FROM paper_positions WHERE status='OPEN' ORDER BY market DESC",("%btc-updown-15m-%",),fetch=True)
+ pending=(await asyncio.to_thread(execute, "SELECT market FROM signals WHERE result='PENDING' AND phase='FINAL_15M' AND market LIKE ? UNION SELECT market FROM ai_decisions WHERE result='PENDING' AND phase='FINAL_15M' AND source='AI_REVIEW' UNION SELECT market FROM research_calls WHERE winner IS NULL UNION SELECT market FROM paper_positions WHERE status='OPEN' ORDER BY market DESC",("%btc-updown-15m-%",),fetch=True))
  diagnostic={"pending_markets":len(pending),"checked":0,"verified":0,"unresolved":0,"errors":[],"reasons":{}}
  def unresolved(reason):
   diagnostic["unresolved"]+=1
@@ -626,18 +626,18 @@ async def settle(client):
       "asset_price_terms":str(market.get("assetPriceTerms") or "")[:350]})
     unresolved("official_winner_mapping_unverified")
     continue
-   execute("UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
-   execute("UPDATE ai_decisions SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug))
-   execute("UPDATE research_calls SET winner=?,settled_at=? WHERE market=? AND winner IS NULL",(win,datetime.now(timezone.utc).isoformat(),slug))
+   (await asyncio.to_thread(execute, "UPDATE signals SET result=CASE WHEN direction='WAIT' THEN 'NO_CALL' WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug)))
+   (await asyncio.to_thread(execute, "UPDATE ai_decisions SET result=CASE WHEN direction=? THEN 'WIN' ELSE 'LOSS' END WHERE market=? AND result='PENDING'",(win,slug)))
+   (await asyncio.to_thread(execute, "UPDATE research_calls SET winner=?,settled_at=? WHERE market=? AND winner IS NULL",(win,datetime.now(timezone.utc).isoformat(),slug)))
    official=official_numeric_price(market,win)
    if official is not None:
-    execute("""UPDATE research_calls SET final_reference_mean=?,
+    (await asyncio.to_thread(execute, """UPDATE research_calls SET final_reference_mean=?,
         final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
-        WHERE market=? AND winner=?""",(official,slug,win))
+        WHERE market=? AND winner=?""",(official,slug,win)))
     diagnostic["official_numeric_recorded"]=diagnostic.get("official_numeric_recorded",0)+1
    # Numeric scoring may backfill from the published market value when absent.
    # The official binary winner is never inferred from a public chart reconstruction.
-   execute("UPDATE paper_positions SET winner=? WHERE market=? AND status='OPEN'",(win,slug))
+   (await asyncio.to_thread(execute, "UPDATE paper_positions SET winner=? WHERE market=? AND status='OPEN'",(win,slug)))
    diagnostic["verified"]+=1
   except Exception as exc:
    diagnostic["errors"].append(type(exc).__name__+": "+str(exc)[:100])
@@ -767,7 +767,7 @@ def outcome_feedback(market):
 
 async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,market):
  key=slug+":"+checkpoint
- if execute("SELECT id FROM research_calls WHERE id=?",(key,),fetch=True):return
+ if (await asyncio.to_thread(execute, "SELECT id FROM research_calls WHERE id=?",(key,),fetch=True)):return
  # Freeze common evidence BEFORE the AI call; later price changes cannot rewrite it.
  import copy
  frozen=copy.deepcopy(d);captured=datetime.now(timezone.utc).isoformat()
@@ -835,16 +835,18 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
   "external_intelligence":frozen.get("external_intelligence"),"news_assessment":review.get("news_assessment"),
   "outcome_feedback":frozen.get("outcome_feedback"),"settlement_forecast":frozen.get("settlement_forecast"),"time_regime_shadow":frozen.get("time_regime_shadow"),"brti_recent_samples":frozen.get("brti_recent_samples"),"target_validation":frozen.get("target_validation"),"indicator_score":score,"ai_model":review.get("model"),"historical_context":(review.get("evidence") or {}).get("historical_context")}
  # The checkpoint and its legacy halfway rows commit together or roll back together.
- with connect() as c:
-  cur=c.cursor()
-  def run(sql,args):cur.execute(sql.replace("?","%s") if DB else sql,args)
-  try:
-   run("INSERT INTO research_calls (id,market,checkpoint,created_at,snapshot_json,calls_json) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(key,slug,checkpoint,captured,json.dumps(snapshot),json.dumps(calls)))
-   if cur.rowcount and checkpoint=="HALFWAY":
-    ident=slug+":FINAL_15M"
-    run("INSERT INTO signals (id,market,phase,direction,flip,score,created_at,quality,quality_reason,decision_source,decision_reason,ai_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,flip,score,captured,quality,quality_reason,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],confidence))
-    run("INSERT INTO ai_decisions (id,market,phase,direction,confidence,source,reason,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,confidence,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],captured))
-  finally:cur.close()
+ def save_checkpoint():
+  with connect() as c:
+   cur=c.cursor()
+   def run(sql,args):cur.execute(sql.replace("?","%s") if DB else sql,args)
+   try:
+    run("INSERT INTO research_calls (id,market,checkpoint,created_at,snapshot_json,calls_json) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(key,slug,checkpoint,captured,json.dumps(snapshot),json.dumps(calls)))
+    if cur.rowcount and checkpoint=="HALFWAY":
+     ident=slug+":FINAL_15M"
+     run("INSERT INTO signals (id,market,phase,direction,flip,score,created_at,quality,quality_reason,decision_source,decision_reason,ai_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,flip,score,captured,quality,quality_reason,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],confidence))
+     run("INSERT INTO ai_decisions (id,market,phase,direction,confidence,source,reason,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",(ident,slug,"FINAL_15M",chosen,confidence,review.get("source","INDICATORS_FALLBACK"),str(review.get("reason",""))[:300],captured))
+   finally:cur.close()
+ await asyncio.to_thread(save_checkpoint)
  if checkpoint=="HALFWAY":state["last_guarded_primary"]={**calls["GUARDED_PRIMARY"],"market":slug,"checkpoint":checkpoint,"captured_at":captured}
  if checkpoint=="HALFWAY":state["last_halfway_ai"]={"market":slug,"phase":"FINAL_15M","direction":chosen,"price_path_informed":bool(review.get("price_path_informed")),"analysis_context_version":review.get("analysis_context_version") or VERSION,"forecast_final_mean_usd":review.get("forecast_final_mean_usd"),"indicator_direction":fallback,"source":review.get("source"),"reason":review.get("reason"),"ai_confidence":confidence,"updated":captured,"news_assessment":review.get("news_assessment")}
  _research_cache["updated_epoch"]=0
@@ -860,7 +862,9 @@ def track_prediction(task):
  return task
 
 async def loop():
- setup()
+ # Each database operation owns its connection inside the worker thread.
+ # Synchronous Postgres I/O must never stall HTTP or the BRTI sampler.
+ (await asyncio.to_thread(setup))
  ai_task=None
  settlement_task=None
  last_settlement_check=None
@@ -896,7 +900,7 @@ async def loop():
      phase="EARLY" if left15>450 else "LATE" if left15<=180 else "MID"
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(left15),market=slug,external=d,updated=now,error=None)
      state["final_15m"]={"market":slug,"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
-     try:d["outcome_feedback"]=outcome_feedback(slug)
+     try:d["outcome_feedback"]=(await asyncio.to_thread(outcome_feedback, slug))
      except Exception:d["outcome_feedback"]={"status":"unavailable"}
      terms=fifteen.get("assetPriceTerms") or {}
      ptb=terms.get("priceToBeat") or {}
@@ -934,7 +938,7 @@ async def loop():
      forecast_now=time.time()
      quick=quick_forecast(reference,now=forecast_now)
      try:
-      track_first_five_quick(slug,reference,quick,forecast_now)
+      (await asyncio.to_thread(track_first_five_quick, slug,reference,quick,forecast_now))
       state["quick_accuracy_error"]=None
      except Exception as quick_exc:
       # A logging issue must never freeze the live 15-minute prediction loop.
@@ -947,14 +951,14 @@ async def loop():
      d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow,quick_forecast=quick,reversal_evidence=reversal,guarded_primary=guarded_live,manual_entry_review=entry_review)
      state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,quick_forecast=quick,reversal_evidence=reversal,guarded_primary=guarded_live,manual_entry_review=entry_review)
      try:
-      capture_polymarket_quote(quote)
+      (await asyncio.to_thread(capture_polymarket_quote, quote))
       state["quote_storage_error"]=None
      except Exception as quote_exc:
       state["quote_storage_error"]=type(quote_exc).__name__+": "+str(quote_exc)[:150]
      avg=reference.get("opening_average");pt=number(target)
      state["target_validation"]=validate_official_target(pt,reference)
      d["target_validation"]=state["target_validation"]
-     captured={r[0] for r in execute("SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True)}
+     captured={r[0] for r in (await asyncio.to_thread(execute, "SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True))}
      plan=checkpoint_plan(left15,captured)
      state["missed_checkpoints"]=plan["missed"]
      for name in plan["due"]:
@@ -963,7 +967,7 @@ async def loop():
        if key not in checkpoints or checkpoints[key].done():
         checkpoints[key]=track_prediction(asyncio.create_task(capture_checkpoint(client,slug,name,round(left15),json.loads(json.dumps(d)),direction,flip,score,fifteen)))
      checkpoints={k:v for k,v in checkpoints.items() if not v.done()}
-     d["paper_position"]=paper.position_context(execute,slug)
+     d["paper_position"]=(await asyncio.to_thread(paper.position_context, execute,slug))
      if ai_task is None or ai_task.done():
       ai_task=asyncio.create_task(confirm(client,slug,phase,direction,flip,score,json.loads(json.dumps(d)),price_to_beat=target,seconds_left=round(left15)))
       track_prediction(ai_task)
@@ -990,7 +994,7 @@ async def loop():
      last_settlement_check=time.monotonic()
     state["settlement_task_running"]=settlement_task is not None and not settlement_task.done()
     state["alerts"]=health_checks(state,public_state(),DB)
-    persist_alerts(execute,state["alerts"])
+    (await asyncio.to_thread(persist_alerts, execute,state["alerts"]))
    except Exception as e:
     for key in ("phase","seconds_left","score"): state.pop(key,None)
     state.update(status="feed error",signal="WAIT",flip="WAIT",quick_forecast={"status":"unavailable","reason":"Monitoring feed error"},error=type(e).__name__+": "+str(e)[:200],updated=datetime.now(timezone.utc).isoformat())
@@ -999,7 +1003,7 @@ async def loop():
                  guarded_primary={"status":"unavailable","direction":"WAIT"},
                  manual_entry_review={"status":"unavailable"})
     db_error=None
-    try:execute("SELECT 1",fetch=True)
+    try:(await asyncio.to_thread(execute, "SELECT 1",fetch=True))
     except Exception:db_error="Database query failed"
     state["alerts"]=health_checks(state,public_state(),DB,db_error=db_error)
    state["last_cycle_duration_seconds"]=round(time.monotonic()-cycle_started,2)
@@ -1018,7 +1022,7 @@ async def paper_worker():
    try:
     await paper.cycle(client,execute,connect,bool(DB),{**paper_signal_state(),"live_quote":state.get("market_quote")})
     state["paper_error"]=None
-    state["paper_unfilled_exits"]=execute("SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True)[0][0]
+    state["paper_unfilled_exits"]=(await asyncio.to_thread(execute, "SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True))[0][0]
    except Exception as exc:state["paper_error"]=type(exc).__name__+": "+str(exc)[:160]
    await asyncio.sleep(max(0,1-(time.monotonic()-started)))
 
@@ -1114,7 +1118,7 @@ async def paper_control(request:Request):
   if action not in ("pause","resume","stop"):return JSONResponse({"error":"Only paper pause, resume or stop are supported"},status_code=400)
   if action=="resume" and os.getenv("PAPER_TRADING_ENABLED","true").lower() not in ("true","1","yes"):
    return JSONResponse({"error":"Paper trading is disabled by the server setting"},status_code=409)
-  paper.control(connect,bool(DB),action)
+  (await asyncio.to_thread(paper.control, connect,bool(DB),action))
   return {"mode":"PAPER_ONLY","action":action,"real_orders_enabled":False}
  except Exception:return JSONResponse({"error":"Paper control unavailable"},status_code=503)
 
