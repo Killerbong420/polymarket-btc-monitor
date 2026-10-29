@@ -4,8 +4,11 @@ Polymarket US official BRTI ticks and separately sampled BTC/USD exchange prices
 No fabricated interpolation, no USD/USDT conflation, no private/trade endpoints.
 A process restart resets the rolling one-hour chart; model records are unaffected.
 """
+import asyncio
 import math
 import time
+from datetime import datetime,timezone
+import httpx
 from collections import deque
 from threading import RLock
 
@@ -87,3 +90,82 @@ def snapshot(range_id, round_start=None, round_end=None, market=None, now=None):
                           "points":_thin(pts,240)} for name,pts in sorted(venue.items()) if pts],
          "source":"Polymarket US official BRTI index ticks + observed BTC/USD public venue spot price samples",
          "limitations":"Last-exchange-price receipt time is not guaranteed trade execution time. Gaps not interpolated. Prior rounds and 30/60m windows accumulate in memory only after server startup. Only official BRTI determines settlement."}
+
+def latest_tip(now=None):
+ """Return a tiny snapshot of observed index ticks; no invented intervening prices."""
+ now=time.time() if now is None else now
+ with _lock:
+  ticks=sorted((t,p) for t,p in _brti.items() if now-12<=t<=now+1)
+ age=round(now-ticks[-1][0],1) if ticks else None
+ return {"status":"fresh" if age is not None and 0<=age<=15 else "stale",
+         "points":[list(tick) for tick in ticks[-12:]],
+         "age_seconds":age,"server_epoch":round(now,3),
+         "source":"Polymarket US BTC reference / BRTI"}
+
+# Isolated 1-second chart sampler. The official market and target remain governed by
+# the slower prediction loop; this path ONLY records genuine published reference ticks.
+OFFICIAL_SOURCE="Polymarket US BTC reference / BRTI"
+CHART_TICK_INTERVAL_SECONDS=1.0
+
+def eligible_tick_market(state,now):
+ """Do not fetch when official BRTI identity, round timing or heartbeat is unverified."""
+ if state.get("status")!="running":return False
+ market=state.get("market")
+ if not isinstance(market,str) or "btc-updown-15m-" not in market:return False
+ ref=state.get("reference_price") or {}
+ if ref.get("source")!=OFFICIAL_SOURCE or ref.get("status")!="fresh":return False
+ try:
+  start=float(ref["window_start"]);end=float(ref["window_end"]);epoch=float(ref["price_epoch"])
+  updated=datetime.fromisoformat(state["updated"].replace("Z","+00:00")).timestamp()
+ except (ValueError,TypeError,KeyError,OverflowError,AttributeError):return False
+ return (math.isfinite(start) and math.isfinite(end) and math.isfinite(epoch)
+         and math.isfinite(updated) and end-start==900 and start<=now<end
+         and -5<=now-epoch<=15 and -5<=now-updated<=20)
+
+async def sample_official_ticks(client,state,now=None):
+ """Request only the newest 30s of official 1-second published index samples.
+
+ Never interpolate, invent, backfill missing timestamps, modify predictions or
+ interpret BTC spot/exchange quotes as Polymarket BRTI index observations.
+ """
+ now=time.time() if now is None else now
+ if not eligible_tick_market(state,now):return 0
+ start=math.floor(now)-30
+ try:
+  response=await client.get(
+   "https://gateway.polymarket.us/v1/asset-prices/history",
+   params={"assets":"crypto:btc","from":start,"to":0,"bucket":"ASSET_PRICE_BUCKET_1S"},
+   timeout=2.5)
+  response.raise_for_status()
+  body=response.json()
+  series=body.get("series",[]) if isinstance(body,dict) else []
+  matched=next((x for x in series if isinstance(x,dict)
+   and (x.get("asset") or {}).get("symbol")=="btc"
+   and (x.get("asset") or {}).get("assetClass")=="ASSET_CLASS_CRYPTO"
+   and x.get("currency")=="USD"),None)
+  if matched is None:return 0
+  received=time.time()
+  if not eligible_tick_market(state,received):return 0
+  ticks=[]
+  for candle in matched.get("candles") or ():
+   if not isinstance(candle,dict):continue
+   try:
+    t=float(candle.get("timestamp"));count=int(candle.get("tickCount") or 0)
+   except (ValueError,TypeError,OverflowError):continue
+   price=_positive(candle.get("close"))
+   if count>0 and math.isfinite(t) and t.is_integer() and price is not None and start<=t<=received+1:
+    ticks.append([int(t),price])
+  if ticks:record_brti(ticks,OFFICIAL_SOURCE,received)
+  return len(ticks)
+ except (httpx.HTTPError,ValueError,TypeError,KeyError,StopIteration):
+  return 0
+
+async def official_chart_sampler(state):
+ """Single shared server worker; no provider API requests per Safari user."""
+ async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
+  while True:
+   start=time.monotonic()
+   try:await sample_official_ticks(client,state)
+   except asyncio.CancelledError:raise
+   except Exception:pass
+   await asyncio.sleep(max(.10,CHART_TICK_INTERVAL_SECONDS-(time.monotonic()-start)))
