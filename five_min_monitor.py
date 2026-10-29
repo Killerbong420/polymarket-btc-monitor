@@ -47,19 +47,24 @@ async def discover(client):
  slug="btc-updown-5m-"+stamp
  markets=[]
  errors=[]
- for event_slug in (slug,"cpc-"+slug):
+ async def fetch_event(event_slug):
+  # Independent standard and CPC event lookups must not serialize two
+  # eight-second network timeouts and miss the 2:30-left checkpoint.
   try:
    r=await client.get("https://gateway.polymarket.us/v1/events/slug/"+event_slug,timeout=8)
    if r.status_code!=200:
-    errors.append(event_slug+":http_"+str(r.status_code))
-    continue
+    return [],event_slug+":http_"+str(r.status_code)
    body=r.json()
    event=body.get("event",body) if isinstance(body,dict) else {}
    found=event.get("markets",[]) if isinstance(event,dict) else []
    if not found and isinstance(body,dict):found=body.get("markets",[])
-   if isinstance(found,list):markets.extend(found)
+   return (found if isinstance(found,list) else []),None
   except Exception as exc:
-   errors.append(event_slug+":"+type(exc).__name__)
+   return [],event_slug+":"+type(exc).__name__
+ # gather preserves event priority: standard first, CPC second.
+ for found,error in await asyncio.gather(fetch_event(slug),fetch_event("cpc-"+slug)):
+  markets.extend(found)
+  if error:errors.append(error)
  if not markets:return None,"; ".join(errors) or "event_has_no_markets"
  for m in markets if isinstance(markets,list) else []:
   if not isinstance(m,dict):continue
