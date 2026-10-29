@@ -1,4 +1,5 @@
 import asyncio, json, os, sqlite3, time, uuid
+from threading import RLock as _HistoryLock
 from pathlib import Path
 from historical_15m import main as collect_15m, START as HISTORY_START, END as HISTORY_END
 from ai_confirmation import confirm, public_state, check_auth, auth_state, halfway_decision, paper_signal_state
@@ -1515,7 +1516,6 @@ def checkpoint_scoreboard_report():
 
 # The historical scoreboard does not change every second; cache SQL reads while
 # keeping state/AI connection information refreshed on each dashboard request.
-from threading import RLock as _HistoryLock
 _status_cache={"at":0.0,"data":None}
 _status_cache_lock=_HistoryLock()
 
