@@ -259,6 +259,40 @@ class CheckpointLoopTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(asyncio.CancelledError):
                     await task
 
+    def test_verified_market_cache_expires_and_requires_official_brti_terms(self):
+        end=time.time()+240
+        market={"slug":"cpc-btc-updown-5m-test","end":end,
+                "assetPriceTerms":{"indexSymbol":"BRTI","priceToBeat":100}}
+        self.assertTrue(five.reusable_verified_market(market,end-200))
+        self.assertFalse(five.reusable_verified_market(market,end))
+        self.assertFalse(five.reusable_verified_market(market,end-301))
+        self.assertFalse(five.reusable_verified_market(
+            {**market,"assetPriceTerms":{"priceToBeat":100}},end-200))
+        self.assertFalse(five.reusable_verified_market(
+            {**market,"assetPriceTerms":{"indexSymbol":"OTHER","priceToBeat":100}},end-200))
+
+    async def test_verified_current_round_does_not_refetch_events_every_poll(self):
+        end=time.time()+240
+        market={"slug":"cpc-btc-updown-5m-2026-10-29-2350z","end":end,
+                "assetPriceTerms":{"indexSymbol":"BRTI","priceToBeat":100}}
+        # A pre-existing early call avoids changing the scoring table in this test.
+        self.db.execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?)",
+                        (market["slug"],end-280,"UP",100,101))
+        sleeps=0
+        async def two_iterations(_seconds):
+            nonlocal sleeps
+            sleeps+=1
+            if sleeps==2:
+                raise asyncio.CancelledError()
+        with (patch("five_min_monitor.discover",new=AsyncMock(return_value=(market,None))) as discovery,
+              patch("five_min_monitor.reference_prices",new=AsyncMock(return_value={"status":"stale"})),
+              patch("five_min_monitor.asyncio.sleep",new=two_iterations),
+              patch("five_min_monitor.report",return_value={})):
+            with self.assertRaises(asyncio.CancelledError):
+                await five.live_loop(None,self.db.execute,{})
+        self.assertEqual(sleeps,2)
+        self.assertEqual(discovery.await_count,1)
+
     async def test_existing_early_call_gets_distinct_late_checkpoint(self):
         slug="cpc-btc-updown-5m-2026-10-28-1930z"
         end=time.time()+135
