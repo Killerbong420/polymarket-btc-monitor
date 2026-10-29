@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 import httpx
 from market_intelligence import intelligence_loop, public_intelligence
-from market_chart_history import record_brti, snapshot as chart_history_snapshot
+from market_chart_history import record_brti, snapshot as chart_history_snapshot, latest_tip, official_chart_sampler, eligible_tick_market
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from price_action import analyze_price_action, shadow_price_action
 from bot_library import study_strategies, consensus
@@ -1054,6 +1054,7 @@ async def read_only_diagnostics_loop():
 async def lifespan(app):
  task=asyncio.create_task(loop())
  context_task=asyncio.create_task(intelligence_loop())
+ chart_task=asyncio.create_task(official_chart_sampler(state))
  async def five_min_worker():
   async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
    await five_min_monitor.loop(client,execute,verified_winner,state)
@@ -1073,10 +1074,11 @@ async def lifespan(app):
  history_task.cancel()
  diagnostics_task.cancel()
  context_task.cancel()
+ chart_task.cancel()
  five_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,history_task,context_task,diagnostics_task,five_task,*pending_predictions):
+ for running in (task,history_task,context_task,chart_task,diagnostics_task,five_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
@@ -1342,6 +1344,15 @@ def historical_csv():
  p=Path("historical_15m_7d.csv")
  if not p.exists(): return JSONResponse({"status":historical_state},status_code=202)
  return FileResponse(str(p),media_type="text/csv",filename="polymarket_us_btc_15m_7d.csv")
+@app.get("/api/market-chart/tip")
+def market_chart_tip():
+ """Tiny read-only official index changes for 1s chart refresh; never touches SQL."""
+ now=time.time()
+ if not eligible_tick_market(state,now):
+  return {"status":"unavailable","market":state.get("market"),"points":[],
+          "reason":"Verified BRTI round heartbeat unavailable","server_epoch":now}
+ return {"market":state.get("market"),**latest_tip(now)}
+
 @app.get("/api/market-chart/history")
 def market_chart_history(range: str = Query(default="round")):
  """Bounded read-only BRTI ticks and historical exchange observations, no extra provider polls."""
