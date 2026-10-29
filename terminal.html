@@ -545,13 +545,15 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
  function draw(force=false){
   if(document.hidden)return;
   const nowMillis=Date.now(),now=nowMillis/1000;
-  if(!force&&nowMillis-lastDraw<950)return;
+  if(!force&&nowMillis-lastDraw<1000/30)return;
   lastDraw=nowMillis;
   const bounds=canvas.getBoundingClientRect(),w=bounds.width,h=bounds.height;
   if(w<110||h<100)return;
   const ctx=canvas.getContext('2d');if(!ctx)return;
   const ratio=Math.min(window.devicePixelRatio||1,2);
-  canvas.width=Math.round(w*ratio);canvas.height=Math.round(h*ratio);
+  const pixelWidth=Math.round(w*ratio),pixelHeight=Math.round(h*ratio);
+  if(canvas.width!==pixelWidth)canvas.width=pixelWidth;
+  if(canvas.height!==pixelHeight)canvas.height=pixelHeight;
   ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#0b151b';ctx.fillRect(0,0,w,h);
   const d=window.btcServerStatus;
   const latestTip=tipMarket===d?.market?tipTicks.filter(p=>Array.isArray(p)&&Number.isFinite(p[0])&&Number.isFinite(p[1])&&
@@ -683,7 +685,14 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
  draw(true);refreshHistory();refreshTip();
  if(typeof setInterval==='function'){
   setInterval(()=>{if(!document.hidden)refreshTip()},1000);
-  setInterval(()=>{if(!document.hidden)draw()},1000);
+  if(typeof requestAnimationFrame==='function'){
+   let animationActive=true;
+   const animate=()=>{
+    if(!document.hidden)draw();
+    requestAnimationFrame(animate);
+   };
+   requestAnimationFrame(animate);
+  }else setInterval(()=>{if(!document.hidden)draw()},1000);
   setInterval(()=>{if(!document.hidden)refreshHistory()},10000);
  }
 })();
