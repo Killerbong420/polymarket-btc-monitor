@@ -482,7 +482,7 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
  window.btcBrtiLineModel=model;
  const spans={"30s":30,"1m":60,"2m":120,"5m":300,"30m":1800,"60m":3600};
  const colors={"Coinbase":"#668fd4","Kraken":"#9277c9","Bitstamp":"#3e9a9e","Gemini":"#bc7da4","Bitfinex":"#83a76a","Binance.US":"#bb9158"};
- let selected='round',history=null,inFlight=false,lastDraw=0,aborter=null;
+ let selected='round',history=null,inFlight=false,lastDraw=0,aborter=null,tipBusy=false,tipTicks=[],tipMarket=null;
  const money=v=>Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
  const ranges=document.getElementById('brtiRangeTabs'),overlayLegend=document.getElementById('brtiOverlayLegend');
  function onRange(newRange){
@@ -502,7 +502,7 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
  window.btcChartSelectRange=onRange;
  async function refreshHistory(){
   if(document.hidden||typeof fetch!=='function')return;
-  if(inFlight&&aborter)aborter.abort();
+  if(inFlight)return;
   inFlight=true;
   const controller=new AbortController();aborter=controller;
   const requested=selected,timeout=setTimeout(()=>controller.abort(),4500);
@@ -522,7 +522,7 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
  function draw(force=false){
   if(document.hidden)return;
   const nowMillis=Date.now(),now=nowMillis/1000;
-  if(!force&&nowMillis-lastDraw<1500)return;
+  if(!force&&nowMillis-lastDraw<950)return;
   lastDraw=nowMillis;
   const bounds=canvas.getBoundingClientRect(),w=bounds.width,h=bounds.height;
   if(w<110||h<100)return;
@@ -530,7 +530,15 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
   const ratio=Math.min(window.devicePixelRatio||1,2);
   canvas.width=Math.round(w*ratio);canvas.height=Math.round(h*ratio);
   ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#0b151b';ctx.fillRect(0,0,w,h);
-  const d=window.btcServerStatus,m=model(d,now);
+  const d=window.btcServerStatus;
+  const latestTip=tipMarket===d?.market?tipTicks.filter(p=>Array.isArray(p)&&Number.isFinite(p[0])&&Number.isFinite(p[1])&&
+   p[1]>0&&now-p[0]>=-5&&now-p[0]<=15):[];
+  const latest=latestTip.length?latestTip[latestTip.length-1]:null;
+  const graphState=latest?{...d,
+   reference_price:{...(d.reference_price||{}),price:latest[1],price_epoch:latest[0],status:'fresh'},
+   brti_chart:{...(d.brti_chart||{}),sample_age_seconds:Math.max(0,now-latest[0]),
+    points:[...((d.brti_chart||{}).points||[]),...latestTip]}}:d;
+  const m=model(graphState,now);
   if(!m){
    lastDraw=0;status.textContent='Verified BRTI observations unavailable or stale';
    ctx.fillStyle='#acbdcd';ctx.font='12px system-ui';
@@ -547,7 +555,8 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
    if(t<=now||selected==='round')return left+(t-start)/(selected==='round'?900:now-start)*(selected==='round'?pw:nowX-left);
    return nowX+(t-now)/Math.max(1,m.end-now)*(plotRight-nowX);
   };
-  const raw=hist&&Array.isArray(hist.brti_points)&&hist.brti_points.length>=2?hist.brti_points:m.points;
+  const raw=hist&&Array.isArray(hist.brti_points)&&hist.brti_points.length>=2?
+    [...hist.brti_points,...latestTip]:[...m.points,...latestTip];
   const points=raw.filter(p=>Array.isArray(p)&&p.length>=2&&finite(Number(p[0]))&&finite(Number(p[1]))&&Number(p[0])>=start&&Number(p[0])<=now&&Number(p[1])>0)
    .map(p=>[Number(p[0]),Number(p[1])]);
   const source=points.length>=2?points:m.points.filter(p=>p[0]>=start);
@@ -622,11 +631,38 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
    ' · last-price samples, not the settlement index'+(hist&&hist.brti_coverage_seconds<((spans[selected]||now-m.start)-30)?' · history still accumulating':'')+
    (selected!=='round'?' · future timeline compressed':'');
  }
+ async function refreshTip(){
+  if(document.hidden||tipBusy||typeof fetch!=='function')return;
+  tipBusy=true;
+  const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),1400);
+  try{
+   const response=await fetch('/api/market-chart/tip',{cache:'no-store',signal:ctrl.signal});
+   if(!response.ok)throw Error('BRTI tick unavailable');
+   const data=await response.json(),d=window.btcServerStatus;
+   if(data.status!=='fresh'||data.source!=='Polymarket US BTC reference / BRTI'||
+      !d||d.status!=='running'||data.market!==d.market||!Array.isArray(data.points))return;
+   const ref=d.reference_price||{},start=Number(ref.window_start),end=Number(ref.window_end),now=Date.now()/1000;
+   if(!Number.isFinite(start)||!Number.isFinite(end)||end-start!==900||!(start<=now&&now<end))return;
+   const verified=data.points.filter(p=>Array.isArray(p)&&p.length>=2&&Number.isFinite(p[0])&&
+    Number.isFinite(p[1])&&p[1]>0&&p[0]>=start&&p[0]<=now+1);
+   if(!verified.length)return;
+   if(tipMarket!==d.market){tipTicks=[];tipMarket=d.market;}
+   const merged=new Map(tipTicks.filter(p=>now-p[0]<=30).map(p=>[p[0],p[1]]));
+   for(const [t,v] of verified)merged.set(t,v);
+   tipTicks=[...merged.entries()].sort((a,b)=>a[0]-b[0]).slice(-32);
+   draw();
+  }catch(e){/* Keep last verified observations; never synthesize a point. */}
+  finally{clearTimeout(timeout);tipBusy=false;}
+ }
  window.addEventListener('btc-status-updated',()=>draw());
  window.addEventListener('resize',()=>draw(true));
  document.addEventListener('visibilitychange',()=>{if(!document.hidden){draw(true);refreshHistory();}});
- draw(true);refreshHistory();
- if(typeof setInterval==='function')setInterval(()=>{if(!document.hidden)refreshHistory()},5000);
+ draw(true);refreshHistory();refreshTip();
+ if(typeof setInterval==='function'){
+  setInterval(()=>{if(!document.hidden)refreshTip()},1000);
+  setInterval(()=>{if(!document.hidden)draw()},1000);
+  setInterval(()=>{if(!document.hidden)refreshHistory()},10000);
+ }
 })();
 </script><section class="card" id="crossExchangePanel" aria-label="Bitcoin exchange comparison and buy sell pressure">
  <div class="row" style="justify-content:space-between"><strong class="label">BTC EXCHANGE COMPARISON</strong><span id="crossFeedState" class="small">Checking venues</span></div>
