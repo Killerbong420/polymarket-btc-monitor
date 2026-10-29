@@ -282,6 +282,17 @@ body:not(.show-advanced) #futureForecastCard p.small{display:none!important}
 #brtiLineCanvas{height:clamp(280px,62vw,410px);background:#0b151b;border-color:#334653;margin-top:3px}
 #brtiLineLegend{gap:7px 12px}
 #brtiLineStatus{color:#96bdd0}
+/* Lightweight market activity warning, computed server-side from existing candles. */
+#marketShockPanel{border-left:4px solid #526a82!important}
+#marketShockPanel[data-level="normal"]{border-left-color:#48b999!important}
+#marketShockPanel[data-level="elevated"]{border-left-color:#e4b757!important}
+#marketShockPanel[data-level="shock"]{border-left-color:#f07865!important}
+#marketShockHeadline{font-size:clamp(19px,5vw,26px);font-weight:800;line-height:1.2;margin:9px 0 6px}
+#marketShockPanel[data-level="shock"] #marketShockHeadline{color:#ffae88}
+#marketShockPanel[data-level="elevated"] #marketShockHeadline{color:#f3cc78}
+#marketShockPanel[data-level="normal"] #marketShockHeadline{color:#83d7b6}
+#marketShockDetails,#marketShockSource{line-height:1.5;overflow-wrap:anywhere}
+
 @media(max-width:430px){#brtiLineCanvas{height:clamp(265px,78vw,350px)}#brtiRangeTabs button{padding:8px 10px}#brtiLineHead{font-size:10px}}
 </style></head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
 document.getElementById('advancedToggle').addEventListener('click',function(){
@@ -290,6 +301,14 @@ document.getElementById('advancedToggle').addEventListener('click',function(){
  this.textContent=enabled?'Hide detailed logs & diagnostics':'Show detailed logs, outside data & diagnostics';
 });
 </script><h1 id="mainTitle">₿ BTC · 15-MINUTE MARKET</h1><p id="mainSubtitle">Official BRTI target · 15-minute priority · 5-minute companion</p><section class="card" id="monitorHealth"><div class="row" style="justify-content:space-between"><div class="label">MONITOR ALERTS</div><span class="status" id="healthLabel">CHECKING</span></div><div id="healthAlerts" aria-live="polite"></div><details><summary class="small">Alert history</summary><div id="healthHistory"></div></details></section>
+<section class="card" id="marketShockPanel" data-level="unavailable" aria-label="BTC market shock indicator">
+ <div class="row" style="justify-content:space-between;align-items:center">
+  <span class="label">⚡ MARKET SHOCK · BTC/USD</span><span class="status" id="marketShockStatus">CHECKING</span>
+ </div>
+ <div class="value wait" id="marketShockHeadline" aria-live="polite">AWAITING EXCHANGE DATA</div>
+ <div class="small" id="marketShockDetails">Volume and BTC movement compared with earlier completed 1-minute candles.</div>
+ <div class="small" id="marketShockSource" style="margin-top:5px;color:#8ba3b8">Exchange activity is not official BRTI volume. Does not override UP/DOWN predictions.</div>
+</section>
 <section class="card" id="targetResearch"><div class="row" style="justify-content:space-between"><div class="label">REFERENCE PRICE &amp; TARGET BEHAVIOR · 15-MINUTE ROUND</div><span class="status" id="referenceStatus">CONNECTING</span></div><div class="grid" style="margin-top:12px"><div><div class="label">BTC reference price</div><div class="value" id="referencePrice">—</div><div class="small" id="referenceMeta"></div></div><div><div class="label">Lead against official target</div><div class="value" id="behaviorGap">—</div><div class="small" id="behaviorDetails"></div></div></div><p class="small" id="behaviorOccupancy"></p><p class="small" id="settlementAverage"></p><div class="small" id="targetValidation"></div><p class="small">BTC settles against the final-minute reference average, not a single spot tick. Gaps and spot fallbacks are labeled.</p><div class="small" id="checkpointStatus">Checkpoints: early at 12:00 left · halfway at 7:30 left · late at 3:00 left. Missed checkpoints are not backfilled.</div></section>
 
 <section class="card" id="futureForecastCard" style="border-left:4px solid #6db8ff" aria-label="Forecast of final 15-minute Bitcoin settlement value">
@@ -715,6 +734,36 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
 </section>
 <section class="card" id="serverHistory"><div class="label">AI ACCURACY · LAST 100 SETTLED PREDICTIONS (15M)</div><div class="row"><span class="status" id="serverState">Connecting…</span><span class="small" id="serverCounts"></span></div><div class="result-grid" aria-label="Server prediction results"><div class="result-tile"><div class="result-number up" id="winCount">0</div><div class="result-label">WINS · LAST 100</div></div><div class="result-tile"><div class="result-number down" id="lossCount">0</div><div class="result-label">LOSSES · LAST 100</div></div><div class="result-tile"><div class="result-number wait" id="pendingCount">0</div><div class="result-label">PENDING · ALL</div></div><div class="result-tile"><div class="result-number" id="winRate">—</div><div class="result-label">LAST 100 ACCURACY</div></div></div><div class="small" id="winLossRatio" aria-live="polite">AI WIN/LOSS RATIO · —</div><div class="small" id="serverLatest" aria-live="polite">Checking saved predictions…</div><div class="result-foot" id="settlementInfo">Settlement verification: checking…</div><p class="small">Win/loss and accuracy use the 100 most recent settled 15-minute AI_REVIEW predictions (or fewer if not yet available). Pending predictions are counted separately and excluded from accuracy. Fallbacks are excluded. Older records remain stored for historical analysis; verified Polymarket settlement is required to score a prediction.</p></section><section class="card" id="peerBotsPanel"><div class="row" style="justify-content:space-between"><div class="label">BOT STRATEGY STUDIES · 15-MIN MARKET</div><span class="status">RESEARCH ONLY</span></div><div id="peerBotsLive" class="small">Waiting for fresh BTC exchange candles…</div><p class="small">MACD trend, Bollinger reversals, ATR breakouts and range/liquidity price action. These are independent public-indicator studies, not another trader's live signals. Compare their settled win rates and prediction coverage under Detailed logs.</p></section><script>(()=>{const $=id=>document.getElementById(id);function safeText(v){return String(v??'—')}
 let statusInFlight=false;
+function renderMarketShock(d,online,validCandles){
+ const get=id=>document.getElementById(id),panel=get('marketShockPanel');
+ if(!panel)return;
+ const shock=d.external?.market_shock||{};
+ const valid=online&&validCandles&&shock.status==='available'&&
+  ['normal','elevated','shock'].includes(shock.level)&&
+  Number.isFinite(shock.volume_multiple)&&Number.isFinite(shock.movement_multiple)&&
+  Number.isFinite(shock.sample_age_seconds)&&shock.sample_age_seconds<=120;
+ panel.dataset.level=valid?shock.level:'unavailable';
+ const status=get('marketShockStatus'),headline=get('marketShockHeadline'),
+       details=get('marketShockDetails'),source=get('marketShockSource');
+ if(!valid){
+  status.textContent=online?'DATA UNAVAILABLE':'SERVER STALE';
+  headline.textContent='MARKET SHOCK · UNAVAILABLE';
+  headline.className='value wait';
+  details.textContent='Waiting for fresh, contiguous completed BTC/USD exchange candles. No market-shock estimate shown.';
+  source.textContent='Exchange activity is not official BRTI volume. Does not override UP/DOWN predictions.';
+  return;
+ }
+ const volume=shock.volume_multiple.toFixed(2),movement=shock.movement_multiple.toFixed(2),
+       change=Number(shock.net_5m_change_pct);
+ status.textContent=shock.level.toUpperCase();
+ headline.textContent=shock.level==='shock'?'⚡ MARKET SHOCK DETECTED':
+  shock.level==='elevated'?'⚠ ELEVATED ACTIVITY':'✓ NORMAL MARKET ACTIVITY';
+ headline.className='value '+(shock.level==='normal'?'up':'wait');
+ details.textContent='Volume '+volume+'× typical · BTC movement '+movement+'× typical'+
+  (Number.isFinite(change)?' · 5m change '+(change>=0?'+':'')+change.toFixed(3)+'%':'');
+ source.textContent=(shock.source||'Exchange BTC/USD')+' · latest 5 completed minutes vs preceding 20'+
+  ' · sample '+Math.round(shock.sample_age_seconds)+'s old · Non-predictive warning; no changes to trading or forecasts.';
+}
 function renderPersistentSignals(d){
  const el=id=>document.getElementById(id), ext=d.external||{}, quality=ext.signal_quality||{};
  const serverAge=Date.now()-Date.parse(d.updated||'');
@@ -722,6 +771,7 @@ function renderPersistentSignals(d){
  const validMarket=d.status==='running'&&typeof d.market==='string'&&d.market.includes('btc-updown-15m-');
  const candleAge=Number(ext.candle_age_seconds);
  const validCandles=ext.price!=null&&Number.isFinite(candleAge)&&candleAge>=0&&candleAge<120;
+ renderMarketShock(d,online,validCandles);
  // A causal next-minute BRTI forecast takes priority over local exchange
  // momentum, but only while the current-round server state is fresh.
  const q=d.quick_forecast||{};
@@ -1014,8 +1064,10 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  for(const id of ['fastPanel','strongPanel','final15Panel']){const panel=document.getElementById(id);if(panel)cards.append(panel)}
  const primary=document.getElementById('currentSignal')?.closest('.card');if(primary){primary.id='primaryPanel';cards.append(primary)}
  const forecast=document.getElementById('futureForecastCard'),history=document.getElementById('serverHistory');
+ const shock=document.getElementById('marketShockPanel');
  const exchanges=document.getElementById('crossExchangePanel'),checkpoint=document.getElementById('checkpointBoard');
  if(forecast)cards.insertAdjacentElement('afterend',forecast);
+ if(shock)cards.insertAdjacentElement('afterend',shock);
  if(exchanges)(forecast||cards).insertAdjacentElement('afterend',exchanges);
  if(history)(exchanges||forecast||cards).insertAdjacentElement('afterend',history);
  if(checkpoint)(history||exchanges||forecast||cards).insertAdjacentElement('afterend',checkpoint);
