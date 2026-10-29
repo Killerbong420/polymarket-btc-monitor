@@ -269,6 +269,34 @@ class CheckpointLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(five.state["early_direction"],"UP")
         self.assertEqual(five.state["late_direction"],"DOWN")
 
+    async def test_legacy_off_window_late_call_is_not_labeled_strict_230(self):
+        slug="cpc-btc-updown-5m-2026-10-28-1932z"
+        end=time.time()+100
+        self.db.execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?)",
+                        (slug,end-240,"UP",100,101))
+        self.db.execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast,result,winner) VALUES (?,?,?,?,?,?,?)",
+                        (slug,end-100,"DOWN",100,99,"WIN","DOWN"))
+        market={"slug":slug,"end":end,"assetPriceTerms":{"indexSymbol":"BRTI","priceToBeat":100}}
+        await self.run_once(market)
+        self.assertEqual(five.state["phase"],"LEGACY_LATE")
+        self.assertIn("excluded from strict accuracy",five.state["reason"])
+        self.assertEqual(five.state["late_direction"],"DOWN")
+        self.assertEqual(five.report(self.db.execute)["late"]["graded"],0)
+        self.assertEqual(self.db.execute("SELECT result FROM five_min_late_predictions WHERE market=?",
+                                         (slug,),fetch=True),[("WIN",)])
+
+    async def test_valid_existing_late_call_keeps_strict_label_during_visual_refresh(self):
+        slug="cpc-btc-updown-5m-2026-10-28-1934z"
+        end=time.time()+130
+        self.db.execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?)",
+                        (slug,end-250,"UP",100,101))
+        self.db.execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?)",
+                        (slug,end-135,"DOWN",100,99))
+        market={"slug":slug,"end":end,"assetPriceTerms":{"indexSymbol":"BRTI","priceToBeat":100}}
+        await self.run_once(market)
+        self.assertEqual(five.state["phase"],"LATE_2M30")
+        self.assertIn("Frozen 2:30-left forecast",five.state["reason"])
+
     async def test_no_mislabelled_late_call_at_100_seconds_remaining(self):
         slug="cpc-btc-updown-5m-2026-10-28-1932z"
         end=time.time()+100
