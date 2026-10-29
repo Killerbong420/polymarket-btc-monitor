@@ -487,7 +487,7 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
   if(d?.status!=='running'||typeof d.market!=='string'||!d.market.includes('btc-updown-15m-')||
    series.market!==d.market||!(end-start===900)||!(start<=now&&now<end)||
    r.status!=='fresh'||!finite(age)||age < -5||age>15||
-   !finite(updatedAge)||updatedAge < -5||updatedAge>25||
+   (!d.chart_tip_verified&&(!finite(updatedAge)||updatedAge < -5||updatedAge>25))||
    !finite(Number(series.sample_age_seconds))||Number(series.sample_age_seconds)>15)return null;
   const points=(Array.isArray(series.points)?series.points:[])
    .filter(p=>Array.isArray(p)&&p.length>=2&&finite(Number(p[0]))&&finite(Number(p[1]))&&
@@ -556,10 +556,10 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
   if(canvas.height!==pixelHeight)canvas.height=pixelHeight;
   ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#0b151b';ctx.fillRect(0,0,w,h);
   const d=window.btcServerStatus;
-  const latestTip=tipMarket===d?.market?tipTicks.filter(p=>Array.isArray(p)&&Number.isFinite(p[0])&&Number.isFinite(p[1])&&
+  const latestTip=tipMarket===d?.market&&d?.reference_price?.source==='Polymarket US BTC reference / BRTI'?tipTicks.filter(p=>Array.isArray(p)&&Number.isFinite(p[0])&&Number.isFinite(p[1])&&
    p[1]>0&&now-p[0]>=-5&&now-p[0]<=15):[];
   const latest=latestTip.length?latestTip[latestTip.length-1]:null;
-  const graphState=latest?{...d,
+  const graphState=latest?{...d,chart_tip_verified:true,
    reference_price:{...(d.reference_price||{}),price:latest[1],price_epoch:latest[0],status:'fresh'},
    brti_chart:{...(d.brti_chart||{}),sample_age_seconds:Math.max(0,now-latest[0]),
     points:[...((d.brti_chart||{}).points||[]),...latestTip]}}:d;
@@ -665,7 +665,7 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
    if(!response.ok)throw Error('BRTI tick unavailable');
    const data=await response.json(),d=window.btcServerStatus;
    if(data.status!=='fresh'||data.source!=='Polymarket US BTC reference / BRTI'||
-      !d||d.status!=='running'||data.market!==d.market||!Array.isArray(data.points))return;
+      !d||d.status!=='running'||d.reference_price?.source!==data.source||data.market!==d.market||!Array.isArray(data.points))return;
    const ref=d.reference_price||{},start=Number(ref.window_start),end=Number(ref.window_end),now=Date.now()/1000;
    if(!Number.isFinite(start)||!Number.isFinite(end)||end-start!==900||!(start<=now&&now<end))return;
    const verified=data.points.filter(p=>Array.isArray(p)&&p.length>=2&&Number.isFinite(p[0])&&
