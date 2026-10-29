@@ -546,7 +546,6 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
   if(document.hidden)return;
   const nowMillis=Date.now(),now=nowMillis/1000;
   if(!force&&nowMillis-lastDraw<1000/30)return;
-  lastDraw=nowMillis;
   const bounds=canvas.getBoundingClientRect(),w=bounds.width,h=bounds.height;
   if(w<110||h<100)return;
   const ctx=canvas.getContext('2d');if(!ctx)return;
@@ -585,7 +584,8 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
   const points=raw.filter(p=>Array.isArray(p)&&p.length>=2&&finite(Number(p[0]))&&finite(Number(p[1]))&&Number(p[0])>=start&&Number(p[0])<=now&&Number(p[1])>0)
    .map(p=>[Number(p[0]),Number(p[1])]);
   const source=points.length>=2?points:m.points.filter(p=>p[0]>=start);
-  if(source.length<2){lastDraw=0;status.textContent='Collecting real BRTI ticks for this range';return;}
+  if(source.length<2){status.textContent='Collecting real BRTI ticks for this range';return;}
+  lastDraw=nowMillis;
   const venues=hist?((hist.venue_series||[]).filter(v=>v.quote==='USD'&&v.status==='fresh'&&Array.isArray(v.points))):[];
   const visibleVenues=venues.map(v=>({name:v.source,color:colors[v.source]||'#7186a1',
    points:v.points.filter(p=>Array.isArray(p)&&finite(Number(p[0]))&&finite(Number(p[1]))&&p[0]>=start&&p[0]<=now&&p[1]>0)
