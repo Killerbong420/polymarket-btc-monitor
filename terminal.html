@@ -84,7 +84,7 @@ button.active{background:#1769bc;border-color:#80c6ff}
 /* Price display policy: only Polymarket-sourced prices/odds are visible.
    External exchange feeds remain available to backend analysis, never relabeled. */
 #heroChart{display:block} /* Restored BTC trading candles; Polymarket odds chart remains separate. */
-#entryQuote{font-weight:700}
+/* Entry-cost scenario has been retired from the dashboard. */
 </style><style>
 /* Compact iPhone-friendly signal tile dashboard */
 body{max-width:920px;padding:10px 10px 38px}
@@ -244,6 +244,18 @@ body:not(.show-advanced) #futureForecastCard p.small{display:none!important}
  #pmApiStrip .pm-numbers strong{font-size:clamp(11px,3.4vw,16px)}
 }
 @media(max-width:350px){#terminalQuickCards{grid-template-columns:1fr}}
+</style>
+<style>
+/* Official BRTI line chart, not candles. Uses the 2-second status feed already on the page. */
+#brtiLinePanel{margin-top:11px;border-top:1px solid #334b5f;padding-top:10px}
+#brtiLineHead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:#c1d9ee;font-weight:750}
+#brtiLineStatus{font-size:10px;color:#a2bad1}
+#brtiLineCanvas{display:block;width:100%;height:clamp(190px,47vw,290px);border-radius:10px;background:#0b1624;border:1px solid #294153;margin-top:8px}
+#brtiLineLegend{display:flex;flex-wrap:wrap;align-items:center;gap:11px;margin:8px 0 0;font-size:10px;color:#9bb5ce}
+#brtiLineLegend i{display:inline-block;width:16px;height:3px;margin-right:4px;vertical-align:middle;background:#61c2ff;border-radius:2px}
+#brtiLineLegend .target{background:repeating-linear-gradient(90deg,#d8e1e8 0 5px,transparent 5px 8px)}
+#brtiLineLegend .forecast{background:repeating-linear-gradient(90deg,#ffb44a 0 3px,transparent 3px 7px)}
+@media(max-width:390px){#brtiLineCanvas{height:200px}#brtiLineHead{font-size:10px}}
 </style></head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
 document.getElementById('advancedToggle').addEventListener('click',function(){
  const enabled=document.body.classList.toggle('show-advanced');
@@ -276,6 +288,11 @@ document.getElementById('advancedToggle').addEventListener('click',function(){
 <div class="pm-head"><span>POLYMARKET US · 15M REFERENCE</span><span class="pm-feed" id="pmApiFeed">CONNECTING</span></div>
 <div class="pm-numbers"><div><small>OFFICIAL PRICE TO BEAT</small><strong id="pmApiTarget">—</strong></div><div><small>BRTI REFERENCE</small><strong id="pmApiPrice">—</strong></div><div><small>ROUND REMAINING</small><strong id="pmApiCountdown">—</strong></div></div>
 <div class="pm-detail" id="pmApiInfo" aria-live="polite">Awaiting verified current-round index observations</div></section>
+<section id="brtiLinePanel" aria-label="Current 15-minute official BRTI price path">
+  <div id="brtiLineHead"><span>OFFICIAL BRTI · 15-MINUTE PRICE PATH</span><span id="brtiLineStatus" aria-live="polite">Waiting for verified index ticks</span></div>
+  <canvas id="brtiLineCanvas" role="img" aria-label="Official Polymarket US BRTI index line, official price to beat, and eligible final-average forecast. No candlesticks or contract values."></canvas>
+  <div id="brtiLineLegend"><span><i></i>BRTI index</span><span><i class="target"></i>Official target</span><span><i class="forecast"></i>Projected final average (when verified)</span></div>
+</section>
 <div class="card" id="patternPanel" style="border-left:4px solid #e5a45d;margin-top:10px"><div class="label">PATTERN ANALYSIS · SERVER SIGNALS</div><div class="value wait" id="patternName">ANALYZING</div><div class="small" id="patternDetails">Waiting for server pattern analysis</div><div class="small" id="minuteForecast">NEXT 60 SECONDS · Awaiting forecast</div><div class="small" id="minuteReversal">REVERSAL WATCH · Awaiting BRTI evidence</div><p class="small">Pattern analysis continues on the server; no calibrated probabilities.</p></div></div><div id="signalTiles"><div class="card" id="fastPanel" style="border-left:4px solid #f6bb45;margin-top:10px"><div class="row" style="justify-content:space-between"><span class="label">⚡ QUICK PREDICTION · UP / DOWN</span><span class="small" id="fastAge">Waiting for stream</span></div><div class="value wait" id="fastSignal">SCANNING</div><div class="small" id="fastReason">Waiting for live price movement</div>
  <div class="small" id="quickAccuracySummary" style="margin-top:10px;font-weight:700">FIRST 5 MIN · Quick prediction accuracy: collecting</div>
  <div class="small" id="quickAccuracyMinutes" style="margin-top:5px">Minutes 1–5: awaiting scored calls</div>
@@ -396,7 +413,103 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
  window.addEventListener('btc-status-updated',()=>updatePolymarketSummary(window.btcServerStatus));
 })();
 </script>
-<section class="card" id="serverHistory"><div class="label">AI ACCURACY · LAST 100 SETTLED PREDICTIONS (15M)</div><div class="row"><span class="status" id="serverState">Connecting…</span><span class="small" id="serverCounts"></span></div><div class="result-grid" aria-label="Server prediction results"><div class="result-tile"><div class="result-number up" id="winCount">0</div><div class="result-label">WINS · LAST 100</div></div><div class="result-tile"><div class="result-number down" id="lossCount">0</div><div class="result-label">LOSSES · LAST 100</div></div><div class="result-tile"><div class="result-number wait" id="pendingCount">0</div><div class="result-label">PENDING · ALL</div></div><div class="result-tile"><div class="result-number" id="winRate">—</div><div class="result-label">LAST 100 ACCURACY</div></div></div><div class="small" id="winLossRatio" aria-live="polite">AI WIN/LOSS RATIO · —</div><div class="small" id="serverLatest" aria-live="polite">Checking saved predictions…</div><div class="result-foot" id="settlementInfo">Settlement verification: checking…</div><p class="small">Win/loss and accuracy use the 100 most recent settled 15-minute AI_REVIEW predictions (or fewer if not yet available). Pending predictions are counted separately and excluded from accuracy. Fallbacks are excluded. Older records remain stored for historical analysis; verified Polymarket settlement is required to score a prediction.</p></section><section class="card" id="peerBotsPanel"><div class="row" style="justify-content:space-between"><div class="label">BOT STRATEGY STUDIES · 15-MIN MARKET</div><span class="status">RESEARCH ONLY</span></div><div id="peerBotsLive" class="small">Waiting for fresh BTC exchange candles…</div><p class="small">MACD trend, Bollinger reversals, ATR breakouts and range/liquidity price action. These are independent public-indicator studies, not another trader's live signals. Compare their settled win rates and prediction coverage under Detailed logs.</p></section><script>(()=>{const $=id=>document.getElementById(id);function safeText(v){return String(v??'—')}
+<script>
+/* Lightweight, read-only 15m BRTI line. Shares existing /api/status requests (no extra fetch). */
+(()=>{
+ 'use strict';
+ const canvas=document.getElementById('brtiLineCanvas'),status=document.getElementById('brtiLineStatus');
+ if(!canvas||!status)return;
+ const finite=v=>typeof v==='number'&&Number.isFinite(v);
+ const model=(d,now)=>{
+  const r=d?.reference_price||{},series=d?.brti_chart||{},terms=d?.target_behavior||{},forecast=d?.settlement_forecast||{};
+  const start=Number(r.window_start),end=Number(r.window_end),epoch=Number(r.price_epoch);
+  const age=now-epoch,updatedAge=now-Date.parse(d?.updated||'')/1000;
+  if(d?.status!=='running'||typeof d.market!=='string'||!d.market.includes('btc-updown-15m-')||
+   series.market!==d.market||!(end-start===900)||!(start<=now&&now<end)||
+   r.status!=='fresh'||!finite(age)||age < -5||age>15||
+   !finite(updatedAge)||updatedAge < -5||updatedAge>25||
+   !finite(Number(series.sample_age_seconds))||Number(series.sample_age_seconds)>15)return null;
+  const points=(Array.isArray(series.points)?series.points:[])
+   .filter(p=>Array.isArray(p)&&p.length>=2&&finite(Number(p[0]))&&finite(Number(p[1]))&&
+    Number(p[0])>=start&&Number(p[0])<=now&&Number(p[1])>0)
+   .map(p=>[Number(p[0]),Number(p[1])]).sort((a,b)=>a[0]-b[0]).slice(-480);
+  if(points.length<2||now-points[points.length-1][0]>15)return null;
+  const target=terms.status==='available'&&finite(Number(terms.target))&&Number(terms.target)>0?Number(terms.target):null;
+  const fval=Number(forecast.forecast_final_mean_usd);
+  const projected=target!==null&&forecast.status==='available'&&finite(fval)&&fval>0&&
+   finite(Number(forecast.target_usd))&&Math.abs(Number(forecast.target_usd)-target)<.02&&
+   finite(Number(forecast.seconds_to_settlement))&&Math.abs(Number(forecast.seconds_to_settlement)-(end-now))<=20?
+   fval:null;
+  return {start,end,points,target,projected};
+ };
+ window.btcBrtiLineModel=model;
+ let lastDraw=0;
+ const money=v=>v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+ function draw(force=false){
+  if(document.hidden)return;
+  const now=Date.now();
+  if(!force&&now-lastDraw<1500)return;
+  lastDraw=now;
+  const box=canvas.getBoundingClientRect(),w=box.width,h=box.height;
+  if(w<80||h<90)return;
+  const ctx=canvas.getContext('2d');if(!ctx)return;
+  const ratio=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=Math.round(w*ratio);canvas.height=Math.round(h*ratio);
+  ctx.setTransform(ratio,0,0,ratio,0,0);
+  ctx.fillStyle='#0b1624';ctx.fillRect(0,0,w,h);
+  const m=model(window.btcServerStatus,now/1000);
+  if(!m){
+   status.textContent='Verified BRTI observations unavailable or stale';
+   ctx.fillStyle='#a6b6c8';ctx.font='12px system-ui';
+   ctx.fillText('Waiting for fresh official 15m reference data',13,h/2);
+   return;
+  }
+  status.textContent='LIVE · official ticks';
+  const left=12,right=80,top=18,bottom=31,pw=w-left-right,ph=h-top-bottom;
+  const vals=m.points.map(p=>p[1]);
+  if(m.target!==null)vals.push(m.target);
+  if(m.projected!==null)vals.push(m.projected);
+  const minimum=Math.min(...vals),maximum=Math.max(...vals),pad=Math.max(2,(maximum-minimum)*.13);
+  const low=minimum-pad,high=maximum+pad;
+  const X=t=>left+(t-m.start)/900*pw,Y=v=>top+(high-v)/(high-low)*ph;
+  ctx.font='10px system-ui';ctx.lineWidth=1;
+  for(let i=0;i<4;i++){
+   const y=top+i*ph/3;
+   ctx.strokeStyle='#283f51';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(w-right,y);ctx.stroke();
+   ctx.fillStyle='#a7bdce';ctx.fillText((high-(high-low)*i/3).toFixed(2),w-right+5,y+3);
+  }
+  for(let i=0;i<=3;i++){
+   const tick=m.start+i*300;
+   ctx.fillStyle='#8ca5bd';ctx.fillText(new Date(tick*1000).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),Math.max(2,Math.min(w-68,X(tick)-19)),h-9);
+  }
+  function line(series,color,width,dashed){
+   ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.setLineDash(dashed||[]);
+   let prev=null;
+   for(const [t,p] of series){
+    if(prev!==null&&t-prev>20)ctx.moveTo(X(t),Y(p));
+    else if(prev===null)ctx.moveTo(X(t),Y(p));else ctx.lineTo(X(t),Y(p));
+    prev=t;
+   }
+   ctx.stroke();ctx.setLineDash([]);
+  }
+  if(m.target!==null)line([[m.start,m.target],[m.end,m.target]],'#d8e1e8',1.4,[5,5]);
+  line(m.points,'#61c2ff',2.2);
+  const last=m.points[m.points.length-1];
+  ctx.beginPath();ctx.arc(X(last[0]),Y(last[1]),3.2,0,Math.PI*2);ctx.fillStyle='#61c2ff';ctx.fill();
+  if(m.projected!==null){
+   line([last,[m.end,m.projected]],'#ffb44a',1.7,[3,5]);
+  }
+  ctx.fillStyle='#d4e8f7';ctx.font='10px system-ui';
+  ctx.fillText('BRTI '+money(last[1]),13,13);
+  if(m.target!==null)ctx.fillText('Target '+money(m.target),Math.max(9,w-140),13);
+  if(m.projected!==null)status.textContent='LIVE · final average projection shown as dotted guide';
+ }
+ window.addEventListener('btc-status-updated',()=>draw());
+ window.addEventListener('resize',()=>draw(true));
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)draw(true)});
+ draw(true);
+})();
+</script><section class="card" id="serverHistory"><div class="label">AI ACCURACY · LAST 100 SETTLED PREDICTIONS (15M)</div><div class="row"><span class="status" id="serverState">Connecting…</span><span class="small" id="serverCounts"></span></div><div class="result-grid" aria-label="Server prediction results"><div class="result-tile"><div class="result-number up" id="winCount">0</div><div class="result-label">WINS · LAST 100</div></div><div class="result-tile"><div class="result-number down" id="lossCount">0</div><div class="result-label">LOSSES · LAST 100</div></div><div class="result-tile"><div class="result-number wait" id="pendingCount">0</div><div class="result-label">PENDING · ALL</div></div><div class="result-tile"><div class="result-number" id="winRate">—</div><div class="result-label">LAST 100 ACCURACY</div></div></div><div class="small" id="winLossRatio" aria-live="polite">AI WIN/LOSS RATIO · —</div><div class="small" id="serverLatest" aria-live="polite">Checking saved predictions…</div><div class="result-foot" id="settlementInfo">Settlement verification: checking…</div><p class="small">Win/loss and accuracy use the 100 most recent settled 15-minute AI_REVIEW predictions (or fewer if not yet available). Pending predictions are counted separately and excluded from accuracy. Fallbacks are excluded. Older records remain stored for historical analysis; verified Polymarket settlement is required to score a prediction.</p></section><section class="card" id="peerBotsPanel"><div class="row" style="justify-content:space-between"><div class="label">BOT STRATEGY STUDIES · 15-MIN MARKET</div><span class="status">RESEARCH ONLY</span></div><div id="peerBotsLive" class="small">Waiting for fresh BTC exchange candles…</div><p class="small">MACD trend, Bollinger reversals, ATR breakouts and range/liquidity price action. These are independent public-indicator studies, not another trader's live signals. Compare their settled win rates and prediction coverage under Detailed logs.</p></section><script>(()=>{const $=id=>document.getElementById(id);function safeText(v){return String(v??'—')}
 let statusInFlight=false;
 function renderPersistentSignals(d){
  const el=id=>document.getElementById(id), ext=d.external||{}, quality=ext.signal_quality||{};
@@ -596,7 +709,7 @@ document.getElementById('intelFlow').textContent=(flow.exchanges||[]).map(x=>x.s
 document.getElementById('intelBook').textContent='Kraken depth: '+(book.status==='fresh'?'imbalance '+(Number(book.imbalance)*100).toFixed(1)+'% · '+book.age_seconds+'s old':book.status||'unavailable');
 document.getElementById('intelNewsStatus').textContent='News: '+(news.status||'unavailable')+' · '+(news.age_seconds!=null?news.age_seconds+'s since feed check':'not checked')+' · '+(news.headlines||[]).length+' recent headlines';
 const headlines=document.getElementById('intelHeadlines');headlines.replaceChildren();for(const h of news.headlines||[]){const line=document.createElement('div'),link=document.createElement('a');line.style.cssText='padding:8px 0;border-top:1px solid #2a3e55';link.textContent=h.title;try{const url=new URL(h.url);if(!['https:','http:'].includes(url.protocol))continue;link.href=url.href}catch(e){continue}link.target='_blank';link.rel='noopener noreferrer';line.append(link,document.createTextNode(' · '+h.source+' · '+new Date(h.published_at).toLocaleString()));headlines.append(line)}
-const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').textContent='LAST 100 SETTLED · WIN '+(counts.WIN||0)+' · LOSS '+(counts.LOSS||0)+' · PENDING (ALL) '+(counts.PENDING||0);const log=document.getElementById('aiLogRows');log.replaceChildren();for(const x of (d.ai_decision_history||[]).slice(0,12)){const line=document.createElement('div');line.style.cssText='padding:8px 0;border-top:1px solid #2a3e55;line-height:1.5';line.textContent=(x.direction||'?')+' · '+(x.result||'PENDING')+' · '+(x.confidence||'UNRATED')+' · '+(x.source||'UNKNOWN')+' · '+(x.created_at||'')+' — '+(x.reason||'');log.append(line)};const verdict=a.status==='ready'?(a.verdict||'WAIT'):(a.status||'NOT CONFIGURED').replaceAll('_',' ').toUpperCase();const el=document.getElementById('aiVerdict');el.textContent=verdict;el.style.color=verdict==='UP'?'#3de5a5':verdict==='DOWN'?'#ff7777':'#a6b6cb';document.getElementById('aiReason').textContent=(a.confidence?'Confidence: '+a.confidence+' · ':'')+(a.reason||'AI prediction is waiting for valid server-side data.');let stamp=Date.parse(d.updated||''),lastAI=Number(a.updated_epoch||a.captured_epoch||0)*1000;let stale=a.status==='ready'&&(!d.market||a.market!==d.market||!String(a.market).includes('btc-updown-15m-')||!Number.isFinite(stamp)||Date.now()-stamp>45000||!lastAI||Date.now()-lastAI>180000);document.getElementById('aiMeta').textContent=(a.model||'AI')+' · '+(a.market||'No round')+' · '+(a.phase||'')+(stale?' · STALE OR PREVIOUS ROUND — NOT CURRENT':'')+' · Research only; no automatic orders.';if(stale){el.textContent='STALE / WAIT';el.style.color='#ffbd5a'}}catch(e){document.getElementById('aiVerdict').textContent='UNAVAILABLE';document.getElementById('aiReason').textContent='Could not reach AI confirmation on Render.'}}pollAI();setInterval(()=>{if(!document.hidden)pollAI()},20000)})();</script><section class="card terminal-secondary"><div class="label">ENTRY COST SCENARIO · NO ORDERS</div><p class="small" id="entryQuote">Fetching contract quotes…</p><div class="research-controls"><label>Direction<select id="costDirection"><option>UP</option><option>DOWN</option></select></label><label>Contracts<input id="costQuantity" type="number" min="1" max="1000000" value="100" step="1"></label><label>Slippage (cents)<input id="costSlippage" type="number" min="0" max="25" value="0.5" step="0.1"></label></div><button id="costCalculate">Calculate scenario</button><p id="entryResult" class="small"></p><p id="entryDetails" class="small"></p><a class="small" href="https://docs.polymarket.us/fees" target="_blank" rel="noopener">US fee schedule · checked October 25, 2026</a></section>
+const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').textContent='LAST 100 SETTLED · WIN '+(counts.WIN||0)+' · LOSS '+(counts.LOSS||0)+' · PENDING (ALL) '+(counts.PENDING||0);const log=document.getElementById('aiLogRows');log.replaceChildren();for(const x of (d.ai_decision_history||[]).slice(0,12)){const line=document.createElement('div');line.style.cssText='padding:8px 0;border-top:1px solid #2a3e55;line-height:1.5';line.textContent=(x.direction||'?')+' · '+(x.result||'PENDING')+' · '+(x.confidence||'UNRATED')+' · '+(x.source||'UNKNOWN')+' · '+(x.created_at||'')+' — '+(x.reason||'');log.append(line)};const verdict=a.status==='ready'?(a.verdict||'WAIT'):(a.status||'NOT CONFIGURED').replaceAll('_',' ').toUpperCase();const el=document.getElementById('aiVerdict');el.textContent=verdict;el.style.color=verdict==='UP'?'#3de5a5':verdict==='DOWN'?'#ff7777':'#a6b6cb';document.getElementById('aiReason').textContent=(a.confidence?'Confidence: '+a.confidence+' · ':'')+(a.reason||'AI prediction is waiting for valid server-side data.');let stamp=Date.parse(d.updated||''),lastAI=Number(a.updated_epoch||a.captured_epoch||0)*1000;let stale=a.status==='ready'&&(!d.market||a.market!==d.market||!String(a.market).includes('btc-updown-15m-')||!Number.isFinite(stamp)||Date.now()-stamp>45000||!lastAI||Date.now()-lastAI>180000);document.getElementById('aiMeta').textContent=(a.model||'AI')+' · '+(a.market||'No round')+' · '+(a.phase||'')+(stale?' · STALE OR PREVIOUS ROUND — NOT CURRENT':'')+' · Research only; no automatic orders.';if(stale){el.textContent='STALE / WAIT';el.style.color='#ffbd5a'}}catch(e){document.getElementById('aiVerdict').textContent='UNAVAILABLE';document.getElementById('aiReason').textContent='Could not reach AI confirmation on Render.'}}pollAI();setInterval(()=>{if(!document.hidden)pollAI()},20000)})();</script>
 <section class="card terminal-secondary"><div class="label">WHAT NEWS INFLUENCED THE AI?</div><div id="newsInfluence" style="margin-top:10px"></div></section>
 <section class="card" id="researchDashboard"><div class="row" style="justify-content:space-between"><div class="label">FORWARD COMPARISON LOG · 15-MINUTE MARKETS</div><a href="/api/research.csv">Download CSV + evidence</a></div><p class="small" id="researchAsOf">Collecting new observations…</p><p class="small" id="researchError" aria-live="polite"></p><div class="research-scroll" id="strategyTable"></div><p class="small">AI, selective indicators, forced indicator direction, and the current target side share the same saved data snapshot. AI failures are marked no call. Outcomes require official settlement.</p><p class="small">* Paper P&amp;L assumes 100 contracts, 0.5¢ adverse slippage per contract, the recorded top-of-book quote and standard US taker fee. Only calls with valid quotes are priced. No actual trades, rebates, fill-depth guarantees or profitability claims.</p><details open><summary>AI confidence scorecard</summary><div class="research-scroll" id="confidenceTable"></div><p class="small">Confidence is the model's label, not a calibrated probability. Small samples and dependence between rounds limit conclusions.</p></details><details><summary>Earlier logged halfway AI confidence</summary><div class="research-scroll" id="priorConfidence"></div><p class="small">Earlier genuine AI calls only; these do not have matched baseline snapshots.</p></details><details open><summary>Does AI beat the baselines at the same time?</summary><div class="research-scroll" id="pairedTable"></div></details><details><summary>Recent saved calls and news attribution</summary><div id="researchRecent"></div></details></section><script>
 /* Arrange existing live widgets into the requested chart-first terminal layout.
