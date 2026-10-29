@@ -1066,8 +1066,8 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  const forecast=document.getElementById('futureForecastCard'),history=document.getElementById('serverHistory');
  const shock=document.getElementById('marketShockPanel');
  const exchanges=document.getElementById('crossExchangePanel'),checkpoint=document.getElementById('checkpointBoard');
+ if(forecast)cards.insertAdjacentElement('afterend',forecast);
  if(shock)cards.insertAdjacentElement('afterend',shock);
- if(forecast)(shock||cards).insertAdjacentElement('afterend',forecast);
  if(exchanges)(forecast||cards).insertAdjacentElement('afterend',exchanges);
  if(history)(exchanges||forecast||cards).insertAdjacentElement('afterend',history);
  if(checkpoint)(history||exchanges||forecast||cards).insertAdjacentElement('afterend',checkpoint);
