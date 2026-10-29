@@ -58,6 +58,37 @@ class PhaseScoreTests(unittest.TestCase):
         self.assertEqual((report["late"]["wins"],report["late"]["losses"],report["late"]["graded"]),(1,0,1))
         self.assertEqual((report["late_legacy"]["wins"],report["late_legacy"]["losses"],report["late_legacy"]["graded"]),(1,1,2))
 
+    def test_late_capture_audit_explains_zero_strict_calls_without_regrading(self):
+        from datetime import datetime, timedelta, timezone
+        start=datetime(2026,10,28,20,0,tzinfo=timezone.utc)
+        # Two historical off-window captures and one genuine 2:30 capture.
+        for minute,left,side,result in [(0,20,"UP","WIN"),(5,165,"DOWN","LOSS"),(10,135,"UP","WIN")]:
+            round_start=start+timedelta(minutes=minute)
+            slug="cpc-btc-updown-5m-"+round_start.strftime("%Y-%m-%d-%H%Mz")
+            captured=(round_start+timedelta(minutes=5)).timestamp()-left
+            self.db.execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast,result,winner) VALUES (?,?,?,?,?,?,?)",
+                            (slug,captured,side,100,101,result,side if result=="WIN" else "UP"))
+        result=five.strict_late_counts(self.db.execute)
+        self.assertEqual((result["wins"],result["losses"],result["graded"]),(1,0,1))
+        audit=result["capture_audit"]
+        self.assertEqual(audit["sampled"],3)
+        self.assertEqual((audit["within_window"],audit["before_window"],audit["after_window"],audit["invalid_timestamp"]),(1,1,1,0))
+        self.assertEqual(sum(audit[key] for key in ("within_window","before_window","after_window","invalid_timestamp")),audit["sampled"])
+        self.assertTrue(all("window" in row for row in audit["recent"]))
+        # No grading mutation or timestamps changed.
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM five_min_late_predictions",fetch=True)[0][0],3)
+
+    def test_late_capture_audit_does_not_relabel_invalid_market_or_pending(self):
+        self.db.execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast,result,winner) VALUES (?,?,?,?,?,?,?)",
+                        ("invalid-market",1234,"UP",100,101,"WIN","UP"))
+        self.db.execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast,result,winner) VALUES (?,?,?,?,?,?,?)",
+                        ("cpc-btc-updown-5m-2026-10-28-2010z",1235,"DOWN",100,99,"PENDING",None))
+        audit=five.strict_late_counts(self.db.execute)
+        self.assertEqual(audit["graded"],0)
+        self.assertEqual(audit["capture_audit"]["sampled"],1)
+        self.assertEqual(audit["capture_audit"]["invalid_timestamp"],1)
+        self.assertEqual(audit["capture_audit"]["recent"][0]["window"],"invalid_timestamp")
+
     def test_reconciliation_scores_both_snapshots_with_matching_published_event(self):
         slug="cpc-btc-updown-5m-2026-10-27-1900z"
         for table,side in (("five_min_predictions","DOWN"),("five_min_late_predictions","UP")):

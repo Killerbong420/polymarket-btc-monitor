@@ -112,25 +112,42 @@ def _counts(execute, table):
  return {"wins":wins,"losses":losses,"graded":n,"accuracy_pct":round(100*wins/n,1) if n else None}
 
 def strict_late_counts(execute):
- """Prospective 2:30 window only. Older late calls outside the window remain auditable.
+ """Grade only frozen 120-150s-left calls; audit recent capture timing.
 
- Query is bounded; the last 100 eligible settled calls are counted without
- retroactively treating 20-second-left forecasts as 2:30 forecasts.
+ One bounded existing SQL read serves both the immutable scoreboard and
+ a small diagnostic of why historical late rows do not qualify. The audit
+ never reclassifies a call, changes its timestamp, or grades a pending row.
  """
  rows=execute("SELECT market,created_epoch,result FROM five_min_late_predictions WHERE result IN ('WIN','LOSS') ORDER BY created_epoch DESC LIMIT 1000",fetch=True)
  wins=losses=0
- for slug,captured,result in rows:
+ audit={"sampled":min(len(rows),36),"within_window":0,"before_window":0,
+        "after_window":0,"invalid_timestamp":0,"recent":[]}
+ for idx,(slug,captured,result) in enumerate(rows):
   try:
    stamp=slug.split('btc-updown-5m-',1)[1]
    start=datetime.strptime(stamp,'%Y-%m-%d-%H%Mz').replace(tzinfo=timezone.utc)
-   remaining=(start+timedelta(minutes=5)).timestamp()-captured
-  except (ValueError,IndexError,TypeError):continue
-  if not LATE_CHECKPOINT_MIN_LEFT <= remaining <= LATE_CHECKPOINT_MAX_LEFT:continue
-  if result=='WIN':wins+=1
+   remaining=(start+timedelta(minutes=5)).timestamp()-float(captured)
+   if not math.isfinite(remaining):raise ValueError("Non-finite capture time")
+  except (ValueError,IndexError,TypeError,AttributeError,OverflowError):
+   if idx<36:
+    audit["invalid_timestamp"]+=1
+    if idx<5:audit["recent"].append({"market":str(slug)[:90],"window":"invalid_timestamp"})
+   continue
+  if remaining>LATE_CHECKPOINT_MAX_LEFT:bucket="before_window"
+  elif remaining<LATE_CHECKPOINT_MIN_LEFT:bucket="after_window"
+  else:bucket="within_window"
+  if idx<36:
+   audit[bucket]+=1
+   if idx<5:
+    audit["recent"].append({"market":slug,"seconds_left":round(remaining,1),"window":bucket})
+  if bucket!="within_window":continue
+  if result=="WIN":wins+=1
   else:losses+=1
   if wins+losses>=100:break
  n=wins+losses
- return {'wins':wins,'losses':losses,'graded':n,'accuracy_pct':round(100*wins/n,1) if n else None}
+ return {"wins":wins,"losses":losses,"graded":n,
+         "accuracy_pct":round(100*wins/n,1) if n else None,
+         "capture_audit":audit}
 
 def report(execute):
  early=_counts(execute,"five_min_predictions")
