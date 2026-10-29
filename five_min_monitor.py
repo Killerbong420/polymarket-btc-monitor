@@ -23,6 +23,13 @@ def eligible_late_checkpoint(seconds_left,early_created,end):
  return (LATE_CHECKPOINT_MIN_LEFT <= seconds_left <= LATE_CHECKPOINT_MAX_LEFT
          and early_created <= end-LATE_CHECKPOINT_MAX_LEFT)
 
+def reusable_verified_market(market, now_epoch):
+ """Reuse only an already verified current-round contract; never carry it into the next round."""
+ if not isinstance(market,dict) or not valid_terms(market.get("assetPriceTerms")):
+  return False
+ end=number(market.get("end"))
+ return end is not None and end-300 <= now_epoch < end
+
 def valid_terms(terms):
  """Reject incompatible terms even when the event supplies a positive target."""
  if not isinstance(terms,dict):return False
@@ -255,9 +262,17 @@ async def loop(client,execute,verified_winner,external_state):
 async def live_loop(client,execute,external_state):
  global _last_market
  last_visual_refresh=0.0
+ cached_market=None
  while True:
   try:
-   market,reason=await discover(client)
+   # Repeated event/detail HTTP lookups can consume the entire 30-second
+   # verified 2:30 checkpoint window. Contract identity and published BRTI
+   # target are immutable within one UTC round, but never across rounds.
+   if reusable_verified_market(cached_market,time.time()):
+    market,reason=dict(cached_market),None
+   else:
+    cached_market=None
+    market,reason=await discover(client)
    if not market:
     state.update(status="unavailable",market=None,direction="WAIT",forecast=None,
                  early_direction="WAIT",late_direction="WAIT",phase="UNAVAILABLE",
@@ -285,6 +300,8 @@ async def live_loop(client,execute,external_state):
         break
       except Exception:continue
     valid_target=valid_terms(market.get("assetPriceTerms"))
+    if valid_target and reusable_verified_market(market,time.time()):
+     cached_market=dict(market)
     left=max(0,market["end"]-time.time())
     state.update(status="running" if valid_target else "target_unavailable",
                  market=slug,seconds_left=round(left),target=target if valid_target else None,
