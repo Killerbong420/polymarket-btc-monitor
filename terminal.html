@@ -567,12 +567,12 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
     {cache:'no-store',signal:controller.signal});
    if(!response.ok)throw Error('History temporarily unavailable');
    const data=await response.json();
-   if(data.range!==requested)return;
+   if(data.range!==requested||selected!==requested)return;
    history=data;historyReceivedAt=Date.now();window.btcNoteRequest?.('chart history',Date.now()-started,true);draw(true);
   }catch(e){
    window.btcNoteRequest?.('chart history',Date.now()-started,false);
    if(controller===aborter&&overlayLegend)overlayLegend.textContent='Exchange history currently unavailable; official live BRTI remains displayed';
-  }finally{clearTimeout(timeout);if(controller===aborter){inFlight=false;aborter=null;}}
+  }finally{clearTimeout(timeout);if(controller===aborter){inFlight=false;aborter=null;if(selected!==requested)refreshHistory();}}
  }
  const freshHistory=(d,now)=>history&&history.market===d?.market&&history.range===selected&&
   finite(Number(history.sampled_at))&&now-Number(history.sampled_at)>=-5&&now-Number(history.sampled_at)<=27;
