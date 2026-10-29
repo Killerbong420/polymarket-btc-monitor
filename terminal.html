@@ -459,6 +459,8 @@ async function fetchDepth(){try{const book=await json('/products/BTC-USD/book?le
   ctx.fillStyle='#0b1624';ctx.fillRect(0,0,w,h);
   const m=model(window.btcServerStatus,now/1000);
   if(!m){
+   // Do not throttle the first valid frame after loading or feed recovery.
+   lastDraw=0;
    status.textContent='Verified BRTI observations unavailable or stale';
    ctx.fillStyle='#a6b6c8';ctx.font='12px system-ui';
    ctx.fillText('Waiting for fresh official 15m reference data',13,h/2);
