@@ -54,7 +54,21 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn('id="winLossRatio"', self.html)
         self.assertIn('id="winRate"', self.html)
         self.assertIn("d.ai_performance", self.html)
-        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},5000)", self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},2000)", self.html)
+
+    def test_lightweight_chart_free_main_ui(self):
+        # Remove canvas widgets and their browser polling, not server-side
+        # price-path analysis, official targets, or settlement auditing.
+        for canvas_id in ("candleChart", "priceChart", "brtiCanvas"):
+            self.assertNotIn('id="' + canvas_id + '"', self.html)
+        for endpoint in ("/api/candles", "/api/brti-chart"):
+            self.assertNotIn("fetch('" + endpoint + "'", self.html)
+        self.assertIn('id="pmApiStrip"', self.html)
+        self.assertIn('id="patternName"', self.html)
+        self.assertIn("ext.chart_pattern", self.html)
+        self.assertIn("if(statusInFlight)return", self.html)
+        self.assertIn("if(fiveBusy||document.hidden)return", self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshFive()},2000)", self.html)
 
     def test_ai_scoreboard_explains_100_settled_calls(self):
         self.assertIn("LAST 100 SETTLED PREDICTIONS", self.html)
@@ -104,7 +118,7 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("fetch('/api/round-tiles'",self.html)
         self.assertIn("correct call",self.html)
         self.assertIn("No verified",self.html)
-        self.assertIn("setInterval(()=>{if(!document.hidden)refreshRoundTiles()},30000)",self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshRoundTiles()},10000)",self.html)
         tiles=self.html.split("/* Recent verified rounds.",1)[1]
         self.assertNotIn("fair price",tiles.lower())
         self.assertNotIn("auto-trader",tiles.lower())
@@ -112,7 +126,7 @@ class TerminalUITest(unittest.TestCase):
 
     def test_live_feeds_are_started(self):
         self.assertIn("connectStream('coinbase');connectStream('kraken');update()", self.html)
-        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},5000)", self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},2000)", self.html)
         self.assertIn("renderPersistentSignals(d)", self.html)
         self.assertIn("window.btcPrimaryLocalLive=!!ok", self.html)
 
