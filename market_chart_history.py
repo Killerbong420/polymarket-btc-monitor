@@ -91,6 +91,17 @@ def snapshot(range_id, round_start=None, round_end=None, market=None, now=None):
          "source":"Polymarket US official BRTI index ticks + observed BTC/USD public venue spot price samples",
          "limitations":"Last-exchange-price receipt time is not guaranteed trade execution time. Gaps not interpolated. Prior rounds and 30/60m windows accumulate in memory only after server startup. Only official BRTI determines settlement."}
 
+def latest_tip(now=None):
+ """Return a tiny snapshot of observed index ticks; no invented intervening prices."""
+ now=time.time() if now is None else now
+ with _lock:
+  ticks=sorted((t,p) for t,p in _brti.items() if now-12<=t<=now+1)
+ age=round(now-ticks[-1][0],1) if ticks else None
+ return {"status":"fresh" if age is not None and 0<=age<=15 else "stale",
+         "points":[list(tick) for tick in ticks[-12:]],
+         "age_seconds":age,"server_epoch":round(now,3),
+         "source":"Polymarket US BTC reference / BRTI"}
+
 # Isolated 1-second chart sampler. The official market and target remain governed by
 # the slower prediction loop; this path ONLY records genuine published reference ticks.
 OFFICIAL_SOURCE="Polymarket US BTC reference / BRTI"
