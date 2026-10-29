@@ -56,13 +56,22 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("d.ai_performance", self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},2000)", self.html)
 
-    def test_lightweight_chart_free_main_ui(self):
-        # Remove canvas widgets and their browser polling, not server-side
-        # price-path analysis, official targets, or settlement auditing.
+    def test_lightweight_brtI_line_without_candles(self):
+        # Render the official index as a simple line; retain server-side
+        # price-path analysis and avoid additional polling requests.
         for canvas_id in ("candleChart", "priceChart", "brtiCanvas"):
             self.assertNotIn('id="' + canvas_id + '"', self.html)
         for endpoint in ("/api/candles", "/api/brti-chart"):
             self.assertNotIn("fetch('" + endpoint + "'", self.html)
+        self.assertIn('id="brtiLineCanvas"', self.html)
+        self.assertIn('id="brtiLineStatus"', self.html)
+        self.assertIn("window.btcBrtiLineModel=model", self.html)
+        self.assertIn("window.addEventListener('btc-status-updated',()=>draw())", self.html)
+        self.assertNotIn("ENTRY COST SCENARIO", self.html)
+        self.assertNotIn('id="costCalculate"', self.html)
+        self.assertNotIn('id="costDirection"', self.html)
+        self.assertNotIn('id="costSlippage"', self.html)
+        self.assertNotIn('id="costQuantity"', self.html)
         self.assertIn('id="pmApiStrip"', self.html)
         self.assertIn('id="patternName"', self.html)
         self.assertIn("ext.chart_pattern", self.html)
