@@ -300,7 +300,21 @@ document.getElementById('advancedToggle').addEventListener('click',function(){
  this.setAttribute('aria-expanded',String(enabled));
  this.textContent=enabled?'Hide detailed logs & diagnostics':'Show detailed logs, outside data & diagnostics';
 });
-</script><h1 id="mainTitle">₿ BTC · 15-MINUTE MARKET</h1><p id="mainSubtitle">Official BRTI target · 15-minute priority · 5-minute companion</p><section class="card" id="monitorHealth"><div class="row" style="justify-content:space-between"><div class="label">MONITOR ALERTS</div><span class="status" id="healthLabel">CHECKING</span></div><div id="healthAlerts" aria-live="polite"></div><details><summary class="small">Alert history</summary><div id="healthHistory"></div></details></section>
+</script><script>
+/* Browser-only timing; does not create additional network requests. */
+window.btcNetworkTimings=Object.create(null);
+window.btcNoteRequest=function(name,ms,ok){
+ const entry=window.btcNetworkTimings[name]||{samples:[],failures:0};
+ if(ok){entry.samples.push(Math.max(0,Math.round(ms)));if(entry.samples.length>12)entry.samples.shift()}
+ else entry.failures++;
+ window.btcNetworkTimings[name]=entry;
+ const el=document.getElementById('networkTiming');
+ if(el&&document.body.classList.contains('show-advanced'))
+  el.textContent='BROWSER ROUND-TRIP · '+Object.entries(window.btcNetworkTimings).map(([k,v])=>
+   k+' '+(v.samples.length?Math.round(v.samples.reduce((a,b)=>a+b,0)/v.samples.length)+'ms avg':'waiting')+
+   (v.failures?' · '+v.failures+' failed':'')).join(' | ');
+};
+</script><h1 id="mainTitle">₿ BTC · 15-MINUTE MARKET</h1><p id="mainSubtitle">Official BRTI target · 15-minute priority · 5-minute companion</p><section class="card" id="monitorHealth"><div class="row" style="justify-content:space-between"><div class="label">MONITOR ALERTS</div><span class="status" id="healthLabel">CHECKING</span></div><div id="healthAlerts" aria-live="polite"></div><div id="networkTiming" class="small" style="margin-top:8px">Browser timing: collecting</div><details><summary class="small">Alert history</summary><div id="healthHistory"></div></details></section>
 <section class="card" id="marketShockPanel" data-level="unavailable" aria-label="BTC market shock indicator">
  <div class="row" style="justify-content:space-between;align-items:center">
   <span class="label">⚡ MARKET SHOCK · BTC/USD</span><span class="status" id="marketShockStatus">CHECKING</span>
@@ -524,12 +538,12 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
  window.btcBrtiLineModel=model;
  const spans={"30s":30,"1m":60,"2m":120,"5m":300,"30m":1800,"60m":3600};
  const colors={"Coinbase":"#668fd4","Kraken":"#9277c9","Bitstamp":"#3e9a9e","Gemini":"#bc7da4","Bitfinex":"#83a76a","Binance.US":"#bb9158"};
- let selected='round',history=null,inFlight=false,lastDraw=0,aborter=null,tipBusy=false,tipTicks=[],tipMarket=null;
+ let selected='round',history=null,historyReceivedAt=0,inFlight=false,lastDraw=0,aborter=null,tipBusy=false,tipTicks=[],tipMarket=null;
  const money=v=>Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
  const ranges=document.getElementById('brtiRangeTabs'),overlayLegend=document.getElementById('brtiOverlayLegend');
  function onRange(newRange){
   if(newRange!=='round'&&!Object.prototype.hasOwnProperty.call(spans,newRange))return;
-  selected=newRange;history=null;lastDraw=0;
+  selected=newRange;history=null;historyReceivedAt=0;lastDraw=0;
   if(ranges&&typeof ranges.querySelectorAll==='function'){
    for(const button of ranges.querySelectorAll('button[data-range]')){
     const active=button.getAttribute('data-range')===selected;
@@ -544,23 +558,24 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
  window.btcChartSelectRange=onRange;
  async function refreshHistory(){
   if(document.hidden||typeof fetch!=='function')return;
-  if(inFlight)return;
+  if(inFlight||Date.now()-historyReceivedAt<15000)return;
   inFlight=true;
   const controller=new AbortController();aborter=controller;
-  const requested=selected,timeout=setTimeout(()=>controller.abort(),4500);
+  const requested=selected,started=Date.now(),timeout=setTimeout(()=>controller.abort(),8000);
   try{
    const response=await fetch('/api/market-chart/history?range='+encodeURIComponent(requested),
     {cache:'no-store',signal:controller.signal});
    if(!response.ok)throw Error('History temporarily unavailable');
    const data=await response.json();
    if(data.range!==requested)return;
-   history=data;draw(true);
+   history=data;historyReceivedAt=Date.now();window.btcNoteRequest?.('chart history',Date.now()-started,true);draw(true);
   }catch(e){
+   window.btcNoteRequest?.('chart history',Date.now()-started,false);
    if(controller===aborter&&overlayLegend)overlayLegend.textContent='Exchange history currently unavailable; official live BRTI remains displayed';
   }finally{clearTimeout(timeout);if(controller===aborter){inFlight=false;aborter=null;}}
  }
  const freshHistory=(d,now)=>history&&history.market===d?.market&&history.range===selected&&
-  finite(Number(history.sampled_at))&&now-Number(history.sampled_at)>=-5&&now-Number(history.sampled_at)<=22;
+  finite(Number(history.sampled_at))&&now-Number(history.sampled_at)>=-5&&now-Number(history.sampled_at)<=27;
  function draw(force=false){
   if(document.hidden)return;
   const nowMillis=Date.now(),now=nowMillis/1000;
@@ -678,11 +693,12 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
  async function refreshTip(){
   if(document.hidden||tipBusy||typeof fetch!=='function')return;
   tipBusy=true;
-  const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),1400);
+  const ctrl=new AbortController(),started=Date.now(),timeout=setTimeout(()=>ctrl.abort(),3000);
   try{
    const response=await fetch('/api/market-chart/tip',{cache:'no-store',signal:ctrl.signal});
    if(!response.ok)throw Error('BRTI tick unavailable');
    const data=await response.json(),d=window.btcServerStatus;
+   window.btcNoteRequest?.('BRTI tip',Date.now()-started,true);
    if(data.status!=='fresh'||data.source!=='Polymarket US BTC reference / BRTI'||
       !d||d.status!=='running'||d.reference_price?.source!==data.source||data.market!==d.market||!Array.isArray(data.points))return;
    const ref=d.reference_price||{},start=Number(ref.window_start),end=Number(ref.window_end),now=Date.now()/1000;
@@ -695,7 +711,7 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
    for(const [t,v] of verified)merged.set(t,v);
    tipTicks=[...merged.entries()].sort((a,b)=>a[0]-b[0]).slice(-32);
    draw();
-  }catch(e){/* Keep last verified observations; never synthesize a point. */}
+  }catch(e){window.btcNoteRequest?.('BRTI tip',Date.now()-started,false);/* Keep last verified observations; never synthesize a point. */}
   finally{clearTimeout(timeout);tipBusy=false;}
  }
  window.addEventListener('btc-status-updated',()=>draw());
