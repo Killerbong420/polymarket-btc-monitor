@@ -54,13 +54,15 @@ assert.equal(element('pmApiTarget').textContent,'—');
   addEventListener:(name,fn)=>{drawListeners[name]=fn;}};
  const browser={devicePixelRatio:1,btcServerStatus:null,
   addEventListener:(name,fn)=>{handlers[name]=fn;}};
- vm.runInNewContext(graphScript,{window:browser,document:doc,Date});
+ const testNow=Math.floor(Date.now()/900000)*900000+450000;
+ const TestDate=class extends Date{static now(){return testNow;}};
+ vm.runInNewContext(graphScript,{window:browser,document:doc,Date:TestDate});
  assert.equal(typeof browser.btcBrtiLineModel,'function');
  assert.equal(typeof handlers['btc-status-updated'],'function');
- const nowSec=Date.now()/1000, start=Math.floor(nowSec/900)*900, end=start+900;
+ const nowSec=Math.floor(Date.now()/900000)*900+450, start=nowSec-450, end=start+900;
  const pts=Array.from({length:15},(_,i)=>[nowSec-56+i*3.8,81020+i*1.2]);
  const m='cpc-btc-updown-15m-test';
- const obj={status:'running',market:m,updated:new Date().toISOString(),
+ const obj={status:'running',market:m,updated:new Date(nowSec*1000).toISOString(),
   reference_price:{status:'fresh',price_epoch:nowSec-2,window_start:start,window_end:end},
   brti_chart:{market:m,sample_age_seconds:2,points:pts},
   target_behavior:{status:'available',target:81041},
