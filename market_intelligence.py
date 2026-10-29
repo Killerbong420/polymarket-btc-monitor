@@ -10,12 +10,14 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 import httpx
+from exchange_prices import fetch_snapshot, public_snapshot
 
 FEEDS = [('CoinDesk','https://www.coindesk.com/arc/outboundfeeds/rss/'),
          ('Cointelegraph','https://cointelegraph.com/rss'),
          ('Federal Reserve','https://www.federalreserve.gov/feeds/press_all.xml')]
 _state = {'trade_flow':{'status':'starting','exchanges':[]},
-          'order_book':{'status':'starting'},'news':{'status':'starting','headlines':[]}}
+          'order_book':{'status':'starting'},'news':{'status':'starting','headlines':[]},
+          'price_comparison':{'status':'starting','exchanges':[], 'as_of_epoch':0}}
 
 def iso(ts):
     return datetime.fromtimestamp(ts, timezone.utc).isoformat()
@@ -151,16 +153,17 @@ async def news_feed(client, source, url):
     except Exception as exc:return [],{'source':source,'status':'unavailable','reason':type(exc).__name__}
 
 async def refresh(client, include_news=True):
-    jobs=[exchange_flow(client,'Coinbase'),exchange_flow(client,'Kraken'),order_book(client)]
+    jobs=[exchange_flow(client,'Coinbase'),exchange_flow(client,'Kraken'),order_book(client),fetch_snapshot(client)]
     if include_news:jobs.extend(news_feed(client,s,u) for s,u in FEEDS)
     results=await asyncio.gather(*jobs)
     now=time.time()
     _state['trade_flow']={'status':'available' if any(x['status']=='fresh' for x in results[:2]) else 'unavailable',
                            'exchanges':results[:2],'fetched_epoch':now,'window_seconds':180}
     _state['order_book']=results[2]
+    _state['price_comparison']=results[3]
     if include_news:
         items={};feeds=[]
-        for headlines,health in results[3:]:
+        for headlines,health in results[4:]:
             feeds.append(health)
             for item in headlines:
                 key=re.sub(r'\W+','',item['title'].lower())
@@ -174,6 +177,7 @@ async def refresh(client, include_news=True):
 
 def public_intelligence():
     d=copy.deepcopy(_state);now=time.time()
+    d['price_comparison']=public_snapshot(d.get('price_comparison') or {},now)
     for key in ('trade_flow','order_book','news'):
         item=d[key];ts=item.get('fetched_epoch')
         item['age_seconds']=round(max(0,now-ts)) if ts else None
@@ -182,7 +186,7 @@ def public_intelligence():
         ts=exchange.get('latest_trade_epoch')
         exchange['age_seconds']=round(max(0,now-ts)) if ts else None
         if ts and now-ts>45:exchange['status']='stale'
-    d['coverage']='Coinbase/Kraken spot trades, Kraken depth, CoinDesk/Cointelegraph/Federal Reserve RSS; no verified on-chain wallet flow, all-exchange flow, or full news coverage.'
+    d['coverage']='BTC/USD last prices from Coinbase, Kraken, Bitstamp, Gemini, Bitfinex, Binance.US; Binance Global and OKX BTC/USDT shown separately. Coinbase/Kraken initiator trade flow, Kraken depth, and selected news. Unavailable venues remain labeled; no full global trade-flow or on-chain coverage.'
     return d
 
 async def intelligence_loop():
