@@ -298,16 +298,21 @@ async def live_loop(client,execute,external_state):
                   early_result=None,late_result=None,
                   phase="EARLY",result="PENDING",reason="Awaiting verified BRTI and official target")
     prior=execute("SELECT direction,forecast,result,created_epoch FROM five_min_predictions WHERE market=?",(slug,),fetch=True)
-    late_prior=execute("SELECT direction,forecast,result FROM five_min_late_predictions WHERE market=?",(slug,),fetch=True)
+    late_prior=execute("SELECT direction,forecast,result,created_epoch FROM five_min_late_predictions WHERE market=?",(slug,),fetch=True)
     if prior:
      ed,ef,er,early_created=prior[0]
      state.update(direction=ed,forecast=ef,early_direction=ed,early_forecast=ef,
                   early_result=er,result=er,phase="EARLY",reason="Frozen early five-minute forecast")
     if late_prior:
-     ld,lf,lr=late_prior[0]
+     ld,lf,lr,late_created=late_prior[0]
+     strict_late=bool(prior) and eligible_late_checkpoint(
+      market["end"]-late_created,prior[0][3],market["end"])
      state.update(direction=ld,forecast=lf,late_direction=ld,
-                  late_forecast=lf,late_result=lr,result=lr,phase="LATE_2M30",
-                  reason="Frozen 2:30-left forecast from newer verified BRTI ticks")
+                  late_forecast=lf,late_result=lr,result=lr,
+                  phase="LATE_2M30" if strict_late else "LEGACY_LATE",
+                  reason=("Frozen 2:30-left forecast from newer verified BRTI ticks"
+                          if strict_late else
+                          "Legacy late forecast outside verified 2:30 window; excluded from strict accuracy"))
     if not valid_target:
      state.update(direction="WAIT",forecast=None,phase="UNVERIFIED_TARGET",
                   visual_forecast={"status":"unavailable","reason":"Official BRTI target not verified"},
@@ -332,7 +337,8 @@ async def live_loop(client,execute,external_state):
                       eligible_late_checkpoint(left,prior[0][3],market["end"]))):
        candidate,error=forecast_candidate(reference,external_state.get("external") or {},target,left,captured)
       if candidate is None:
-       state["reason"]=error
+       # A visual-only refresh must not overwrite the frozen call explanation.
+       if due_early or due_late:state["reason"]=error
       elif due_early:
        execute("INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?) ON CONFLICT(market) DO NOTHING",
                (slug,captured,candidate["direction"],target,candidate["forecast"]))
