@@ -298,7 +298,7 @@ body:not(.show-advanced) #futureForecastCard p.small{display:none!important}
 /* Rule-based dashboard: keep charts, 5m/15m calls, flip watch and verified checkpoint results.
    Legacy AI data remains archived in the database but is not presented as current predictions. */
 #aiConfirmationPanel,#aiDecisionLog,#serverHistory,#externalIntelPanel,#newsInfluence,
-#researchDashboard {display:none!important}
+#researchDashboard,#futureAiPrice,#futureShadowPrice {display:none!important}
 </style>
 </head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
 document.getElementById('advancedToggle').addEventListener('click',function(){
@@ -882,7 +882,7 @@ function renderPersistentSignals(d){
 }
 function renderPeerBots(d){const root=document.getElementById('peerBotsLive');if(!root)return;root.replaceChildren();const studies=d.external?.bot_research_signals||{},price=d.external?.price_action||{};const liveAge=Number(d.external?.candle_age_seconds),fresh=d.status==='running'&&Number.isFinite(liveAge)&&liveAge>=0&&liveAge<=75;
 const checkpoint=d.last_checkpoint||{},saved=checkpoint.market===d.market?checkpoint.calls||{}:{};
-const names=[['BOT_MACD','MACD TREND'],['BOT_BOLLINGER','BOLLINGER REVERSAL'],['BOT_SUPERTREND','ATR BREAKOUT'],['PRICE_ACTION','RANGE / LIQUIDITY'],['BOT_CONSENSUS','BOT + AI AGREEMENT']];
+const names=[['BOT_MACD','MACD TREND'],['BOT_BOLLINGER','BOLLINGER REVERSAL'],['BOT_SUPERTREND','ATR BREAKOUT'],['PRICE_ACTION','RANGE / LIQUIDITY'],['BOT_CONSENSUS','INDICATOR AGREEMENT']];
 for(const [key,title] of names){const call=key==='PRICE_ACTION'?price:key==='BOT_CONSENSUS'?saved.BOT_CONSENSUS||{}:studies[key]||{};const row=document.createElement('div');row.style.cssText='padding:8px 1px;border-top:1px solid #2a3e55;display:flex;justify-content:space-between;gap:10px';
 const label=document.createElement('span');const direction=document.createElement('strong');label.textContent=title+' · '+(key==='BOT_CONSENSUS'?'last checkpoint':(key==='PRICE_ACTION'?price.setup||'':'live analysis'))+' · '+(call.reason||'Collecting data');label.style.overflowWrap='anywhere';let verdict=key==='BOT_CONSENSUS'?(saved.BOT_CONSENSUS?.direction||'WAIT'):(fresh?call.direction||'WAIT':'STALE');
 direction.textContent=verdict;direction.style.whiteSpace='nowrap';direction.style.color=verdict==='UP'?'#6ce2d1':verdict==='DOWN'?'#ff927d':'#b5c4d9';row.append(label,direction);root.append(row)}
