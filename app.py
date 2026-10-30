@@ -2,7 +2,7 @@ import asyncio, json, os, sqlite3, time, uuid
 from threading import RLock as _HistoryLock
 from pathlib import Path
 from historical_15m import main as collect_15m, START as HISTORY_START, END as HISTORY_END
-from ai_confirmation import confirm, public_state, check_auth, auth_state, halfway_decision, paper_signal_state
+from ai_confirmation import public_state, auth_state, paper_signal_state
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 import httpx
@@ -792,7 +792,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  behavior=frozen.get("target_behavior") or {}
  quote=frozen.get("market_quote") or {}
  fallback=final_direction(frozen,primary,score)
- review=await halfway_decision(client,slug,15,fallback,score,frozen,target,seconds_left=left,checkpoint=checkpoint)
+ review={"direction":fallback,"source":"RULE_BASED","ai_confidence":"UNRATED","reason":"AI disabled; deterministic indicators and BRTI price-path forecast","forecast_final_mean_usd":(frozen.get("settlement_forecast") or {}).get("forecast_final_mean_usd")}
  chosen=review.get("direction") if review.get("direction") in ("UP","DOWN") else fallback
  confidence=review.get("ai_confidence","UNRATED")
  quality,quality_reason=signal_quality_snapshot(frozen,primary,score)
@@ -811,7 +811,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
   "reason":"Unvalidated time-aware trend-shrink shadow forecast"}
  a_price=number(calls["AI"].get("forecast_final_mean_usd"))
  p_price=number(calls["PRICE_PATH"].get("forecast_final_mean_usd"))
- calls["AI"]["independent_forecast"]=bool(review.get("independent_forecast"))
+ calls["AI"]["independent_forecast"]=False
  calls["AI"]["price_path_informed"]=bool(review.get("price_path_informed"))
  calls["AI"]["analysis_context_version"]=review.get("analysis_context_version") or VERSION
  calls["AI"]["forecast_status"]=review.get("forecast_status","LEGACY_OR_UNVERIFIED")
@@ -891,8 +891,8 @@ async def loop():
    cycle_started=time.monotonic()
    try:
     state["loop_started_epoch"]=time.time()
-    auth_result,spot_result,market_result=await asyncio.gather(
-     check_auth(client),spot_data(client),market_15m(client),return_exceptions=True)
+    spot_result,market_result=await asyncio.gather(
+     spot_data(client),market_15m(client),return_exceptions=True)
     if isinstance(spot_result,BaseException):
      d={"source":"unavailable","candle_age_seconds":None,"signal_quality":{"status":"INSUFFICIENT_DATA","reason":"No fresh verified BTC candles"},"feed_error":str(spot_result)[:300]}
     else:d=spot_result
@@ -900,7 +900,7 @@ async def loop():
      fifteen,reason15=None,"lookup_"+type(market_result).__name__
     else:fifteen,reason15=market_result
     state["market_lookup_reason"]=reason15
-    state["ai_auth_error"]=type(auth_result).__name__ if isinstance(auth_result,BaseException) else None
+    state["ai_auth_error"]=None
     intel=public_intelligence()
     d["external_intelligence"]=intel
     fresh_flow=[x for x in intel["trade_flow"].get("exchanges",[]) if x.get("status")=="fresh"] if intel["trade_flow"].get("status")!="stale" else []
@@ -985,15 +985,13 @@ async def loop():
         checkpoints[key]=track_prediction(asyncio.create_task(capture_checkpoint(client,slug,name,round(left15),json.loads(json.dumps(d)),direction,flip,score,fifteen)))
      checkpoints={k:v for k,v in checkpoints.items() if not v.done()}
      d["paper_position"]=(await asyncio.to_thread(paper.position_context, execute,slug))
-     if ai_task is None or ai_task.done():
-      ai_task=asyncio.create_task(confirm(client,slug,phase,direction,flip,score,json.loads(json.dumps(d)),price_to_beat=target,seconds_left=round(left15)))
-      track_prediction(ai_task)
+     state["ai_disabled"]=True
     else:
      for key in ("phase","seconds_left","score"): state.pop(key,None)
      state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No verified Polymarket US 15-minute market: "+str(reason15))
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
      state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},settlement_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},quick_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},guarded_primary={"status":"unavailable","direction":"WAIT"},manual_entry_review={"status":"unavailable"},reversal_evidence={"status":"unavailable"},missed_checkpoints=[])
-     await confirm(client,None,None,"WAIT","WAIT",0,d)
+     state["ai_disabled"]=True
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     # Historical settlement can involve 30 remote rounds and must not
     # prevent current 15-minute predictions from refreshing every cycle.
@@ -1037,7 +1035,7 @@ async def paper_worker():
   while True:
    started=time.monotonic()
    try:
-    await paper.cycle(client,execute,connect,bool(DB),{**paper_signal_state(),"live_quote":state.get("market_quote")})
+    await paper.cycle(client,execute,connect,bool(DB),{"status":"disabled","direction":"WAIT","live_quote":state.get("market_quote")})
     state["paper_error"]=None
     state["paper_unfilled_exits"]=(await asyncio.to_thread(execute, "SELECT COUNT(*) FROM paper_orders WHERE status='UNFILLED'",fetch=True))[0][0]
    except Exception as exc:state["paper_error"]=type(exc).__name__+": "+str(exc)[:160]
