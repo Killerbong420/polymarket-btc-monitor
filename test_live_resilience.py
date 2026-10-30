@@ -54,9 +54,7 @@ class NonblockingSettlementTests(unittest.IsolatedAsyncioTestCase):
             with (patch("app.setup"),
                   patch("app.market_15m",new=market),
                   patch("app.spot_data",new=AsyncMock(return_value={"price":None})),
-                  patch("app.check_auth",new=AsyncMock(return_value={})),
                   patch("app.settle",new=blocked_settle),
-                  patch("app.confirm",new=AsyncMock(return_value={})),
                   patch("app.public_intelligence",return_value=intel),
                   patch("app.health_checks",return_value=[]),
                   patch("app.persist_alerts")):
@@ -99,9 +97,7 @@ class NonblockingSettlementTests(unittest.IsolatedAsyncioTestCase):
             with (patch("app.setup"),
                   patch("app.market_15m",new=market),
                   patch("app.spot_data",new=AsyncMock(return_value={"price":None})),
-                  patch("app.check_auth",new=AsyncMock(return_value={})),
                   patch("app.settle",new=failed_settle),
-                  patch("app.confirm",new=AsyncMock(return_value={})),
                   patch("app.public_intelligence",return_value=intel),
                   patch("app.health_checks",return_value=[]),
                   patch("app.persist_alerts")):
