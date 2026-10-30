@@ -294,7 +294,13 @@ body:not(.show-advanced) #futureForecastCard p.small{display:none!important}
 #marketShockDetails,#marketShockSource{line-height:1.5;overflow-wrap:anywhere}
 
 @media(max-width:430px){#brtiLineCanvas{height:clamp(265px,78vw,350px)}#brtiRangeTabs button{padding:8px 10px}#brtiLineHead{font-size:10px}}
-</style></head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
+</style><style>
+/* Rule-based dashboard: keep charts, 5m/15m calls, flip watch and verified checkpoint results.
+   Legacy AI data remains archived in the database but is not presented as current predictions. */
+#aiConfirmationPanel,#aiDecisionLog,#serverHistory,#externalIntelPanel,#newsInfluence,
+#researchDashboard {display:none!important}
+</style>
+</head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
 document.getElementById('advancedToggle').addEventListener('click',function(){
  const enabled=document.body.classList.toggle('show-advanced');
  this.setAttribute('aria-expanded',String(enabled));
