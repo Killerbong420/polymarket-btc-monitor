@@ -339,11 +339,20 @@ async def live_loop(client,execute,external_state):
      due_early=not prior and left>20
      due_late=(not late_prior and bool(prior) and
                eligible_late_checkpoint(left,prior[0][3],market["end"]))
+     # Begin a verified reference fetch just before the 2:30 window so a
+     # slow network response can still produce a genuine in-window capture.
+     approaching_late=(not late_prior and bool(prior) and
+                       LATE_CHECKPOINT_MAX_LEFT < left <= LATE_CHECKPOINT_MAX_LEFT+2*POLL_SECONDS
+                       and prior[0][3] <= market["end"]-LATE_CHECKPOINT_MAX_LEFT)
      preview_due=time.time()-last_visual_refresh>=VISUAL_REFRESH_SECONDS
-     if due_early or due_late or preview_due:
+     if due_early or due_late or approaching_late or preview_due:
       reference=await reference_prices(client,market)
       captured=time.time()
       left=market["end"]-captured
+      # Eligibility is based on the actual frozen input time, not the time
+      # before awaiting the reference feed. Never backdate a prediction.
+      due_late=(not late_prior and bool(prior) and
+                eligible_late_checkpoint(left,prior[0][3],market["end"]))
       state["seconds_left"]=round(max(0,left))
       if preview_due or due_early or due_late:
        state["visual_forecast"]=visual_forecast(
