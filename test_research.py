@@ -79,30 +79,31 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
   return slug,market,d,review
  async def test_same_snapshot_atomic_idempotent_and_settlement(self):
   slug,market,d,review=self.fixture()
-  with patch('app.halfway_decision',new=AsyncMock(return_value=review)) as ai:
-   await app.capture_checkpoint(None,slug,'HALFWAY',450,d,'WAIT','WAIT',1,market)
-   d['price']=999
-   await app.capture_checkpoint(None,slug,'HALFWAY',440,d,'DOWN','WAIT',-1,market)
-   self.assertEqual(ai.await_count,1)
+  await app.capture_checkpoint(None,slug,'HALFWAY',450,d,'WAIT','WAIT',1,market)
+  d['price']=999
+  await app.capture_checkpoint(None,slug,'HALFWAY',440,d,'DOWN','WAIT',-1,market)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM research_calls',fetch=True)[0][0],1)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM signals',fetch=True)[0][0],1)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM ai_decisions',fetch=True)[0][0],1)
   calls=json.loads(app.execute('SELECT calls_json FROM research_calls',fetch=True)[0][0]);self.assertEqual(calls['TARGET_SIDE']['direction'],'UP');self.assertEqual(calls['INDICATORS']['direction'],'WAIT')
+  # Rule-based checkpoints must not be counted as genuine AI_REVIEW predictions.
+  self.assertEqual(calls['AI']['source'],'RULE_BASED')
+  self.assertEqual(calls['AI']['direction'],'WAIT')
+  self.assertEqual(app.execute('SELECT source FROM ai_decisions',fetch=True)[0][0],'RULE_BASED')
   class Client:
    async def get(self,url,**kw):return Reply({'settlement':1}) if url.endswith('/settlement') else Reply({'event':{'markets':[market]}})
   await app.settle(Client());self.assertEqual(app.execute('SELECT winner FROM research_calls',fetch=True)[0][0],'UP')
-  report=app.research_report();self.assertEqual(report['confidence'][0]['wins'],1)
+  report=app.research_report();self.assertEqual(report['confidence'],[])
  async def test_early_only_call_is_settled_without_legacy_signal(self):
   slug,market,d,review=self.fixture()
-  with patch('app.halfway_decision',new=AsyncMock(return_value=review)):await app.capture_checkpoint(None,slug,'EARLY',720,d,'UP','WAIT',1,market)
+  await app.capture_checkpoint(None,slug,'EARLY',720,d,'UP','WAIT',1,market)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM signals',fetch=True)[0][0],0)
   class Client:
    async def get(self,url,**kw):return Reply({'settlement':0}) if url.endswith('/settlement') else Reply({'event':{'markets':[market]}})
   await app.settle(Client());self.assertEqual(app.execute('SELECT winner FROM research_calls',fetch=True)[0][0],'DOWN')
  async def test_transaction_rollback(self):
   slug,market,d,review=self.fixture();app.execute('DROP TABLE ai_decisions')
-  with patch('app.halfway_decision',new=AsyncMock(return_value=review)):
-   with self.assertRaises(Exception):await app.capture_checkpoint(None,slug,'HALFWAY',450,d,'UP','WAIT',1,market)
+  with self.assertRaises(Exception):await app.capture_checkpoint(None,slug,'HALFWAY',450,d,'UP','WAIT',1,market)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM research_calls',fetch=True)[0][0],0)
   self.assertEqual(app.execute('SELECT COUNT(*) FROM signals',fetch=True)[0][0],0)
  async def test_final_price_accuracy_retries_after_binary_settlement(self):
