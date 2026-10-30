@@ -306,6 +306,42 @@ class CheckpointLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(five.state["early_direction"],"UP")
         self.assertEqual(five.state["late_direction"],"DOWN")
 
+    async def test_reference_fetch_crossing_230_window_uses_actual_capture_time(self):
+        # The request starts before 2:30 left; only its observed completion
+        # time may qualify. A slower response after the window must not count.
+        for suffix,delay,should_capture in (("0940z",20,True),("0945z",50,False)):
+            with self.subTest(delay=delay):
+                slug="cpc-btc-updown-5m-2026-10-30-"+suffix
+                clock=[time.time()]
+                end=clock[0]+158
+                self.db.execute(
+                    "INSERT INTO five_min_predictions (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?)",
+                    (slug,end-250,"UP",100,101))
+                market={"slug":slug,"end":end,
+                        "assetPriceTerms":{"indexSymbol":"BRTI","priceToBeat":100}}
+                async def delayed_reference(*_):
+                    clock[0]+=delay
+                    return {"status":"fresh"}
+                async def stop_after_cycle(_seconds):
+                    raise asyncio.CancelledError()
+                with (patch("five_min_monitor.discover",new=AsyncMock(return_value=(market,None))),
+                      patch("five_min_monitor.reference_prices",new=AsyncMock(side_effect=delayed_reference)),
+                      patch("five_min_monitor.forecast_candidate",
+                            return_value=({"direction":"DOWN","forecast":99.0},None)),
+                      patch("five_min_monitor.time.time",side_effect=lambda:clock[0]),
+                      patch("five_min_monitor.asyncio.sleep",new=stop_after_cycle),
+                      patch("five_min_monitor.report",return_value={})):
+                    with self.assertRaises(asyncio.CancelledError):
+                        await five.live_loop(None,self.db.execute,{})
+                rows=self.db.execute(
+                    "SELECT created_epoch,direction FROM five_min_late_predictions WHERE market=?",
+                    (slug,),fetch=True)
+                self.assertEqual(len(rows),int(should_capture))
+                if should_capture:
+                    self.assertAlmostEqual(end-rows[0][0],138,delta=0.01)
+                    self.assertEqual(rows[0][1],"DOWN")
+                    self.assertEqual(five.state["phase"],"LATE_2M30")
+
     async def test_legacy_off_window_late_call_is_not_labeled_strict_230(self):
         slug="cpc-btc-updown-5m-2026-10-28-1932z"
         end=time.time()+100
