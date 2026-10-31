@@ -26,8 +26,8 @@ def checks(state,ai,db,db_error=None,now=None):
     add('REFERENCE_FEED',ref.get('status')!='fresh','warning','Reference index is stale or unavailable; target analysis uses a labeled spot proxy when possible.')
     add('TARGET',target.get('target') is None,'warning','Official price to beat is missing; target-side baseline is unavailable.')
     add('TARGET_MISMATCH',state.get('target_validation',{}).get('status')=='mismatch' and state.get('target_validation',{}).get('material') is True,'warning','Published target differs from the independently reconstructed reference average.')
-    add('AI',ai.get('status') in ('error','not_configured'),'warning','AI request failed or API access is not configured.')
-    add('AI_STALE',ai.get('status')=='ready' and (ai.get('market')!=state.get('market') or now-ai.get('updated_epoch',0)>300),'warning','AI output belongs to an earlier round or is over five minutes old.')
+    add('AI',not state.get('ai_disabled') and ai.get('status') in ('error','not_configured'),'warning','AI request failed or API access is not configured.')
+    add('AI_STALE',not state.get('ai_disabled') and ai.get('status')=='ready' and (ai.get('market')!=state.get('market') or now-ai.get('updated_epoch',0)>300),'warning','AI output belongs to an earlier round or is over five minutes old.')
     for key,code in [('trade_flow','TRADE_FLOW'),('news','NEWS_FEED')]:
         add(code,(intel.get(key) or {}).get('status') not in ('available','partial'),'warning',key.replace('_',' ').title()+' is unavailable or stale.')
     add('PARTIAL_NEWS',(intel.get('news') or {}).get('status')=='partial','warning','Some news publishers are unavailable.')
