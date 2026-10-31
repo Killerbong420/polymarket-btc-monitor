@@ -256,9 +256,9 @@ def visual_forecast(reference, external, target, seconds_left, now):
          "reference_age_seconds":projection.get("age_seconds"),
          "note":"Read-only projected final 60-second average; scenarios are uncalibrated. Observed prices are official BRTI ticks. Forecasts and historical grading remain frozen and separate."}
 
-async def loop(client,execute,verified_winner,external_state):
+async def loop(client,execute,verified_winner,external_state,postgres=False):
  """Keep slow historical settlement requests out of the live forecast cadence."""
- (await asyncio.to_thread(setup, execute))
+ (await asyncio.to_thread(setup, execute, postgres))
  async def score_worker():
   while True:
    try:
