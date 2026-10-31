@@ -26,6 +26,54 @@ class MemoryDB:
         self.db.close()
 
 
+
+class TimestampPrecisionTests(unittest.TestCase):
+    def test_sqlite_new_tables_keep_exact_epoch_precision(self):
+        db = MemoryDB()
+        try:
+            epoch = 1793437200.125
+            for table in ("five_min_predictions", "five_min_late_predictions"):
+                columns = db.execute(f"PRAGMA table_info({table})", fetch=True)
+                epoch_column = next(row for row in columns if row[1] == "created_epoch")
+                self.assertEqual(epoch_column[2], "DOUBLE PRECISION")
+                db.execute(
+                    f"INSERT INTO {table} (market,created_epoch,direction,target,forecast) VALUES (?,?,?,?,?)",
+                    ("cpc-btc-updown-5m-2026-10-31-0900z", epoch, "UP", 100, 101))
+                stored = db.execute(f"SELECT created_epoch FROM {table}", fetch=True)[0][0]
+                self.assertAlmostEqual(stored, epoch, places=3)
+        finally:
+            db.close()
+
+    def test_postgres_real_epoch_columns_migrate_once(self):
+        types = {"five_min_predictions": "real", "five_min_late_predictions": "real"}
+        statements = []
+
+        def execute(sql, args=(), fetch=False):
+            statements.append(sql)
+            if "information_schema.columns" in sql:
+                return [(types[args[0]],)]
+            if sql.startswith("ALTER TABLE"):
+                table = sql.split()[2]
+                self.assertEqual(types[table], "real")
+                self.assertIn("TYPE DOUBLE PRECISION", sql)
+                types[table] = "double precision"
+            return None
+
+        five.setup(execute, postgres=True)
+        self.assertEqual(set(types.values()), {"double precision"})
+        self.assertEqual(sum(sql.startswith("ALTER TABLE") for sql in statements), 2)
+        five.setup(execute, postgres=True)
+        self.assertEqual(sum(sql.startswith("ALTER TABLE") for sql in statements), 2)
+
+    def test_postgres_unexpected_type_fails_closed(self):
+        def execute(sql, args=(), fetch=False):
+            if "information_schema.columns" in sql:
+                return [("integer",)]
+            return None
+        with self.assertRaisesRegex(RuntimeError, "Unexpected five-minute timestamp type"):
+            five.setup(execute, postgres=True)
+
+
 class PhaseScoreTests(unittest.TestCase):
     def setUp(self):
         self.db = MemoryDB()

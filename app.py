@@ -1086,7 +1086,7 @@ async def lifespan(app):
  chart_task=asyncio.create_task(official_chart_sampler(state))
  async def five_min_worker():
   async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
-   await five_min_monitor.loop(client,execute,verified_winner,state)
+   await five_min_monitor.loop(client,execute,verified_winner,state,postgres=bool(DB))
  five_task=asyncio.create_task(five_min_worker())
  # Paper-trading worker disabled: prediction-only mode.
  async def historical_job():
