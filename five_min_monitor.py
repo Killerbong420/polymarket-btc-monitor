@@ -37,15 +37,33 @@ def valid_terms(terms):
  return (target is not None and target>0 and terms.get("indexSymbol")=="BRTI"
          and terms.get("marketType") in (None,"ASSET_PRICE_MARKET_TYPE_UP_DOWN"))
 
-def setup(execute):
+def setup(execute, postgres=False):
+ """Use 64-bit capture timestamps; PostgreSQL REAL rounds 2026 epochs by ~128s.
+
+ Existing REAL rows cannot recover lost precision. Never backdate or regrade
+ historical captures; only newly frozen calls benefit from this migration.
+ """
  execute("""CREATE TABLE IF NOT EXISTS five_min_predictions (
- market TEXT PRIMARY KEY, created_epoch REAL NOT NULL,
+ market TEXT PRIMARY KEY, created_epoch DOUBLE PRECISION NOT NULL,
  direction TEXT NOT NULL, target REAL NOT NULL, forecast REAL NOT NULL,
  result TEXT NOT NULL DEFAULT 'PENDING', winner TEXT)""")
  execute("""CREATE TABLE IF NOT EXISTS five_min_late_predictions (
- market TEXT PRIMARY KEY, created_epoch REAL NOT NULL,
+ market TEXT PRIMARY KEY, created_epoch DOUBLE PRECISION NOT NULL,
  direction TEXT NOT NULL, target REAL NOT NULL, forecast REAL NOT NULL,
  result TEXT NOT NULL DEFAULT 'PENDING', winner TEXT)""")
+ if postgres:
+  # Existing PostgreSQL tables retain their old REAL column after CREATE IF
+  # NOT EXISTS. Only migrate the two known epoch columns, once per table.
+  for table in ("five_min_predictions", "five_min_late_predictions"):
+   rows=execute("""SELECT data_type FROM information_schema.columns
+     WHERE table_schema=current_schema() AND table_name=?
+       AND column_name='created_epoch'""",(table,),fetch=True)
+   if len(rows)!=1:
+    raise RuntimeError("Cannot verify five-minute timestamp column: "+table)
+   if rows[0][0]=="real":
+    execute(f"ALTER TABLE {table} ALTER COLUMN created_epoch TYPE DOUBLE PRECISION")
+   elif rows[0][0]!="double precision":
+    raise RuntimeError("Unexpected five-minute timestamp type: "+table)
 
 async def discover(client):
  now=datetime.now(timezone.utc)
