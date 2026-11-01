@@ -47,6 +47,30 @@ class GuardedDecisionTests(unittest.TestCase):
         self.assertEqual(guarded_decision(path(),reference(),101,450)["status"], "unavailable")
         self.assertEqual(guarded_decision({**path(),"quality":"LIMITED"},reference(),100,450)["status"], "unavailable")
 
+    def test_material_target_discrepancy_suppresses_guarded_and_manual_entry(self):
+        major = validate_official_target(100, {
+            "opening_average": 115, "opening_average_samples": 60})
+        self.assertTrue(major["material"])
+        candidate = guarded_decision(path(), reference(), 100, 450,
+                                     target_validation=major)
+        self.assertEqual(candidate["status"], "unavailable")
+        self.assertEqual(candidate["direction"], "WAIT")
+        self.assertEqual(candidate["reason"], "Material official BRTI target discrepancy")
+        quote = {"status": "available", "market": "m", "up_entry": .5}
+        self.assertEqual(manual_entry_review(candidate, quote, "m")["status"], "unavailable")
+        self.assertEqual(major["official_target_usd"], 100)
+
+        minor = validate_official_target(100, {
+            "opening_average": 105, "opening_average_samples": 60})
+        self.assertFalse(minor["material"])
+        self.assertEqual(guarded_decision(path(), reference(), 100, 450,
+                                          target_validation=minor)["status"], "available")
+        incomplete = validate_official_target(100, {
+            "opening_average": 115, "opening_average_samples": 59})
+        self.assertEqual(incomplete["status"], "unavailable")
+        self.assertEqual(guarded_decision(path(), reference(), 100, 450,
+                                          target_validation=incomplete)["status"], "available")
+
     def test_ai_adjustment_bounded_and_optional(self):
         base=guarded_decision(path(),reference(),100,180)
         distant=guarded_decision(path(),reference(),100,180,ai_forecast=200)

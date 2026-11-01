@@ -963,7 +963,8 @@ async def loop():
      price_path=forecast_settlement(reference,d,target,left15,now=forecast_now)
      regime_shadow=regime_shadow_forecast(reference,d,target,left15,now=forecast_now)
      reversal=reversal_evidence(reference,left15)
-     guarded_live=guarded_decision(price_path,ref_public,target,left15,reversal=reversal)
+     target_validation=validate_official_target(number(target),reference)
+     guarded_live=guarded_decision(price_path,ref_public,target,left15,reversal=reversal,target_validation=target_validation)
      entry_review=manual_entry_review(guarded_live,quote,slug)
      d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow,quick_forecast=quick,reversal_evidence=reversal,guarded_primary=guarded_live,manual_entry_review=entry_review)
      state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,quick_forecast=quick,reversal_evidence=reversal,guarded_primary=guarded_live,manual_entry_review=entry_review)
@@ -972,9 +973,8 @@ async def loop():
       state["quote_storage_error"]=None
      except Exception as quote_exc:
       state["quote_storage_error"]=type(quote_exc).__name__+": "+str(quote_exc)[:150]
-     avg=reference.get("opening_average");pt=number(target)
-     state["target_validation"]=validate_official_target(pt,reference)
-     d["target_validation"]=state["target_validation"]
+     state["target_validation"]=target_validation
+     d["target_validation"]=target_validation
      captured={r[0] for r in (await asyncio.to_thread(execute, "SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True))}
      plan=checkpoint_plan(left15,captured)
      state["missed_checkpoints"]=plan["missed"]

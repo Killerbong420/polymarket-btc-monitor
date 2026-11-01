@@ -69,7 +69,7 @@ def reversal_evidence(reference, seconds_left):
 
 
 def guarded_decision(path, reference, official_target, seconds_left,
-                     ai_forecast=None, reversal=None):
+                     ai_forecast=None, reversal=None, target_validation=None):
     """Create a versioned, independently testable research candidate.
 
     Stronger live BRTI paths dominate; early far-horizon momentum shrinks
@@ -79,6 +79,10 @@ def guarded_decision(path, reference, official_target, seconds_left,
     base = {"status": "unavailable", "version": VERSION,
             "direction": "WAIT", "calibrated_probability": False,
             "live_order_placement": False}
+    # Complete observed opening materially disagrees with the official target:
+    # suppress research/entry calls without replacing the published target.
+    if isinstance(target_validation, dict) and target_validation.get("material") is True:
+        return {**base, "reason": "Material official BRTI target discrepancy"}
     target = finite(official_target)
     left = finite(seconds_left)
     path = path if isinstance(path, dict) else {}
