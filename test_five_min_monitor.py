@@ -94,8 +94,8 @@ class PhaseScoreTests(unittest.TestCase):
         self.assertEqual((result["late_legacy"]["wins"],result["late_legacy"]["losses"],result["late_legacy"]["graded"]),(0,1,1))
 
     def test_strict_late_accuracy_excludes_predictions_made_near_settlement(self):
-        slug1="cpc-btc-updown-5m-2026-10-28-2000z"
-        slug2="cpc-btc-updown-5m-2026-10-28-2005z"
+        slug1="cpc-btc-updown-5m-2026-11-02-2000z"
+        slug2="cpc-btc-updown-5m-2026-11-02-2005z"
         import datetime
         def end(slug):
             stamp=slug.split("btc-updown-5m-")[1]
@@ -111,7 +111,7 @@ class PhaseScoreTests(unittest.TestCase):
 
     def test_late_capture_audit_explains_zero_strict_calls_without_regrading(self):
         from datetime import datetime, timedelta, timezone
-        start=datetime(2026,10,28,20,0,tzinfo=timezone.utc)
+        start=datetime(2026,11,2,20,0,tzinfo=timezone.utc)
         # Two historical off-window captures and one genuine 2:30 capture.
         for minute,left,side,result in [(0,20,"UP","WIN"),(5,165,"DOWN","LOSS"),(10,135,"UP","WIN")]:
             round_start=start+timedelta(minutes=minute)
@@ -124,10 +124,28 @@ class PhaseScoreTests(unittest.TestCase):
         audit=result["capture_audit"]
         self.assertEqual(audit["sampled"],3)
         self.assertEqual((audit["within_window"],audit["before_window"],audit["after_window"],audit["invalid_timestamp"]),(1,1,1,0))
-        self.assertEqual(sum(audit[key] for key in ("within_window","before_window","after_window","invalid_timestamp")),audit["sampled"])
+        self.assertEqual(sum(audit[key] for key in ("within_window","before_window","after_window","pre_precision_migration","invalid_timestamp")),audit["sampled"])
         self.assertTrue(all("window" in row for row in audit["recent"]))
         # No grading mutation or timestamps changed.
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM five_min_late_predictions",fetch=True)[0][0],3)
+
+    def test_pre_migration_float4_rows_are_not_retroactively_graded(self):
+        from datetime import datetime, timedelta, timezone
+        old_start=datetime(2026,11,1,22,15,tzinfo=timezone.utc)
+        new_start=datetime(2026,11,2,0,15,tzinfo=timezone.utc)
+        # Old float4 capture appears inside the strict 120-150s window
+        # after float8 conversion, but its original timing is unknowable.
+        for start,result in ((old_start,"WIN"),(new_start,"LOSS")):
+            slug="cpc-btc-updown-5m-"+start.strftime("%Y-%m-%d-%H%Mz")
+            captured=(start+timedelta(minutes=5)).timestamp()-135
+            self.db.execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast,result,winner) VALUES (?,?,?,?,?,?,?)",
+                            (slug,captured,"UP",100,101,result,"UP" if result=="WIN" else "DOWN"))
+        report=five.report(self.db.execute)
+        self.assertEqual((report["late"]["wins"],report["late"]["losses"],report["late"]["graded"]),(0,1,1))
+        self.assertEqual(report["late"]["capture_audit"]["pre_precision_migration"],1)
+        self.assertEqual(report["late"]["capture_audit"]["within_window"],1)
+        self.assertEqual(report["late_legacy"]["graded"],2)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM five_min_late_predictions",fetch=True)[0][0],2)
 
     def test_late_capture_audit_does_not_relabel_invalid_market_or_pending(self):
         self.db.execute("INSERT INTO five_min_late_predictions (market,created_epoch,direction,target,forecast,result,winner) VALUES (?,?,?,?,?,?,?)",
