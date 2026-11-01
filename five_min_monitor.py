@@ -17,6 +17,11 @@ VISUAL_REFRESH_SECONDS=15
 VISUAL_MAX_POINTS=120
 LATE_CHECKPOINT_MIN_LEFT=120
 LATE_CHECKPOINT_MAX_LEFT=150
+# The first float4->float8 deployment was live at 2026-11-01 22:43:44 UTC.
+# Existing float4 timestamps cannot recover their original capture times. A
+# conservative 23:00 cutoff prevents old rounded rows being newly counted as
+# valid strict checkpoints after the type migration. Never backfill these.
+STRICT_LATE_MIN_CAPTURE_EPOCH=datetime(2026,11,1,23,0,tzinfo=timezone.utc).timestamp()
 
 def eligible_late_checkpoint(seconds_left,early_created,end):
  """Capture the later forecast only near 2:30, never retrospectively."""
@@ -151,7 +156,7 @@ def strict_late_counts(execute):
  rows=execute("SELECT market,created_epoch,result FROM five_min_late_predictions WHERE result IN ('WIN','LOSS') ORDER BY created_epoch DESC LIMIT 1000",fetch=True)
  wins=losses=0
  audit={"sampled":min(len(rows),36),"within_window":0,"before_window":0,
-        "after_window":0,"invalid_timestamp":0,"recent":[]}
+        "after_window":0,"pre_precision_migration":0,"invalid_timestamp":0,"recent":[]}
  for idx,(slug,captured,result) in enumerate(rows):
   try:
    stamp=slug.split('btc-updown-5m-',1)[1]
@@ -163,7 +168,8 @@ def strict_late_counts(execute):
     audit["invalid_timestamp"]+=1
     if idx<5:audit["recent"].append({"market":str(slug)[:90],"window":"invalid_timestamp"})
    continue
-  if remaining>LATE_CHECKPOINT_MAX_LEFT:bucket="before_window"
+  if float(captured)<STRICT_LATE_MIN_CAPTURE_EPOCH:bucket="pre_precision_migration"
+  elif remaining>LATE_CHECKPOINT_MAX_LEFT:bucket="before_window"
   elif remaining<LATE_CHECKPOINT_MIN_LEFT:bucket="after_window"
   else:bucket="within_window"
   if idx<36:
@@ -188,7 +194,7 @@ def report(execute):
  return {**early,"recent":[{"market":m,"direction":d,"result":r,"winner":w} for m,d,r,w in recent],
          "late":{**late,"recent":[{"market":m,"direction":d,"result":r,"winner":w} for m,d,r,w in late_recent],
                  "checkpoint_seconds_left":150,"capture_window_seconds_left":[120,150],
-                 "basis":"Only independently graded frozen calls captured 120-150 seconds before expiry; historical off-window calls excluded"},
+                 "basis":"Only independently graded frozen calls captured 120-150 seconds before expiry after the verified 2026-11-01 timestamp-precision migration; pre-migration rounded timestamps excluded"},
          "late_legacy":{**late_legacy,"basis":"Historical late calls captured with 20-150 seconds remaining; retained for audit only"},
          "early_basis":"Original first available frozen 5m predictions; historical records retained unchanged"}
 
