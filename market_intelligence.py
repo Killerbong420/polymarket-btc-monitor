@@ -23,6 +23,23 @@ _state = {'trade_flow':{'status':'starting','exchanges':[]},
 def iso(ts):
     return datetime.fromtimestamp(ts, timezone.utc).isoformat()
 
+def short_window_pressure(rows, now, seconds):
+    """Observed initiated volume; incomplete snapshots must not imply full coverage."""
+    sample=[(t,p*q,side) for t,p,q,side in rows if now-seconds<=t<=now]
+    latest=max((t for t,_,_ in sample),default=None)
+    earliest=min((t for t,_,_ in sample),default=None)
+    buy=sum(value for _,value,side in sample if side=='buy')
+    sell=sum(value for _,value,side in sample if side=='sell')
+    # An exchange's most-recent-N API can omit older trades in a busy market.
+    # Require observed samples spanning most of the window before labeling coverage.
+    covered=bool(sample and earliest<=now-seconds+3 and latest>=now-5)
+    return {'window_seconds':seconds,'status':'observed' if covered else 'partial',
+            'buy_usd':round(buy,2),'sell_usd':round(sell,2),
+            'imbalance':round((buy-sell)/(buy+sell),4) if buy+sell else None,
+            'trade_count':len(sample),'sample_span_seconds':round(latest-earliest,1) if sample else 0,
+            'latest_age_seconds':round(now-latest,1) if sample else None,
+            'coverage':'sample spans near both window edges' if covered else 'insufficient time coverage; not global volume'}
+
 def summarize_trades(trades, source, now):
     """Normalized (epoch, price, BTC quantity, taker side, id) observations."""
     valid={}
@@ -44,6 +61,8 @@ def summarize_trades(trades, source, now):
             'sell_btc':round(sum(q for t,p,q,s in rows if s=='sell'),8),
             'imbalance':round((buys-sells)/(buys+sells),4),
             'trade_count':len(rows),'latest_trade_epoch':latest,
+            'short_windows':{'10s':short_window_pressure(rows,now,10),
+                             '30s':short_window_pressure(rows,now,30)},
             'sample_start':iso(min(x[0] for x in rows)), 'sample_end':iso(latest),
             'sample_seconds':round(latest-min(x[0] for x in rows),1),
             'note':'Observed recent trade sample, not complete exchange or global volume; every trade has a buyer and seller. Side identifies the initiating order.'}
