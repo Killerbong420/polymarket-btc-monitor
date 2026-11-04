@@ -300,7 +300,28 @@ body:not(.show-advanced) #futureForecastCard p.small{display:none!important}
 #aiConfirmationPanel,#aiDecisionLog,#serverHistory,#externalIntelPanel,#newsInfluence,
 #researchDashboard,#futureAiPrice,#futureShadowPrice {display:none!important}
 </style>
-</head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
+<style id="mobile-readability-v1">
+/* Mobile UI readability pass: presentation only; no changes to data or calls. */
+@media (max-width: 600px) {
+  body { overflow-x: clip; }
+  .card, #brtiHero { min-width: 0; }
+  .brti-head, .brti-current { align-items: flex-start; }
+  .brti-stats { gap: 6px; }
+  .brti-stats > div { padding: 9px 6px; }
+  .brti-stats strong { font-variant-numeric: tabular-nums; font-size: 12px; }
+  #brtiCanvas { height: clamp(230px, 66vw, 320px); }
+  .chart-key, .brti-legend { row-gap: 8px; }
+  button, summary { touch-action: manipulation; }
+  .research-scroll { -webkit-overflow-scrolling: touch; }
+}
+@media (max-width: 390px) {
+  .brti-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #brtiPrice { font-size: 25px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
+</style></head><body><button type="button" id="advancedToggle" aria-expanded="false">Show detailed logs, outside data &amp; diagnostics</button><script>
 document.getElementById('advancedToggle').addEventListener('click',function(){
  const enabled=document.body.classList.toggle('show-advanced');
  this.setAttribute('aria-expanded',String(enabled));
