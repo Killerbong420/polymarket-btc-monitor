@@ -6,9 +6,9 @@ HTML = (Path(__file__).parent / "terminal.html").read_text(encoding="utf-8")
 
 
 class NetworkPollingTests(unittest.TestCase):
-    def test_live_two_seconds_and_history_twenty_seconds(self):
+    def test_live_four_seconds_and_history_twenty_seconds(self):
         self.assertIn("fetch('/api/live',{cache:'no-store',signal:ctrl.signal})", HTML)
-        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},2000)", HTML)
+        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},4000)", HTML)
         self.assertIn("setInterval(()=>{if(!document.hidden)refreshHistoryStatus()},20000)", HTML)
         self.assertIn("fetch('/api/status',{cache:'no-store',signal:ctrl.signal})", HTML)
         self.assertIn("const d={...cachedHistoryStatus,...live}", HTML)
@@ -21,9 +21,9 @@ class NetworkPollingTests(unittest.TestCase):
         self.assertIn("window.addEventListener('btc-status-updated',pollAI)", HTML)
         self.assertNotIn("setInterval(()=>{if(!document.hidden)pollAI()},20000)", HTML)
 
-    def test_chart_tip_one_second_and_no_overlap(self):
+    def test_chart_tip_three_seconds_and_no_overlap(self):
         self.assertIn("if(document.hidden||tipBusy||typeof fetch!=='function')return", HTML)
-        self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},1000)", HTML)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},3000)", HTML)
         self.assertIn("setTimeout(()=>ctrl.abort(),3000)", HTML)
         self.assertIn("if(inFlight||Date.now()-historyReceivedAt<15000)return", HTML)
         self.assertIn("window.btcNoteRequest?.('chart history'", HTML)
