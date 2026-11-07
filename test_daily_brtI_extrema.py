@@ -14,7 +14,7 @@ class DailyObservedExtremaTest(unittest.TestCase):
   chart._day_extrema.clear()
 
  def test_high_low_from_official_ticks_only_and_no_lookahead(self):
-  now=1794096000  # fixed UTC timestamp
+  now=1794139200  # fixed UTC timestamp
   chart.record_brti([[now-20,100],[now-10,120],[now-5,90],[now+20,999]],chart.OFFICIAL_SOURCE,now)
   d=chart.today_observed_extrema(now)
   self.assertEqual((d['high'],d['low']),(120,90))
@@ -23,7 +23,7 @@ class DailyObservedExtremaTest(unittest.TestCase):
   self.assertEqual(chart.today_observed_extrema(now)['high'],120)
 
  def test_day_rollover_does_not_reuse_yesterday(self):
-  now=1794096000
+  now=1794139200
   chart.record_brti([[now-1,110]],chart.OFFICIAL_SOURCE,now)
   tomorrow=now+86400
   self.assertIsNone(chart.today_observed_extrema(tomorrow)['high'])
