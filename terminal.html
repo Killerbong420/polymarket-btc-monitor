@@ -418,19 +418,35 @@ window.btcNoteRequest=function(name,ms,ok){
 </div>
 <script>
 (function(){
- function updateMeter(){
-  const call=document.getElementById('final15Signal');
-  const direction=document.getElementById('meterDirection');
-  if(!call||!direction)return;
-  const raw=call.textContent||'';
+ async function updateMeter(){
+  const byId=id=>document.getElementById(id);
+  const call=byId('final15Signal'),direction=byId('meterDirection'),note=byId('meterNote');
+  if(!direction||!note)return;
+  const raw=call?.textContent||'';
   const side=/\\bUP\\b/.test(raw)?'UP':/\\bDOWN\\b/.test(raw)?'DOWN':null;
-  direction.textContent=side?(side==='UP'?'▲ UP favored':'▼ DOWN favored')+' · probability not calibrated':'Waiting for verified 15-minute forecast';
-  // Do not convert indicator agreement or win rate into a fictitious probability.
+  direction.textContent=side?(side==='UP'?'▲ UP favored':'▼ DOWN favored'):'Waiting for verified 15-minute forecast';
+  try{
+   const response=await fetch('/api/direction-probability',{cache:'no-store'});
+   if(!response.ok)throw Error('unavailable');
+   const data=await response.json();
+   if(data.status!=='available'||!Number.isFinite(data.up_probability)||!Number.isFinite(data.down_probability))throw Error(data.reason||'insufficient_verified_history');
+   const up=Math.round(data.up_probability*100),down=100-up;
+   byId('meterUpPct').textContent=up+'%';
+   byId('meterDownPct').textContent=down+'%';
+   byId('meterUpFill').style.width=up+'%';
+   byId('meterDownFill').style.width=down+'%';
+   direction.textContent=(up>=down?'▲ UP':'▼ DOWN')+' · '+Math.max(up,down)+'% estimated';
+   note.textContent='Historical calibrated estimate · '+data.samples+' verified rounds · '+data.holdout+' holdout · not guaranteed';
+   byId('directionMeter').querySelector('.meter-track').setAttribute('aria-label',down+' percent down, '+up+' percent up');
+  }catch(error){
+   byId('meterUpPct').textContent='—';byId('meterDownPct').textContent='—';
+   byId('meterUpFill').style.width='0%';byId('meterDownFill').style.width='0%';
+   note.textContent='Probability unavailable until sufficient verified history passes validation.';
+  }
  }
  document.addEventListener('DOMContentLoaded',function(){
-  const call=document.getElementById('final15Signal');
-  if(call){new MutationObserver(updateMeter).observe(call,{childList:true,characterData:true,subtree:true});}
   updateMeter();
+  setInterval(updateMeter,15000);
  });
 })();
 </script>
