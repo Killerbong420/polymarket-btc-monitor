@@ -10,6 +10,8 @@ import app
 class LiveFeedTests(unittest.TestCase):
     def test_live_api_does_not_touch_database(self):
         old=dict(app.state)
+        old_history=dict(app._status_cache)
+        app._status_cache["data"]=None
         try:
             app.state.update(status="running",market="btc-updown-15m-example",
                              updated=datetime.now(timezone.utc).isoformat(),
@@ -27,8 +29,13 @@ class LiveFeedTests(unittest.TestCase):
                 self.assertEqual(result["last_halfway_ai"]["direction"],"DOWN")
                 self.assertIsInstance(result["server_epoch"],float)
                 status=client.get("/api/status").json()
-                self.assertIn("database_error",status)
+                self.assertEqual(status["status"],"running")
+                self.assertFalse(status["status_history_ready"])
+                self.assertEqual(status["history"],[])
+                self.assertNotIn("database_error",status)
         finally:
+            app._status_cache.clear()
+            app._status_cache.update(old_history)
             app.state.clear()
             app.state.update(old)
 

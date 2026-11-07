@@ -1083,6 +1083,9 @@ async def read_only_diagnostics_loop():
 @asynccontextmanager
 async def lifespan(app):
  task=asyncio.create_task(loop())
+ # Database history is optional for initial page load. Never block /api/status
+ # behind slow SQL while background migrations or archival reads run.
+ status_history_task=asyncio.create_task(_status_history_worker())
  context_task=asyncio.create_task(intelligence_loop())
  trade_stream_task=asyncio.create_task(stream_loop())
  chart_task=asyncio.create_task(official_chart_sampler(state))
@@ -1102,6 +1105,7 @@ async def lifespan(app):
  diagnostics_task=asyncio.create_task(read_only_diagnostics_loop())
  yield
  task.cancel()
+ status_history_task.cancel()
  history_task.cancel()
  diagnostics_task.cancel()
  context_task.cancel()
@@ -1110,7 +1114,7 @@ async def lifespan(app):
  five_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,history_task,context_task,trade_stream_task,chart_task,diagnostics_task,five_task,*pending_predictions):
+ for running in (task,status_history_task,history_task,context_task,trade_stream_task,chart_task,diagnostics_task,five_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
@@ -1633,12 +1637,38 @@ def direction_probability():
  _probability_cache.update(at=now,market=slug,gap=round(gap,3),data=result)
  return result
 
+async def _status_history_worker():
+ """Refresh historical scoreboard in a single background thread.
+
+ Frontend heartbeat must not wait on SQL, even if migrations or I/O are slow.
+ Do not spawn overlapping refresh jobs, accumulate timeouts or leak workers.
+ """
+ while True:
+  try:
+   # Main live worker gets first use of PostgreSQL at service boot.
+   while state.get("status")=="starting":
+    await asyncio.sleep(2)
+   await asyncio.to_thread(_read_status_history)
+   _status_cache["worker_error"]=None
+  except asyncio.CancelledError:
+   raise
+  except Exception as exc:
+   _status_cache["worker_error"]=type(exc).__name__
+  await asyncio.sleep(15)
+
+
 @app.get("/api/status")
 def status():
- try:
-  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),
-          **_read_status_history()}
- except Exception as e: return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),"database_error":str(e),"history":[]}
+ """Return an immediate in-memory snapshot; no synchronous DB work here."""
+ history=_status_cache.get("data")
+ data=history if isinstance(history,dict) else {
+  "history":[],"ai_decision_history":[],"accuracy_by_quality":[],
+  "counts":{},"ai_verified_counts":{},"ai_decision_counts":{}
+ }
+ return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),**data,
+         "status_history_ready":bool(history),
+         "status_history_error":_status_cache.get("worker_error"),
+         "server_epoch":time.time()}
 
 @app.get("/",response_class=HTMLResponse)
 def home():
