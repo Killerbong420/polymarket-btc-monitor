@@ -6,7 +6,8 @@ from ai_confirmation import public_state, auth_state, paper_signal_state
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 import httpx
-from market_intelligence import intelligence_loop, public_intelligence
+from market_intelligence import intelligence_loop, public_intelligence, public_trade_flow
+from live_trade_stream import stream_loop
 from market_chart_history import record_brti, snapshot as chart_history_snapshot, latest_tip, official_chart_sampler, eligible_tick_market
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from price_action import analyze_price_action, shadow_price_action
@@ -24,7 +25,7 @@ from checkpoint_scoreboard import build_scoreboard
 from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
 from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history, diagnostic_extras
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 import paper_trader as paper
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 try:
@@ -1083,6 +1084,7 @@ async def read_only_diagnostics_loop():
 async def lifespan(app):
  task=asyncio.create_task(loop())
  context_task=asyncio.create_task(intelligence_loop())
+ trade_stream_task=asyncio.create_task(stream_loop())
  chart_task=asyncio.create_task(official_chart_sampler(state))
  async def five_min_worker():
   async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
@@ -1103,11 +1105,12 @@ async def lifespan(app):
  history_task.cancel()
  diagnostics_task.cancel()
  context_task.cancel()
+ trade_stream_task.cancel()
  chart_task.cancel()
  five_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,history_task,context_task,chart_task,diagnostics_task,five_task,*pending_predictions):
+ for running in (task,history_task,context_task,trade_stream_task,chart_task,diagnostics_task,five_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
@@ -1373,6 +1376,28 @@ def historical_csv():
  p=Path("historical_15m_7d.csv")
  if not p.exists(): return JSONResponse({"status":historical_state},status_code=202)
  return FileResponse(str(p),media_type="text/csv",filename="polymarket_us_btc_15m_7d.csv")
+# Keep per-visitor stream work bounded; the regular /api/status path is the fallback.
+_flow_ws_clients = 0
+
+@app.websocket("/ws/exchange-flow")
+async def exchange_flow_ws(websocket: WebSocket):
+ global _flow_ws_clients
+ if _flow_ws_clients >= 8:
+  await websocket.close(code=1013)
+  return
+ await websocket.accept()
+ _flow_ws_clients += 1
+ try:
+  while True:
+   await websocket.send_json({"type": "exchange_flow", "trade_flow": public_trade_flow(), "server_epoch": time.time()})
+   await asyncio.sleep(1)
+ except (WebSocketDisconnect, RuntimeError, OSError):
+  pass
+ except asyncio.CancelledError:
+  raise
+ finally:
+  _flow_ws_clients -= 1
+
 @app.get("/api/market-chart/tip")
 def market_chart_tip():
  """Tiny read-only official index changes for 1s chart refresh; never touches SQL."""

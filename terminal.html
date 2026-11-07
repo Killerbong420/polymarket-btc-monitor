@@ -834,6 +834,10 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
   <div><small>BRTI VS USD MEDIAN</small><strong id="crossBRTI">—</strong></div>
  </div>
  <div id="crossPressure" class="xpressure">Coinbase/Kraken trade pressure: waiting for sampled buyer/seller initiated trades</div>
+ <div id="flowLiveNote" class="small" aria-live="polite">30s buyer/seller flow: connecting…</div>
+ <div id="flowLiveBar" style="display:flex;height:8px;overflow:hidden;border-radius:7px;background:#334155;margin:6px 0" role="img" aria-label="Observed last 30 second initiator buy and sell percentages, when coverage is sufficient">
+  <span id="flowLiveBuy" style="width:0%;background:#16a34a"></span><span id="flowLiveSell" style="width:0%;background:#dc2626"></span>
+ </div>
  <div id="crossBook" class="small">Kraken order-book depth: checking</div>
  <details id="crossVenues"><summary>Show prices and feed health by exchange</summary>
   <table class="xtable"><thead><tr><th>Source / quote</th><th>Last price</th><th>Feed</th></tr></thead><tbody id="crossExchangeRows"></tbody></table>
@@ -841,6 +845,71 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
  </details>
  <div class="xnote">Exchange prices confirm broader spot movement but do not replace Polymarket's official BRTI settlement. HTTP response does not prove a recent executed trade. Unavailable and outlier feeds are excluded.</div>
 </section>
+<script>
+/* Read-only WebSocket flow. Browser reuses the 4s status endpoint if WS is unavailable. */
+(()=>{
+ const note=document.getElementById('flowLiveNote');
+ const buyBar=document.getElementById('flowLiveBuy'),sellBar=document.getElementById('flowLiveSell');
+ if(!note||!window.WebSocket)return;
+ let socket=null,retry=null,delay=1000,stopped=false;
+ function reset(message){
+  note.textContent=message;
+  buyBar.style.width='0%';sellBar.style.width='0%';
+ }
+ function paint(data){
+  const flow=data&&data.trade_flow;
+  if(!flow)return;
+  const streamed=(flow.exchanges||[]).filter(x=>x.status==='fresh'&&x.transport==='websocket');
+  const covered=streamed.map(x=>({source:x.source,win:x.short_windows&&x.short_windows['30s']}))
+    .filter(x=>x.win&&x.win.status==='observed');
+  if(!covered.length){
+   reset(streamed.length?'30s flow warming up or partial · waiting for observed coverage':
+     '30s live stream unavailable · REST pressure remains available above');
+   return;
+  }
+  const buy=covered.reduce((s,x)=>s+(Number(x.win.buy_usd)||0),0);
+  const sell=covered.reduce((s,x)=>s+(Number(x.win.sell_usd)||0),0);
+  if(!(buy+sell>0)){reset('30s flow: no eligible trades observed');return;}
+  const pct=100*buy/(buy+sell);
+  buyBar.style.width=pct.toFixed(1)+'%';
+  sellBar.style.width=(100-pct).toFixed(1)+'%';
+  note.textContent='LAST 30s · '+pct.toFixed(1)+'% buyer-initiated / '+(100-pct).toFixed(1)+
+    '% seller-initiated · '+covered.map(x=>x.source).join(' + ')+
+    ' · partial exchange coverage, not settlement or odds';
+ }
+ function connect(){
+  if(stopped||document.hidden||socket)return;
+  const protocol=location.protocol==='https:'?'wss:':'ws:';
+  try{
+   const ws=new WebSocket(protocol+'//'+location.host+'/ws/exchange-flow');
+   socket=ws;
+   ws.onopen=()=>{delay=1000;};
+   ws.onmessage=ev=>{try{const m=JSON.parse(ev.data);if(m.type==='exchange_flow')paint(m);}catch(_){}};
+   ws.onerror=()=>{ws.close();};
+   ws.onclose=()=>{
+    if(socket===ws)socket=null;
+    if(!stopped&&!document.hidden){
+     reset('Live flow disconnected · REST fallback active');
+     retry=setTimeout(connect,delay);
+     delay=Math.min(30000,delay*2);
+    }
+   };
+  }catch(_){reset('Live flow unavailable · REST fallback active');}
+ }
+ document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){
+   if(retry){clearTimeout(retry);retry=null;}
+   if(socket){socket.close();socket=null;}
+  }else connect();
+ });
+ window.addEventListener('pagehide',()=>{
+  stopped=true;
+  if(retry)clearTimeout(retry);
+  if(socket)socket.close();
+ });
+ connect();
+})();
+</script>
 <section class="card" id="checkpointBoard" aria-label="Independently graded Bitcoin checkpoint accuracy">
  <div class="row" style="justify-content:space-between"><strong class="label">MODEL CHECKPOINT SCOREBOARD</strong><span id="checkpointUpdated" class="small">Reading verified settlements</span></div>
  <table><thead><tr><th>Forecast / checkpoint</th><th>Wins / calls</th><th>Accuracy</th></tr></thead><tbody id="checkpointRows"><tr><td>Awaiting official settlement history</td><td>—</td><td>—</td></tr></tbody></table>

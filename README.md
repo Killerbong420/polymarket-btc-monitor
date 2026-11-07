@@ -1,5 +1,28 @@
 # Polymarket BTC Monitor
 
+## Fast observed exchange trade pressure (read-only)
+
+Coinbase BTC-USD matches and Kraken BTC/USD trades now stream through bounded server-side
+WebSocket buffers. The public dashboard receives a **once-per-second** compact
+30-second buyer/seller strip over the same-origin `/ws/exchange-flow` socket;
+Safari reconnects automatically and uses the existing 4-second status view if the
+socket is unavailable. The regular market worker can also use live samples, while
+REST trade sampling remains a fallback during disconnections or cold starts.
+
+Each stream caps stored executions at 6,000 per venue and 180 seconds, deduplicates
+trade IDs, drops stale/invalid observations, and resets on disconnect. A rolling
+10-second or 30-second window is labeled **partial** until its observed time span
+is sufficient, if buffer overflow occurred, or when events become stale. Public
+WebSocket channels may still drop events, so these measurements are observations,
+**not a complete tape**, calibrated UP/DOWN probability, guaranteed order flow,
+or global BTC volume. Coinbase's maker side is inverted to taker side; Kraken
+trade side is used directly. No automated orders or AI have been enabled.
+
+These exchange streams **never replace** the Polymarket US official BRTI
+price-to-beat, BRTI final-minute settlement averaging, or verified outcomes.
+Validation: `python -m unittest -v test_live_trade_stream` and the full CI suite.
+
+
 ## Quick prediction: first five minutes of each 15-minute round
 
 The quick prediction tile now displays only **UP** or **DOWN** (no FAST prefix)
