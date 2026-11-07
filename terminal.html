@@ -409,7 +409,7 @@ window.btcNoteRequest=function(name,ms,ok){
 #directionMeter .meter-up-label{color:#4ade80}
 </style>
 <div class="card" id="directionMeter" aria-label="BTC fifteen-minute direction probability meter">
- <div class="label">15-MIN BTC · UP / DOWN PROBABILITY</div>
+ <div class="label">15-MIN BTC · 10s LIVE PREDICTION / HISTORICAL PROBABILITY</div>
  <div class="meter-sides" style="margin:12px 0">
   <div class="meter-down-label">▼ DOWN <strong id="meterDownPct">—</strong></div>
   <div class="meter-up-label">UP ▲ <strong id="meterUpPct">—</strong></div>
@@ -420,37 +420,94 @@ window.btcNoteRequest=function(name,ms,ok){
  <div class="small" id="meterDirection" style="margin-top:9px">Waiting for verified 15-minute forecast</div>
  <div class="small" id="meterNote">Probability unavailable: the current forecast does not provide calibrated UP/DOWN percentages. No invented odds are shown.</div>
 </div>
+
 <script>
+/* The underlying BRTI forecast already runs at ~5s cadence.
+   Present the latest verified direction every 10s without additional model calls. */
 (function(){
+ const PREDICTION_DISPLAY_MS=10000;
+ let meterInFlight=false;
+ const byId=id=>document.getElementById(id);
+ const upFill=()=>byId('meterUpFill'),downFill=()=>byId('meterDownFill');
+ function liveForecast(snapshot,now){
+  const ref=snapshot&&snapshot.reference_price||{};
+  const forecast=snapshot&&snapshot.guarded_primary||{};
+  const lastUpdate=Date.parse(snapshot&&snapshot.updated||'');
+  const tickAge=now-Number(ref.price_epoch);
+  const updateAge=(now*1000-lastUpdate)/1000;
+  const remaining=Number(ref.window_end)-now;
+  if(!snapshot||snapshot.status!=='running'
+     ||typeof snapshot.market!=='string'||!snapshot.market.includes('btc-updown-15m-')
+     ||ref.status!=='fresh'||ref.source!=='Polymarket US BTC reference / BRTI'
+     ||!Number.isFinite(tickAge)||tickAge< -2||tickAge>15
+     ||!Number.isFinite(updateAge)||updateAge< -2||updateAge>15
+     ||!Number.isFinite(remaining)||remaining<=0||remaining>900
+     ||forecast.status!=='available'||!['UP','DOWN'].includes(forecast.direction)
+     ||!Number.isFinite(Number(forecast.forecast_final_mean_usd))
+     ||!Number.isFinite(Number(forecast.official_target_usd)))return null;
+  return forecast;
+ }
+ function clearProbabilities(){
+  byId('meterUpPct').textContent='—';
+  byId('meterDownPct').textContent='—';
+  upFill().style.width='0%';
+  downFill().style.width='0%';
+  byId('directionMeter').querySelector('.meter-track').setAttribute('aria-label','Verified percentages unavailable');
+ }
+ function paintLivePrediction(live){
+  const direction=byId('meterDirection');
+  if(!live){
+   direction.textContent='Waiting for fresh verified 15-minute BRTI forecast';
+   clearProbabilities();
+   byId('meterNote').textContent='Checking every 10s · no prediction shown when official data is stale or insufficient.';
+   return;
+  }
+  const sign=live.direction==='UP'?'▲':'▼';
+  direction.textContent=sign+' '+live.direction+' forecast · projected final $'+
+     Number(live.forecast_final_mean_usd).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+
+     ' vs target $'+Number(live.official_target_usd).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+
+     ' · refresh 10s';
+ }
  async function updateMeter(){
-  const byId=id=>document.getElementById(id);
-  const call=byId('final15Signal'),direction=byId('meterDirection'),note=byId('meterNote');
-  if(!direction||!note)return;
-  const raw=call?.textContent||'';
-  const side=/\\bUP\\b/.test(raw)?'UP':/\\bDOWN\\b/.test(raw)?'DOWN':null;
-  direction.textContent=side?(side==='UP'?'▲ UP favored':'▼ DOWN favored'):'Waiting for verified 15-minute forecast';
+  if(document.hidden||meterInFlight)return;
+  meterInFlight=true;
+  const snapshot=window.btcServerStatus;
+  const live=liveForecast(snapshot,Date.now()/1000);
+  paintLivePrediction(live);
+  const note=byId('meterNote');
+  let controller=null,timeout=null;
   try{
-   const response=await fetch('/api/direction-probability',{cache:'no-store'});
+   if(!live)return;
+   controller=new AbortController();
+   timeout=setTimeout(()=>controller.abort(),6500);
+   const response=await fetch('/api/direction-probability',{cache:'no-store',signal:controller.signal});
    if(!response.ok)throw Error('unavailable');
    const data=await response.json();
-   if(data.status!=='available'||!Number.isFinite(data.up_probability)||!Number.isFinite(data.down_probability))throw Error(data.reason||'insufficient_verified_history');
+   if(data.status!=='available'||!Number.isFinite(data.up_probability)
+      ||!Number.isFinite(data.down_probability)
+      ||data.up_probability<0||data.up_probability>1)throw Error(data.reason||'insufficient_history');
+   // These percentages come from historical settled rounds, NOT from the live forecast.
    const up=Math.round(data.up_probability*100),down=100-up;
    byId('meterUpPct').textContent=up+'%';
    byId('meterDownPct').textContent=down+'%';
-   byId('meterUpFill').style.width=up+'%';
-   byId('meterDownFill').style.width=down+'%';
-   direction.textContent=(up>=down?'▲ UP':'▼ DOWN')+' · '+Math.max(up,down)+'% estimated';
-   note.textContent='Historical calibrated estimate · '+data.samples+' verified rounds · '+data.holdout+' holdout · not guaranteed';
-   byId('directionMeter').querySelector('.meter-track').setAttribute('aria-label',down+' percent down, '+up+' percent up');
+   upFill().style.width=up+'%';
+   downFill().style.width=down+'%';
+   note.textContent='Historical calibrated UP/DOWN frequency · '+data.samples+
+     ' verified rounds · '+data.holdout+' holdout · separate from live forecast; not guaranteed';
+   byId('directionMeter').querySelector('.meter-track').setAttribute('aria-label',
+       down+' percent historical DOWN frequency, '+up+' percent historical UP frequency');
   }catch(error){
-   byId('meterUpPct').textContent='—';byId('meterDownPct').textContent='—';
-   byId('meterUpFill').style.width='0%';byId('meterDownFill').style.width='0%';
-   note.textContent='Probability unavailable until sufficient verified history passes validation.';
+   clearProbabilities();
+   if(live)note.textContent='Live forecast refreshes every 10s · calibrated percentages unavailable; no made-up odds.';
+  }finally{
+   if(timeout!==null)clearTimeout(timeout);
+   meterInFlight=false;
   }
  }
- document.addEventListener('DOMContentLoaded',function(){
+ document.addEventListener('DOMContentLoaded',()=>{
   updateMeter();
-  setInterval(updateMeter,15000);
+  setInterval(updateMeter,PREDICTION_DISPLAY_MS);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)updateMeter();});
  });
 })();
 </script>
