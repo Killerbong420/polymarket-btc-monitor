@@ -392,7 +392,10 @@ window.btcNoteRequest=function(name,ms,ok){
 </section>
 <div class="card" id="patternPanel" style="border-left:4px solid #e5a45d;margin-top:10px"><div class="label">PATTERN ANALYSIS · SERVER SIGNALS</div><div class="value wait" id="patternName">ANALYZING</div><div class="small" id="patternDetails">Waiting for server pattern analysis</div><div class="small" id="minuteForecast">NEXT 60 SECONDS · Awaiting forecast</div><div class="small" id="minuteReversal">REVERSAL WATCH · Awaiting BRTI evidence</div><p class="small">Pattern analysis continues on the server; no calibrated probabilities.</p></div></div><style>
 /* Preserve hidden nodes for legacy polling code while simplifying the visible UI. */
-#fastPanel,#final15Panel{display:none!important}
+#fastPanel,#final15Panel,#strongPanel,#primaryPanel{display:none!important}
+#terminalQuickCards #fastPanel,#terminalQuickCards #final15Panel,
+#terminalQuickCards #strongPanel,#terminalQuickCards #primaryPanel{display:none!important;visibility:hidden!important}
+#terminalQuickCards #directionMeter{display:block!important;grid-column:1/-1;order:0}
 #directionMeter{border-left:4px solid #42c8a0;margin-top:10px}
 #directionMeter .meter-track{display:flex;height:18px;border-radius:99px;overflow:hidden;background:#39404b}
 #directionMeter .meter-down{background:#dc2626;width:0;transition:width .4s}
@@ -1166,7 +1169,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  chart.insertAdjacentElement('afterend',cards);
  // The reference panel has no live updater; do not show a permanent CONNECTING placeholder.
  if(reference)reference.remove();
- for(const id of ['fastPanel','strongPanel','final15Panel']){const panel=document.getElementById(id);if(panel)cards.append(panel)}
+ for(const id of ['directionMeter','fastPanel','strongPanel','final15Panel']){const panel=document.getElementById(id);if(panel)cards.append(panel)}
  const primary=document.getElementById('currentSignal')?.closest('.card');if(primary){primary.id='primaryPanel';cards.append(primary)}
  const forecast=document.getElementById('futureForecastCard'),history=document.getElementById('serverHistory');
  const shock=document.getElementById('marketShockPanel');
