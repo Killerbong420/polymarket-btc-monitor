@@ -790,9 +790,13 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
    if(!response.ok)throw Error('BRTI tick unavailable');
    const data=await response.json(),d=window.btcServerStatus;
    const daily=data.today_observed;
-   if(daily&&daily.coverage==='since_server_observation'&&/^\\d{4}-\\d{2}-\\d{2}$/.test(daily.date_utc||'')){
+   if(daily&&daily.coverage==='since_server_observation'){
     const high=document.getElementById('brtiTodayHigh'),low=document.getElementById('brtiTodayLow'),note=document.getElementById('brtiTodayCoverage');
-    const fmt=v=>typeof v==='number'&&Number.isFinite(v)&&v>0?'
+    const fmt=v=>typeof v==='number'&&Number.isFinite(v)&&v>0?String.fromCharCode(36)+v.toFixed(2):'—';
+    if(high)high.textContent=fmt(daily.high);
+    if(low)low.textContent=fmt(daily.low);
+    if(note)note.textContent='Official BRTI UTC day '+daily.date_utc+'; observed since server start; earlier daily highs/lows may be missing.';
+   }
    window.btcNoteRequest?.('BRTI tip',Date.now()-started,true);
    if(data.status!=='fresh'||data.source!=='Polymarket US BTC reference / BRTI'||
       !d||d.status!=='running'||d.reference_price?.source!==data.source||data.market!==d.market||!Array.isArray(data.points))return;
