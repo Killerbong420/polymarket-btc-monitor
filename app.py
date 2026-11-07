@@ -1571,6 +1571,43 @@ def _read_status_history():
   _status_cache.update(data=data,at=time.monotonic(),execute_id=id(execute),write_version=_history_write_version)
   return data
 
+from probability_calibration import calibrate as _calibrate_probability
+
+_probability_cache={"at":0.0,"market":None,"gap":None,"data":None}
+
+@app.get("/api/direction-probability")
+def direction_probability():
+ """Forward-safe empirical odds from official BRTI checkpoint gaps and outcomes."""
+ current=state.get("target_behavior") or {}
+ market=state.get("market") or {}
+ slug=market.get("slug") if isinstance(market,dict) else market if isinstance(market,str) else None
+ gap=number(current.get("target_gap_pct"))
+ if current.get("status")!="available" or not current.get("is_reference") or not slug or "btc-updown-15m-" not in slug or gap is None:
+  return {"status":"unavailable","reason":"fresh_official_15m_reference_required"}
+ now=time.monotonic()
+ if (_probability_cache["data"] is not None and _probability_cache["market"]==slug and
+     _probability_cache["gap"]==round(gap,3) and now-_probability_cache["at"]<30):
+  return _probability_cache["data"]
+ try:
+  rows=iter_query_rows("""SELECT market,snapshot_json,winner FROM research_calls
+      WHERE checkpoint='HALFWAY' AND winner IN ('UP','DOWN')
+      ORDER BY created_at ASC LIMIT 10000""")
+  verified=[]
+  for past_market,raw,winner in rows:
+   if not past_market or "btc-updown-15m-" not in past_market or past_market==slug:continue
+   try:
+    snap=json.loads(raw)
+    behavior=snap.get("target_behavior") or {}
+    if behavior.get("status")!="available" or not behavior.get("is_reference"):continue
+    value=number(behavior.get("target_gap_pct"))
+    if value is not None:verified.append((past_market,value,winner))
+   except (ValueError,TypeError,AttributeError):continue
+  result=_calibrate_probability(verified,gap,current_market=slug)
+ except Exception:
+  result={"status":"unavailable","reason":"verified_history_unavailable"}
+ _probability_cache.update(at=now,market=slug,gap=round(gap,3),data=result)
+ return result
+
 @app.get("/api/status")
 def status():
  try:
