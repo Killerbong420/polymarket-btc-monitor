@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import httpx
 from exchange_prices import fetch_snapshot, public_snapshot
 from market_chart_history import record_exchange
+from live_trade_stream import stream_snapshot
 
 FEEDS = [('CoinDesk','https://www.coindesk.com/arc/outboundfeeds/rss/'),
          ('Cointelegraph','https://cointelegraph.com/rss'),
@@ -91,6 +92,70 @@ async def exchange_flow(client, source):
         return summarize_trades(rows,source,time.time())
     except Exception as exc:
         return {'source':source,'status':'unavailable','reason':type(exc).__name__}
+
+def streaming_flow(source, now=None):
+    """Use only currently connected, fresh live executions; report gaps honestly."""
+    now = time.time() if now is None else now
+    sample = stream_snapshot(source, now)
+    if not sample:
+        return None
+    result = summarize_trades(sample["rows"], source, now)
+    if result["status"] != "fresh":
+        return None
+    result["transport"] = "websocket"
+    result["connected_since_epoch"] = sample["connected_since_epoch"]
+    result["latest_trade_age_seconds"] = round(now - sample["latest_trade_epoch"], 2)
+    for seconds in (10, 30):
+        window = result["short_windows"][str(seconds)+"s"]
+        overflow = sample["overflow_epoch"]
+        if (now - sample["connected_since_epoch"] < seconds + 3
+                or (overflow is not None and now - overflow <= seconds)
+                or now - sample["latest_trade_epoch"] > 5):
+            window["status"] = "partial"
+            window["coverage"] = "stream warming, over capacity, or latest trade too old; not complete volume"
+    result["note"] = ("Partial, bounded live exchange execution sample, not the official BRTI or complete/global volume. "
+                      "WebSocket channels may drop trades without notice; observed windows describe coverage only.")
+    return result
+
+
+async def preferred_exchange_flow(client, source):
+    live = streaming_flow(source)
+    if live is not None:
+        return live
+    fallback = await exchange_flow(client, source)
+    fallback["transport"] = "rest_sample"
+    return fallback
+
+
+def public_trade_flow(now=None):
+    """Instant read of stream buffers, falling back to last REST observations."""
+    now = time.time() if now is None else now
+    flow = copy.deepcopy(_state["trade_flow"])
+    by_source = {row.get("source"): row for row in flow.get("exchanges", [])}
+    any_stream = False
+    for source in ("Coinbase", "Kraken"):
+        live = streaming_flow(source, now)
+        if live is not None:
+            by_source[source] = live
+            any_stream = True
+    rows = [by_source.get(source) for source in ("Coinbase", "Kraken")]
+    flow["exchanges"] = [x for x in rows if isinstance(x, dict)]
+    for item in flow["exchanges"]:
+        ts = item.get("latest_trade_epoch")
+        item["age_seconds"] = round(max(0, now-ts)) if ts is not None else None
+        if ts is not None and now-ts > 45:
+            item["status"] = "stale"
+    flow["status"] = ("available" if any(x.get("status") == "fresh" for x in flow["exchanges"])
+                      else "unavailable")
+    flow["transport"] = "websocket_with_rest_fallback" if any_stream else "rest_fallback"
+    if any_stream:
+        flow["fetched_epoch"] = now
+    last_fetch = flow.get("fetched_epoch")
+    flow["age_seconds"] = round(max(0, now-last_fetch)) if last_fetch else None
+    if last_fetch and now-last_fetch > 60:
+        flow["status"] = "stale"
+    return flow
+
 
 async def order_book(client):
     try:
@@ -173,7 +238,7 @@ async def news_feed(client, source, url):
     except Exception as exc:return [],{'source':source,'status':'unavailable','reason':type(exc).__name__}
 
 async def refresh(client, include_news=True):
-    jobs=[exchange_flow(client,'Coinbase'),exchange_flow(client,'Kraken'),order_book(client),fetch_snapshot(client)]
+    jobs=[preferred_exchange_flow(client,'Coinbase'),preferred_exchange_flow(client,'Kraken'),order_book(client),fetch_snapshot(client)]
     if include_news:jobs.extend(news_feed(client,s,u) for s,u in FEEDS)
     results=await asyncio.gather(*jobs)
     now=time.time()
@@ -199,15 +264,12 @@ async def refresh(client, include_news=True):
 def public_intelligence():
     d=copy.deepcopy(_state);now=time.time()
     d['price_comparison']=public_snapshot(d.get('price_comparison') or {},now)
-    for key in ('trade_flow','order_book','news'):
+    d['trade_flow']=public_trade_flow(now)
+    for key in ('order_book','news'):
         item=d[key];ts=item.get('fetched_epoch')
         item['age_seconds']=round(max(0,now-ts)) if ts else None
         if ts and now-ts>(300 if key=='news' else 60):item['status']='stale'
-    for exchange in d['trade_flow'].get('exchanges',[]):
-        ts=exchange.get('latest_trade_epoch')
-        exchange['age_seconds']=round(max(0,now-ts)) if ts else None
-        if ts and now-ts>45:exchange['status']='stale'
-    d['coverage']='BTC/USD last prices from Coinbase, Kraken, Bitstamp, Gemini, Bitfinex, Binance.US; Binance Global and OKX BTC/USDT shown separately. Coinbase/Kraken initiator trade flow, Kraken depth, and selected news. Unavailable venues remain labeled; no full global trade-flow or on-chain coverage.'
+    d['coverage']='BTC/USD last prices from Coinbase, Kraken, Bitstamp, Gemini, Bitfinex, Binance.US; Binance Global and OKX BTC/USDT shown separately. Coinbase/Kraken live observed trade flow with REST fallback, Kraken depth, and selected news. WebSocket gaps are possible; unavailable venues remain labeled; no full global trade-flow or on-chain coverage.'
     return d
 
 async def intelligence_loop():
