@@ -1580,7 +1580,7 @@ def direction_probability():
  """Forward-safe empirical odds from official BRTI checkpoint gaps and outcomes."""
  current=state.get("target_behavior") or {}
  market=state.get("market") or {}
- slug=market.get("slug") if isinstance(market,dict) else None
+ slug=market.get("slug") if isinstance(market,dict) else market if isinstance(market,str) else None
  gap=number(current.get("target_gap_pct"))
  if current.get("status")!="available" or not current.get("is_reference") or not slug or "btc-updown-15m-" not in slug or gap is None:
   return {"status":"unavailable","reason":"fresh_official_15m_reference_required"}
