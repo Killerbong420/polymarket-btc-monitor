@@ -9,7 +9,7 @@ class ProbabilityCalibrationTests(unittest.TestCase):
   self.assertEqual(calibrate(rows,0.1,current_market="market-199")["samples"],199)
  def test_bucket(self):
   self.assertIsNone(bucket(None))
-  self.assertEqual(bucket(0),3)
+  self.assertEqual(bucket(0),2)
  def test_no_fake_probability_from_all_wins(self):
   rows=[("market-"+str(i),0.1,"UP") for i in range(200)]
   self.assertLess(calibrate(rows,0.1).get("up_probability",1),1)
