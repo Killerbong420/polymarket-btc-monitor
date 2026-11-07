@@ -14,8 +14,8 @@ class ChartThirtyFpsTests(unittest.TestCase):
         self.assertIn("tipTicks=[...merged.entries()].sort((a,b)=>a[0]-b[0]).slice(-32);", HTML)
         self.assertNotIn("lastDraw=0;status.textContent", HTML)
 
-    def test_chart_preserves_one_second_verified_price_poll(self):
-        self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},1000)", HTML)
+    def test_chart_preserves_three_second_verified_price_poll(self):
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},3000)", HTML)
         self.assertIn("data.source!=='Polymarket US BTC reference / BRTI'", HTML)
         self.assertIn("if(!verified.length)return;", HTML)
 

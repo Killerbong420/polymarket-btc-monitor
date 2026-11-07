@@ -54,7 +54,7 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn('id="winLossRatio"', self.html)
         self.assertIn('id="winRate"', self.html)
         self.assertIn("d.ai_performance", self.html)
-        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},2000)", self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},4000)", self.html)
 
     def test_lightweight_brtI_line_without_candles(self):
         # Render the official index as a simple line; retain server-side
@@ -77,7 +77,7 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("ext.chart_pattern", self.html)
         self.assertIn("if(statusInFlight)return", self.html)
         self.assertIn("if(fiveBusy||document.hidden)return", self.html)
-        self.assertIn("setInterval(()=>{if(!document.hidden)refreshFive()},2000)", self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshFive()},4000)", self.html)
 
     def test_mobile_layout_uses_compact_order_and_expands_advanced_evidence(self):
         self.assertIn('id="mainTitle"', self.html)
@@ -128,7 +128,7 @@ class TerminalUITest(unittest.TestCase):
 
     def test_chart_one_second_ticks_and_fast_default_ui(self):
         self.assertIn("fetch('/api/market-chart/tip'",self.html)
-        self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},1000)",self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},3000)",self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)draw()},1000)",self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)refreshHistory()},10000)",self.html)
         self.assertIn("if(!force&&nowMillis-lastDraw<1000/30)return",self.html)
@@ -200,7 +200,7 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("if(legacyActive())startLegacy();else stopLegacy()", self.html)
         self.assertIn("for(const which of ['coinbase','kraken'])", self.html)
         self.assertIn("if(legacyActive())update()", self.html)
-        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},2000)", self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},4000)", self.html)
         self.assertIn("renderPersistentSignals(d)", self.html)
         self.assertIn("window.btcPrimaryLocalLive=!!ok", self.html)
 
