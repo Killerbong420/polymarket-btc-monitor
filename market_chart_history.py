@@ -16,6 +16,7 @@ RANGES={"30s":30,"1m":60,"2m":120,"5m":300,"30m":1800,"60m":3600}
 _lock=RLock()
 _brti={}
 _usd={}
+_day_extrema={}
 _STALE=45
 
 def _positive(v):
@@ -36,6 +37,15 @@ def record_brti(points, source, now=None):
    v=_positive(p[1])
    if v is not None and math.isfinite(t) and now-3600<=t<=now+2 and t.is_integer():
     _brti[int(t)]=round(v,2)
+    day=datetime.fromtimestamp(t,timezone.utc).strftime('%Y-%m-%d')
+    entry=_day_extrema.setdefault(day,{'high':v,'low':v,'first_epoch':int(t),'last_epoch':int(t)})
+    entry['high']=max(entry['high'],v)
+    entry['low']=min(entry['low'],v)
+    entry['first_epoch']=min(entry['first_epoch'],int(t))
+    entry['last_epoch']=max(entry['last_epoch'],int(t))
+  today=datetime.fromtimestamp(now,timezone.utc).strftime('%Y-%m-%d')
+  for day in list(_day_extrema):
+   if day!=today:del _day_extrema[day]
   for t in list(_brti):
    if t<now-3600 or t>now+2:del _brti[t]
 
@@ -91,6 +101,21 @@ def snapshot(range_id, round_start=None, round_end=None, market=None, now=None):
          "source":"Polymarket US official BRTI index ticks + observed BTC/USD public venue spot price samples",
          "limitations":"Last-exchange-price receipt time is not guaranteed trade execution time. Gaps not interpolated. Prior rounds and 30/60m windows accumulate in memory only after server startup. Only official BRTI determines settlement."}
 
+def today_observed_extrema(now=None):
+ """UTC day-to-date extrema of *observed official* ticks, not guaranteed full-day OHLC.
+
+ On restart the sample history resets; callers must show coverage and avoid
+ presenting these extrema as complete exchange-wide daily highs/lows.
+ """
+ now=time.time() if now is None else now
+ day=datetime.fromtimestamp(now,timezone.utc).strftime('%Y-%m-%d')
+ with _lock:
+  row=_day_extrema.get(day)
+  if not row:return {'date_utc':day,'high':None,'low':None,'first_epoch':None,'last_epoch':None,'coverage':'since_server_observation'}
+  return {'date_utc':day,'high':round(row['high'],2),'low':round(row['low'],2),
+          'first_epoch':row['first_epoch'],'last_epoch':row['last_epoch'],
+          'coverage':'since_server_observation'}
+
 def latest_tip(now=None):
  """Return a tiny snapshot of observed index ticks; no invented intervening prices."""
  now=time.time() if now is None else now
@@ -100,7 +125,8 @@ def latest_tip(now=None):
  return {"status":"fresh" if age is not None and 0<=age<=15 else "stale",
          "points":[list(tick) for tick in ticks[-12:]],
          "age_seconds":age,"server_epoch":round(now,3),
-         "source":"Polymarket US BTC reference / BRTI"}
+         "source":"Polymarket US BTC reference / BRTI",
+         "today_observed":today_observed_extrema(now)}
 
 # Isolated 1-second chart sampler. The official market and target remain governed by
 # the slower prediction loop; this path ONLY records genuine published reference ticks.

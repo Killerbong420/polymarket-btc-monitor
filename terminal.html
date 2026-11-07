@@ -375,6 +375,10 @@ window.btcNoteRequest=function(name,ms,ok){
 <div class="pm-head"><span>POLYMARKET US · 15M REFERENCE</span><span class="pm-feed" id="pmApiFeed">CONNECTING</span></div>
 <div class="pm-numbers"><div><small>OFFICIAL PRICE TO BEAT</small><strong id="pmApiTarget">—</strong></div><div><small>BRTI REFERENCE</small><strong id="pmApiPrice">—</strong></div><div><small>ROUND REMAINING</small><strong id="pmApiCountdown">—</strong></div></div>
 <div class="pm-detail" id="pmApiInfo" aria-live="polite">Awaiting verified current-round index observations</div></section>
+<div id="brtiDailyExtrema" aria-label="Today's observed official BRTI high and low" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
+<div style="border:1px solid #2d594b;border-radius:10px;padding:10px;background:#102b28"><div class="label">TODAY'S OBSERVED HIGH</div><strong id="brtiTodayHigh" class="up" style="font-size:clamp(16px,3vw,23px)">—</strong></div>
+<div style="border:1px solid #613a46;border-radius:10px;padding:10px;background:#291b29"><div class="label">TODAY'S OBSERVED LOW</div><strong id="brtiTodayLow" class="down" style="font-size:clamp(16px,3vw,23px)">—</strong></div>
+<div id="brtiTodayCoverage" class="small" style="grid-column:1/-1">Official BRTI · UTC day · observed since server start; may not include earlier prices.</div></div>
 <section id="brtiLinePanel" aria-label="Current 15-minute official BRTI price path">
   <div id="brtiLineHead"><span>OFFICIAL BRTI · 15-MINUTE PRICE PATH</span><span id="brtiLineStatus" aria-live="polite">Waiting for verified index ticks</span></div>
   <div id="brtiRangeTabs" role="group" aria-label="Bitcoin chart timeframe">
@@ -785,6 +789,14 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
    const response=await fetch('/api/market-chart/tip',{cache:'no-store',signal:ctrl.signal});
    if(!response.ok)throw Error('BRTI tick unavailable');
    const data=await response.json(),d=window.btcServerStatus;
+   const daily=data.today_observed;
+   if(daily&&daily.coverage==='since_server_observation'){
+    const high=document.getElementById('brtiTodayHigh'),low=document.getElementById('brtiTodayLow'),note=document.getElementById('brtiTodayCoverage');
+    const fmt=v=>typeof v==='number'&&Number.isFinite(v)&&v>0?String.fromCharCode(36)+v.toFixed(2):'—';
+    if(high)high.textContent=fmt(daily.high);
+    if(low)low.textContent=fmt(daily.low);
+    if(note)note.textContent='Official BRTI UTC day '+daily.date_utc+'; observed since server start; earlier daily highs/lows may be missing.';
+   }
    window.btcNoteRequest?.('BRTI tip',Date.now()-started,true);
    if(data.status!=='fresh'||data.source!=='Polymarket US BTC reference / BRTI'||
       !d||d.status!=='running'||d.reference_price?.source!==data.source||data.market!==d.market||!Array.isArray(data.points))return;
@@ -1391,4 +1403,3 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshRoundTiles()});
 })();
 </script></body></html>
-
