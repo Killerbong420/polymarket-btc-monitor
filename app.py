@@ -210,12 +210,25 @@ def parse_json(v):
  if isinstance(v,list): return v
  try: return json.loads(v)
  except (ValueError,TypeError): return []
+# The Polymarket US contract does not need another event lookup every 5s.
+# Only cache a verified official target for 20s, and never across market rounds.
+# BRTI reference ticks and contract quotes remain uncached and fetched live.
+_market_15m_cache={"event_slug":None,"market":None,"checked_monotonic":0.0}
+_MARKET_LOOKUP_CACHE_SECONDS=20
+
 async def market_15m(client):
  # Only accept a real Polymarket US contract returned for the current 15m event.
  from datetime import timedelta
  now=datetime.now(timezone.utc)
  start=now.replace(minute=(now.minute//15)*15,second=0,microsecond=0)
  event_slug="btc-updown-15m-"+start.strftime("%Y-%m-%d-%H%Mz").lower()
+ round_end=(start+timedelta(minutes=15)).timestamp()
+ cached=_market_15m_cache
+ elapsed=time.monotonic()-cached["checked_monotonic"]
+ if (cached["event_slug"]==event_slug and isinstance(cached["market"],dict)
+     and cached["market"].get("end")==round_end
+     and 0<=elapsed<_MARKET_LOOKUP_CACHE_SECONDS and now.timestamp()<round_end):
+  return dict(cached["market"]),None
  try:
   response=await client.get("https://gateway.polymarket.us/v1/events/slug/"+event_slug,timeout=8)
   if response.status_code!=200: return None,"event_http_"+str(response.status_code)
@@ -227,9 +240,15 @@ async def market_15m(client):
    if not isinstance(market,dict): continue
    slug=market.get("slug") or market.get("marketSlug")
    if slug not in (event_slug,"cpc-"+event_slug): continue
-   if time.time()>=(start+timedelta(minutes=15)).timestamp():
+   if time.time()>=round_end:
     return None,"round_expired_during_lookup"
-   return {**market,"slug":slug,"end":(start+timedelta(minutes=15)).timestamp()},None
+   found={**market,"slug":slug,"end":round_end}
+   terms=market.get("assetPriceTerms")
+   official_target=number(terms.get("priceToBeat")) if isinstance(terms,dict) else None
+   # Missing or invalid official targets must be retried on the next cycle.
+   if official_target is not None and official_target>0:
+    _market_15m_cache.update(event_slug=event_slug,market=found,checked_monotonic=time.monotonic())
+   return found,None
   return None,"event_has_no_matching_15m_contract"
  except Exception as exc: return None,type(exc).__name__
 
