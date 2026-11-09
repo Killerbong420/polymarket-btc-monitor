@@ -128,6 +128,7 @@ class MinuteEvidenceTests(unittest.TestCase):
     def test_persistent_capture_once_per_market_minute_with_no_rewrite(self):
         sample=make()
         with patch.object(app, "_minute_research_saved_key", None), \
+             patch.object(app, "_minute_research_prune_at", 10**12), \
              patch.object(app, "execute") as execute:
             self.assertTrue(app.save_minute_observation(sample))
             self.assertFalse(app.save_minute_observation(sample))
