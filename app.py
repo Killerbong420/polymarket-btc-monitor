@@ -14,6 +14,7 @@ from price_action import analyze_price_action, shadow_price_action
 from bot_library import study_strategies, consensus
 from settlement_forecast import forecast_settlement, regime_shadow_forecast
 from brti_volatility_shadow import brti_volatility_shadow, evaluate_shadow
+from minute_research import minute_observation, book_freshness, evaluate_minutes
 from forecast_audit import summarize_forecast_audit
 from forecast_guard import anchored_shadow_forecast, validate_official_target
 from market_shock import measure_market_shock
@@ -118,6 +119,10 @@ def setup():
   except Exception as exc:
    if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower(): raise
  execute("CREATE INDEX IF NOT EXISTS research_market_idx ON research_calls(market)")
+ execute("""CREATE TABLE IF NOT EXISTS minute_research (
+   id TEXT PRIMARY KEY, market TEXT NOT NULL, minute_slot INTEGER NOT NULL,
+   observed_epoch REAL NOT NULL, payload_json TEXT NOT NULL)""")
+ execute("CREATE INDEX IF NOT EXISTS minute_research_time_idx ON minute_research(observed_epoch DESC)")
  paper.setup(execute)
  execute("""CREATE TABLE IF NOT EXISTS polymarket_quote_samples (
    id TEXT PRIMARY KEY, market TEXT NOT NULL,sampled_epoch REAL NOT NULL,
@@ -182,6 +187,41 @@ def first_five_quick_report():
  summary["recent"]=[dict(zip(("market","minute_slot","captured_epoch","direction",
    "quality","result","starting_reference","final_reference"),r)) for r in recent]
  return summary
+
+_minute_research_saved_key=None
+_minute_research_retry_monotonic=0.0
+_minute_research_prune_at=0.0
+
+
+def save_minute_observation(sample):
+ """One immutable row per 15m market/minute, no backfills or overwrites."""
+ global _minute_research_saved_key, _minute_research_prune_at
+ if not isinstance(sample,dict) or sample.get("status")!="captured":
+  return False
+ market=sample.get("market")
+ slot=sample.get("minute_slot")
+ if not isinstance(market,str) or not isinstance(slot,int) or not 0<=slot<15:
+  return False
+ key=market+":"+str(slot)
+ if key==_minute_research_saved_key:
+  return False
+ execute("""INSERT INTO minute_research
+   (id,market,minute_slot,observed_epoch,payload_json) VALUES (?,?,?,?,?)
+   ON CONFLICT(id) DO NOTHING""",
+   (key,market,slot,sample["observed_epoch"],json.dumps(sample,allow_nan=False)))
+ _minute_research_saved_key=key
+ # Bound the new high-frequency archive without modifying existing historical
+ # 15m research or win/loss records. One indexed cleanup per hour, 30-day horizon.
+ now=time.time()
+ if now-_minute_research_prune_at>=3600:
+  try:
+   execute("DELETE FROM minute_research WHERE observed_epoch<?",(now-30*86400,))
+   _minute_research_prune_at=now
+  except Exception:
+   # Cleanup failure must not affect current official-index predictions.
+   pass
+ return True
+
 
 _last_quote_cleanup=0.0
 def capture_polymarket_quote(quote):
@@ -998,6 +1038,27 @@ async def loop():
       state["quote_storage_error"]=type(quote_exc).__name__+": "+str(quote_exc)[:150]
      state["target_validation"]=target_validation
      d["target_validation"]=target_validation
+     # Research-only minute capture. Compare live feature inputs at decision
+     # time, independently verify quote freshness, and freeze every market
+     # minute without any extra upstream API request or changes to calls.
+     research_now=time.time()
+     quote_guard=book_freshness(quote,slug,reference,research_now)
+     state["market_quote_guard"]={**quote_guard,"market":slug}
+     sample=minute_observation(slug,left15,target,reference,behavior,
+                               price_path,quote,research_now,target_validation)
+     state["minute_research_latest"]={k:sample.get(k) for k in
+        ("status","market","market_minute","input_parity","reason",
+         "gap_pct_from_official","gap_pct_from_live",
+         "theoretical_up_probability","version")}
+     global _minute_research_retry_monotonic
+     if sample.get("status")=="captured" and time.monotonic()>=_minute_research_retry_monotonic:
+      try:
+       await asyncio.to_thread(save_minute_observation,sample)
+       state["minute_research_write_error"]=None
+      except Exception as minute_exc:
+       # Never block or disable the current official BRTI prediction.
+       state["minute_research_write_error"]=type(minute_exc).__name__
+       _minute_research_retry_monotonic=time.monotonic()+20
      captured={r[0] for r in (await asyncio.to_thread(execute, "SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True))}
      plan=checkpoint_plan(left15,captured)
      state["missed_checkpoints"]=plan["missed"]
@@ -1013,7 +1074,7 @@ async def loop():
      for key in ("phase","seconds_left","score"): state.pop(key,None)
      state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No verified Polymarket US 15-minute market: "+str(reason15))
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
-     state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},settlement_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},quick_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},guarded_primary={"status":"unavailable","direction":"WAIT"},manual_entry_review={"status":"unavailable"},reversal_evidence={"status":"unavailable"},missed_checkpoints=[])
+     state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},settlement_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},quick_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},guarded_primary={"status":"unavailable","direction":"WAIT"},manual_entry_review={"status":"unavailable"},reversal_evidence={"status":"unavailable"},missed_checkpoints=[],market_quote_guard={"status":"unavailable","reason":"market_unavailable"},minute_research_latest={"status":"unavailable","reason":"market_unavailable"})
      state["ai_disabled"]=True
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
     # Historical settlement can involve 30 remote rounds and must not
@@ -1037,6 +1098,8 @@ async def loop():
     for key in ("phase","seconds_left","score"): state.pop(key,None)
     state.update(status="feed error",signal="WAIT",flip="WAIT",quick_forecast={"status":"unavailable","reason":"Monitoring feed error"},error=type(e).__name__+": "+str(e)[:200],updated=datetime.now(timezone.utc).isoformat())
     state.update(reference_price={"status":"unavailable"},market_quote={"status":"unavailable"},
+                 market_quote_guard={"status":"unavailable","reason":"monitor_feed_error"},
+                 minute_research_latest={"status":"unavailable","reason":"monitor_feed_error"},
                  settlement_forecast={"status":"unavailable","reason":"Monitoring feed error"},
                  guarded_primary={"status":"unavailable","direction":"WAIT"},
                  manual_entry_review={"status":"unavailable"})
@@ -1322,6 +1385,34 @@ def brti_volatility_shadow_performance():
   return evaluate_shadow(rows)
  except Exception:
   return JSONResponse({"status":"unavailable","reason":"Official settled research data unavailable"},status_code=503)
+
+
+@app.get("/api/research/minute-calibration")
+def minute_calibration_report():
+ """Prospective per-minute reliability, only after official BRTI settlement."""
+ try:
+  rows=iter_query_rows("""SELECT m.market,m.minute_slot,m.payload_json,v.winner
+   FROM minute_research m
+   JOIN (
+    SELECT market,MIN(winner) AS winner FROM research_calls
+    WHERE winner IN ('UP','DOWN')
+      AND final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
+    GROUP BY market HAVING MIN(winner)=MAX(winner)
+   ) v ON v.market=m.market
+   ORDER BY m.observed_epoch DESC LIMIT 10000""")
+  return evaluate_minutes(rows)
+ except Exception:
+  return JSONResponse({"status":"unavailable","reason":"Official minute research unavailable"},status_code=503)
+
+
+@app.get("/api/research/live-integrity")
+def live_integrity():
+ """Latest in-memory source/quote integrity without database I/O."""
+ return {"market":state.get("market"),
+         "quote":state.get("market_quote_guard") or {"status":"unavailable"},
+         "minute":state.get("minute_research_latest") or {"status":"collecting"},
+         "write_error":state.get("minute_research_write_error"),
+         "research_only":True,"orders_enabled":False}
 
 
 @app.get("/api/price-forecast/accuracy")
