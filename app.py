@@ -13,6 +13,7 @@ from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, ta
 from price_action import analyze_price_action, shadow_price_action
 from bot_library import study_strategies, consensus
 from settlement_forecast import forecast_settlement, regime_shadow_forecast
+from brti_volatility_shadow import brti_volatility_shadow, evaluate_shadow
 from forecast_audit import summarize_forecast_audit
 from forecast_guard import anchored_shadow_forecast, validate_official_target
 from market_shock import measure_market_shock
@@ -826,6 +827,7 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  calls["PRICE_PATH"]={"direction":path.get("projected_direction") if path.get("status")=="available" and path.get("projected_direction") in ("UP","DOWN") else "WAIT",
   "source":path.get("version"),"confidence":"UNRATED","forecast_final_mean_usd":path.get("forecast_final_mean_usd"),
   "reason":"Independent future BRTI final-minute projection, not the current target side"}
+ calls["BRTI_VOL_SHADOW"]=brti_volatility_shadow(frozen.get("reference_price"),path,target,left,frozen.get("target_validation"))
  regime=frozen.get("time_regime_shadow") or {}
  calls["REGIME_SHADOW"]={"direction":regime.get("projected_direction") if regime.get("status")=="available" else "WAIT",
   "source":regime.get("version"),"confidence":"UNRATED","forecast_final_mean_usd":regime.get("forecast_final_mean_usd"),
@@ -1308,6 +1310,19 @@ def guarded_performance():
       FROM research_calls ORDER BY created_at DESC LIMIT 10000""")
   return evaluate_guarded(rows)
  except Exception:return JSONResponse({"status":"unavailable","reason":"Guarded audit database unavailable"},status_code=503)
+
+@app.get("/api/research/brti-volatility-shadow")
+def brti_volatility_shadow_performance():
+ """Read-only Brier audit of prospectively frozen BRTI theoretical baseline."""
+ try:
+  rows=iter_query_rows("""SELECT market,checkpoint,calls_json,winner FROM research_calls
+   WHERE winner IN ('UP','DOWN')
+   AND final_reference_source='OFFICIAL_MARKET_SETTLEMENT'
+   ORDER BY created_at DESC LIMIT 10000""")
+  return evaluate_shadow(rows)
+ except Exception:
+  return JSONResponse({"status":"unavailable","reason":"Official settled research data unavailable"},status_code=503)
+
 
 @app.get("/api/price-forecast/accuracy")
 def price_forecast_accuracy():
