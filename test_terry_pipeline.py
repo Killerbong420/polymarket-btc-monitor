@@ -23,7 +23,9 @@ class TerryPipelineTests(unittest.TestCase):
             return result.fetchall() if fetch else None
         self.execute = execute
         tc._setup_table(self.execute)
-        self.now = time.time()
+        # Anchor within a minute: now+4 must remain in the same bucket.
+        # Wall-clock timing at :58/:59 previously made this test flaky.
+        self.now = float((int(time.time()) // 60) * 60 + 10)
         self.market = "cpc-btc-updown-15m-2026-11-09-1500z"
         self.provider = {"market": self.market, "horizon": "15m",
                          "window_end": ts(self.now + 480),
