@@ -42,17 +42,36 @@ class LibraryTests(unittest.TestCase):
         # The earlier snapshot must yield identical decisions when replayed.
         self.assertEqual(early, study_strategies(with_future[:-1]))
 
-    def test_bots_not_synonymous_with_ai(self):
-        self.assertEqual(consensus({"AI":{"direction":"UP","source":"AI_REVIEW"}})["direction"],"WAIT")
-        self.assertEqual(consensus({"AI":{"direction":"UP","source":"INDICATORS_FALLBACK"},
-            "BOT_MACD":{"direction":"UP"},"PRICE_ACTION":{"direction":"UP"}})["direction"],"WAIT")
-        calls={"AI":{"direction":"UP","source":"AI_REVIEW"},
-               "BOT_MACD":{"direction":"UP"},"PRICE_ACTION":{"direction":"UP"}}
-        self.assertEqual(consensus(calls)["direction"],"UP")
-        calls["BOT_BOLLINGER"]={"direction":"DOWN"}
-        self.assertEqual(consensus(calls)["direction"],"WAIT")
-        calls["BOT_BOLLINGER"]["direction"]="WAIT"
-        self.assertEqual(consensus(calls)["direction"],"UP")
+    def test_no_ai_required_for_research_consensus(self):
+        from bot_library import VERSION, CONSENSUS_VERSION
+        self.assertEqual(consensus({"AI": {"direction": "UP", "source": "AI_REVIEW"}})["direction"], "WAIT")
+        valid = {"BOT_MACD": {"direction": "UP", "source": VERSION},
+                 "PRICE_ACTION": {"direction": "UP", "source": "PRICE_ACTION_V1"}}
+        baseline = consensus(valid)
+        self.assertEqual(baseline["direction"], "UP")
+        self.assertEqual(baseline["source"], CONSENSUS_VERSION)
+        self.assertFalse(baseline["calibrated_probability"])
+        self.assertTrue(baseline["research_only"])
+        self.assertEqual(baseline, consensus({**valid, "AI": {"direction": "DOWN", "source": "AI_REVIEW"}}))
+        self.assertEqual(baseline, consensus({**valid, "AI": {"direction": "UP", "source": "INDICATORS_FALLBACK"}}))
+
+    def test_conflicting_stale_and_correlated_bots_abstain(self):
+        from bot_library import VERSION
+        trend = {"BOT_MACD": {"direction": "UP", "source": VERSION},
+                 "BOT_SUPERTREND": {"direction": "UP", "source": VERSION}}
+        correlated = consensus(trend)
+        self.assertEqual(correlated["direction"], "WAIT")
+        self.assertIn("overlapping", correlated["reason"])
+        self.assertEqual(consensus({**trend, "PRICE_ACTION": {"direction": "DOWN", "source": "PRICE_ACTION_V1"}})["direction"], "WAIT")
+        self.assertEqual(consensus({**trend, "PRICE_ACTION": {"direction": "UP", "source": "PRICE_ACTION_ABSTAIN"}})["direction"], "WAIT")
+        self.assertEqual(consensus({"BOT_MACD": {"direction": "UP", "source": "BOT_STALE"},
+                                    "PRICE_ACTION": {"direction": "UP", "source": "PRICE_ACTION_V1"}})["direction"], "WAIT")
+        confirmed = consensus({**trend, "PRICE_ACTION": {"direction": "UP", "source": "PRICE_ACTION_V1"}})
+        self.assertEqual(confirmed["direction"], "UP")
+        self.assertEqual(confirmed["eligible_votes"], 3)
+        self.assertEqual(consensus({"BOT_BOLLINGER": {"direction": "DOWN", "source": VERSION},
+                                    "PRICE_ACTION": {"direction": "DOWN", "source": "PRICE_ACTION_V1"}})["direction"], "DOWN")
+        self.assertEqual(consensus(None)["direction"], "WAIT")
 
     def test_context_only_and_source_provenance(self):
         p=analyze_price_action(candles())

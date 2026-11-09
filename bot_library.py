@@ -106,25 +106,53 @@ def study_strategies(candles, source="external-exchange-1m"):
     }
 
 
+
+CONSENSUS_VERSION = "independent-bot-consensus-v2"
+
+
 def consensus(calls):
-    """Optional research-only multi-bot vote, no hindsight weighting.
-    Requires AI plus at least two non-AI independent signals agreeing. Else WAIT.
+    """Forward-only vote across validated exchange-candle research signals.
+
+    AI is deliberately excluded: the app has disabled it. Require two agreeing
+    signals, no contrary votes, and at least one vote outside the closely
+    correlated MACD/Supertrend trend pair. Unrated research, NOT a calibrated
+    BRTI settlement prediction or executable trade instruction.
     """
-    ai = calls.get("AI") or {}
-    if ai.get("source") != "AI_REVIEW" or ai.get("direction") not in ("UP", "DOWN"):
-        return _call("BOT_CONSENSUS", "WAIT", "No genuine AI review")
+    calls = calls if isinstance(calls, dict) else {}
     names = ("BOT_MACD", "BOT_BOLLINGER", "BOT_SUPERTREND", "PRICE_ACTION")
-    votes = [(name, (calls.get(name) or {}).get("direction")) for name in names]
-    good = [(name, v) for name, v in votes if v in ("UP", "DOWN")]
-    if len(good) < 2:
-        return _call("BOT_CONSENSUS", "WAIT", "Fewer than two independent research bot calls",
-                     total_votes=len(good))
-    up = sum(v == "UP" for _, v in good)
-    down = len(good)-up
-    chosen = ai["direction"]
-    if (chosen == "UP" and up < 2) or (chosen == "DOWN" and down < 2) or min(up,down) > 0:
-        return _call("BOT_CONSENSUS", "WAIT", "Bot votes disagree with AI or each other",
-                     votes_up=up, votes_down=down)
-    return _call("BOT_CONSENSUS", chosen,
-                 "Genuine AI plus independent price-action bots agree; research only",
-                 votes_up=up, votes_down=down)
+    votes = []
+    for name in names:
+        call = calls.get(name)
+        if not isinstance(call, dict):
+            continue
+        # Stale/unknown provenance may never contribute a directional vote.
+        expected = "PRICE_ACTION_V1" if name == "PRICE_ACTION" else VERSION
+        if call.get("source") != expected:
+            continue
+        if call.get("direction") in ("UP", "DOWN"):
+            votes.append((name, call["direction"]))
+
+    up = sum(v == "UP" for _, v in votes)
+    down = len(votes) - up
+    side = "UP" if up > 0 and down == 0 else "DOWN" if down > 0 and up == 0 else "WAIT"
+    different_family = any(name in ("BOT_BOLLINGER", "PRICE_ACTION") for name, _ in votes)
+    if up and down:
+        reason = "Independent research signals disagree"
+        side = "WAIT"
+    elif len(votes) < 2:
+        reason = "Fewer than two fresh eligible research signals"
+        side = "WAIT"
+    elif not different_family:
+        reason = "Only overlapping momentum/trend evidence; independent confirmation required"
+        side = "WAIT"
+    else:
+        reason = "Unanimous eligible research votes across at least two strategy families"
+
+    return {
+        "direction": side, "source": CONSENSUS_VERSION,
+        "model_version": CONSENSUS_VERSION, "confidence": "UNRATED",
+        "reason": reason, "votes_up": up, "votes_down": down,
+        "eligible_votes": len(votes), "voters": [name for name, _ in votes],
+        "calibrated_probability": False, "research_only": True,
+        "note": "Independent completed-exchange-candle vote, not official BRTI outcome odds; no AI, no orders."
+    }
