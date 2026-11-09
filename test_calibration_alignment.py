@@ -27,7 +27,8 @@ class TimeMatchedCalibrationTests(unittest.TestCase):
         for remaining in (899, 451, 389, 180, 1, None):
             self.assertEqual(match_halfway_live_state(beh, ref, remaining, ts, 1_800_000_002)["reason"],
                              "no_same_time_checkpoint_history")
-        self.assertEqual(match_halfway_live_state(beh, ref, 450, ts, 1_800_000_002)["reason"], "market_clock_mismatch")
+        inconsistent={**beh, "elapsed_seconds": 520}
+        self.assertEqual(match_halfway_live_state(inconsistent, ref, 450, ts, 1_800_000_002)["reason"], "market_clock_mismatch")
 
     def test_reject_stale_official_reference_and_stale_server_cycle(self):
         beh, ref, left, ts = baseline()
@@ -70,9 +71,9 @@ class TimeMatchedCalibrationTests(unittest.TestCase):
         hist_ok = {"target_behavior":beh,"reference_price":ref,"seconds_left":left}
         hist_wrong = {**hist_ok,"seconds_left":700}
         hist_stale = {**hist_ok,"reference_price":{**ref,"source":"Coinbase spot"}}
-        rows=[("past-good",json.dumps(hist_ok),"UP"),
-              ("past-early",json.dumps(hist_wrong),"DOWN"),
-              ("past-spot",json.dumps(hist_stale),"DOWN")]
+        rows=[("btc-updown-15m-2026-11-08-2300z",json.dumps(hist_ok),"UP"),
+              ("btc-updown-15m-2026-11-07-2300z",json.dumps(hist_wrong),"DOWN"),
+              ("btc-updown-15m-2026-11-06-2300z",json.dumps(hist_stale),"DOWN")]
         with patch.object(app,"state",present),patch("app.time.time",return_value=1_800_000_002),\
              patch.object(app,"iter_query_rows",return_value=rows),\
              patch.object(app,"_calibrate_probability",return_value={"status":"unavailable","samples":1}) as cal:
@@ -84,7 +85,7 @@ class TimeMatchedCalibrationTests(unittest.TestCase):
         self.assertEqual(result["checkpoint"],"HALFWAY")
         self.assertEqual(result["seconds_left_band"],[390,450])
         self.assertEqual(result["alignment"],"same_one_minute_checkpoint_band")
-        self.assertEqual(cal.call_args.args[0],[("past-good",.1,"UP")])
+        self.assertEqual(cal.call_args.args[0],[("btc-updown-15m-2026-11-08-2300z",.1,"UP")])
 
 
 if __name__ == "__main__":
