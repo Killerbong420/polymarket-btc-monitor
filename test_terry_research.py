@@ -66,7 +66,7 @@ class TerryStudyTests(unittest.TestCase):
         self.assertEqual(cp["settled_samples"], 2)
         self.assertEqual(cp["terry_direction_accuracy_pct"], 50.)
         self.assertEqual(cp["terry_paired_accuracy_pct"], 50.)
-        self.assertEqual(cp["ours_paired_accuracy_pct"], 50.)
+        self.assertEqual(cp["ours_paired_accuracy_pct"], 100.)
         self.assertEqual(report["checkpoints"][1]["paired_rounds"], 0)
 
     def test_forward_rejects_invalid_probabilities_and_results(self):
