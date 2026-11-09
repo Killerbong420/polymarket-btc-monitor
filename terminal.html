@@ -421,6 +421,35 @@ window.btcNoteRequest=function(name,ms,ok){
  <div class="small" id="meterNote">Probability unavailable: the current forecast does not provide calibrated UP/DOWN percentages. No invented odds are shown.</div>
 </div>
 
+<section class="card" id="terryCallsPanel" aria-label="Independent TerryCalls 15-minute comparison" style="margin-top:10px;border-left:4px solid #6884cd">
+ <div class="label">TERRYCALLS · INDEPENDENT 15M COMPARISON</div>
+ <div id="terryStatus" style="font-size:20px;font-weight:750;margin:10px 0">Connecting to TerryCalls…</div>
+ <div id="terryChances" class="small">Provider's live estimated chances: —</div>
+ <div id="terryComparison" class="small" style="margin-top:7px">Our model comparison: —</div>
+ <div id="terryAccuracy" class="small" style="margin-top:7px">Paired results: collecting</div>
+ <div class="small" style="margin-top:8px">Terry's estimates are separate from our forecast and never alter official Polymarket BRTI data. Calls by <a href="https://terrycalls.com" target="_blank" rel="noopener noreferrer">TerryCalls</a>.</div>
+</section>
+<script>
+(()=>{
+ const element=id=>document.getElementById(id);
+ function renderTerry(){
+   const data=window.btcServerStatus?.terry_calls||{};
+   const active=data.status==='live'||data.status==='waiting';
+   const call=data.terry_call;
+   const side=call?.side;
+   element('terryStatus').textContent=active?(side?'Terry: '+side+' · '+(call.chance_pct==null?'chance not supplied':call.chance_pct+'% at call'):'Terry: waiting to call this round'):'TerryCalls: '+String(data.status||'connecting').replaceAll('_',' ');
+   element('terryStatus').style.color=side==='UP'?'#4ade80':side==='DOWN'?'#f87171':'#adbacc';
+   const chances=data.terry_chance_now||{};
+   element('terryChances').textContent=active&&chances.up_pct!=null&&chances.down_pct!=null?'Terry estimated now · UP '+chances.up_pct+'% / DOWN '+chances.down_pct+'%':'Terry estimated chances: unavailable';
+   element('terryComparison').textContent=active&&side&&data.our_call?.side?'Our guarded forecast: '+data.our_call.side+' · '+data.comparison+' · same 15m market':'Comparison: awaiting both independent calls on the same active 15m round';
+   const h=data.comparison_history||{},pct=n=>n==null?'—':n+'%';
+   element('terryAccuracy').textContent=h.settled?'Paired settled ('+h.settled+'): ours '+pct(h.ours_accuracy_pct)+' · Terry '+pct(h.terry_accuracy_pct)+' · agreements '+(h.agree||0)+'/'+(h.paired||0):'Paired accuracy: collecting same-round samples; no past results yet';
+ }
+ window.addEventListener('btc-status-updated',renderTerry);
+ renderTerry();
+})();
+</script>
+
 <script>
 /* The underlying BRTI forecast already runs at ~5s cadence.
    Present the latest verified direction every 10s without additional model calls. */
