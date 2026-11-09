@@ -190,11 +190,12 @@ def first_five_quick_report():
 
 _minute_research_saved_key=None
 _minute_research_retry_monotonic=0.0
+_minute_research_prune_at=0.0
 
 
 def save_minute_observation(sample):
  """One immutable row per 15m market/minute, no backfills or overwrites."""
- global _minute_research_saved_key
+ global _minute_research_saved_key, _minute_research_prune_at
  if not isinstance(sample,dict) or sample.get("status")!="captured":
   return False
  market=sample.get("market")
@@ -209,6 +210,16 @@ def save_minute_observation(sample):
    ON CONFLICT(id) DO NOTHING""",
    (key,market,slot,sample["observed_epoch"],json.dumps(sample,allow_nan=False)))
  _minute_research_saved_key=key
+ # Bound the new high-frequency archive without modifying existing historical
+ # 15m research or win/loss records. One indexed cleanup per hour, 30-day horizon.
+ now=time.time()
+ if now-_minute_research_prune_at>=3600:
+  try:
+   execute("DELETE FROM minute_research WHERE observed_epoch<?",(now-30*86400,))
+   _minute_research_prune_at=now
+  except Exception:
+   # Cleanup failure must not affect current official-index predictions.
+   pass
  return True
 
 
