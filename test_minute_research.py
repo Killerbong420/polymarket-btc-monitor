@@ -74,6 +74,7 @@ class MinuteEvidenceTests(unittest.TestCase):
         bad_path=make(path={**path(),"target_usd":99.1})
         self.assertEqual(bad_path["input_parity"],"MISMATCH")
         self.assertEqual(make(validation={"material":True})["input_parity"],"MISMATCH")
+        self.assertEqual(make(path={"status":"unavailable"})["input_parity"],"UNAVAILABLE")
 
     def test_quote_stale_crossed_wrong_market_and_rapid_move(self):
         self.assertEqual(book_freshness(quote(),SLUG,reference(),NOW)["status"],"fresh")
@@ -84,7 +85,7 @@ class MinuteEvidenceTests(unittest.TestCase):
         self.assertEqual(book_freshness(quote(),"different",reference(),NOW)["status"],"unavailable")
         self.assertEqual(book_freshness({**quote(),"fetched_epoch":NOW+10},SLUG,reference(),NOW)["status"],"unavailable")
         points=[(int(NOW)-15,99.80),(int(NOW)-2,100.0)]
-        jump={**reference(),"points":points}
+        jump={**reference(),"points":points,"price_epoch":int(NOW)-2}
         q=book_freshness(quote(),SLUG,jump,NOW)
         self.assertEqual(q["status"],"rapid_move_recheck")
         self.assertFalse(q["rapid_move_is_quote_staleness"])
@@ -94,17 +95,25 @@ class MinuteEvidenceTests(unittest.TestCase):
         valid=make()
         wrong={**valid,"input_parity":"MISMATCH","theoretical_up_probability":None}
         other={**valid,"theoretical_up_probability":None}
+        b="a-"+SLUG
+        c="b-"+SLUG
+        d="c-"+SLUG
+        e="d-"+SLUG
+        tampered="e-"+SLUG
+        corrupt={**valid, "market":tampered, "gap_pct_from_official":5.0}
         rows=[(SLUG,2,json.dumps(valid),"UP"),
               (SLUG,2,json.dumps(valid),"UP"),
-              ("market-b",2,json.dumps({**wrong,"market":"market-b"}),"DOWN"),
-              ("market-c",2,json.dumps({**other,"market":"market-c"}),"UP"),
-              ("market-d",2,json.dumps({**valid,"market":"market-d"}),None),
-              ("market-e",2,"invalid JSON","DOWN")]
+              (b,2,json.dumps({**wrong,"market":b}),"DOWN"),
+              (c,2,json.dumps({**other,"market":c}),"UP"),
+              (d,2,json.dumps({**valid,"market":d}),None),
+              (e,2,"invalid JSON","DOWN"),
+              (tampered,2,json.dumps(corrupt),"DOWN")]
         report=evaluate_minutes(rows)
         g=report["minutes"][0]
-        self.assertEqual(g["officially_settled_samples"],3)
+        self.assertEqual(g["officially_settled_samples"],4)
         self.assertEqual(g["graded"],1)
         self.assertEqual(g["input_parity_mismatches"],1)
+        self.assertEqual(g["archived_replay_mismatches"],1)
         self.assertEqual(g["missing_or_unrated"],1)
         self.assertFalse(report["auto_promote"])
         self.assertFalse(g["sample_sufficient_for_review"])
