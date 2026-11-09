@@ -1,5 +1,39 @@
 # Polymarket BTC Monitor
 
+## Official-BRTI per-minute prediction research (read-only)
+
+The monitor now freezes **at most one observed input snapshot per current
+Polymarket US 15-minute BTC market minute** (minutes 1–15). Each snapshot uses
+the already-fetched official BRTI reference and the authoritative price-to-beat;
+it does **not** reconstruct predictions after the outcome is known. It records
+the existing BRTI final-minute volatility *theoretical* probability only when
+the live inputs match the independently recomputed official gap and forecast
+target/reference. Offline evaluation independently recomputes these frozen
+price/gap/timing features to detect source or feature drift.
+
+- `GET /api/research/minute-calibration`: after an official market settlement,
+  report minute-specific Brier, coarse reliability bins, input parity and
+  archive replay mismatches. A market contributes one dependent observation
+  to each eligible minute, **not** 15 independent settled markets.
+- `GET /api/research/live-integrity`: in-memory live source parity and
+  Polymarket US contract quote freshness, with no database read.
+- Quotes older than 10 seconds, from a different market, or crossed/invalid
+  are flagged. A sharp observed BRTI move triggers **recheck**, not an
+  unsupported assertion that exchange quotes were stale or executable.
+- The new minute-only observations roll off after 30 days to bound database
+  growth; existing trade, call, and settlement logs are not pruned.
+- No additional upstream HTTP calls, live AI, real orders, chart/phone layout
+  changes, or replacement of official BRTI settlement rules.
+
+The frozen theoretical percentages are **not empirically calibrated**; no
+experimental result changes the live direction meter or trading controls.
+Forward cohorts must beat valid time-matched baselines on unseen settled
+markets before a future, separately reviewed model change.
+
+Validation: `python -m unittest -v test_minute_research` and the full CI
+regression suite.
+
+
 ## Fast observed exchange trade pressure (read-only)
 
 Coinbase BTC-USD matches and Kraken BTC/USD trades now stream through bounded server-side
