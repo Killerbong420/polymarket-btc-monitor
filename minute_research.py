@@ -48,12 +48,17 @@ def book_freshness(quote, market, reference, now):
                 "reason": "quote_older_than_ten_seconds"}
     points = []
     if isinstance(reference, dict) and reference.get("status") == "fresh" and reference.get("source") == SOURCE:
+        # Quote-risk warnings must not use a point newer than the last
+        # official observation declared in the same reference snapshot.
+        latest_official_epoch = finite(reference.get("price_epoch"))
         seen = {}
         for item in reference.get("points") or []:
             if not isinstance(item, (tuple, list)) or len(item) != 2:
                 continue
             t, price = finite(item[0]), finite(item[1])
-            if t is not None and price is not None and price > 0 and t <= now + 1:
+            if (t is not None and price is not None and price > 0
+                    and latest_official_epoch is not None
+                    and t <= min(now+1, latest_official_epoch)):
                 seen[int(t)] = price
         points = sorted(seen.items())
     move_bps = None
@@ -113,7 +118,12 @@ def minute_observation(market, seconds_left, official_target, reference,
     path_consistent = (path.get("status") == "available" and
                        path_price is not None and abs(path_price-price) <= .02 and
                        path_target is not None and abs(path_target-target) <= .02)
-    parity = "MATCH" if matches and path_consistent else "MISMATCH"
+    evidence_missing = (
+        beh.get("status") != "available" or beh.get("is_reference") is not True
+        or path.get("status") != "available" or reported is None
+        or path_price is None or path_target is None
+    )
+    parity = "UNAVAILABLE" if evidence_missing else ("MATCH" if matches and path_consistent else "MISMATCH")
     shadow = brti_volatility_shadow(ref, path, target, left, validation) if parity == "MATCH" else {}
     return {**base, "status": "captured", "market_minute": slot+1,
             "minute_slot": slot, "observed_epoch": round(now, 3),
@@ -133,6 +143,35 @@ def minute_observation(market, seconds_left, official_target, reference,
                 shadow.get("model_up_probability") if shadow.get("status") == "available" else None),
             "theoretical_probability_calibrated": False,
             "note": "One forward-captured point per market minute, no hindsight. Official settlement only grades after resolution."}
+
+
+def replay_input_parity(sample):
+    """Recalculate immutable live price/gap/clock features from frozen inputs.
+
+    This catches post-capture corruption or train/serve feature skew without
+    downloading any late prices or using the eventual outcome.
+    """
+    if not isinstance(sample, dict) or sample.get("input_parity") != "MATCH":
+        return False
+    start = market_start(sample.get("market"))
+    target = finite(sample.get("official_target"))
+    price = finite(sample.get("reference_price"))
+    tick = finite(sample.get("reference_epoch"))
+    now = finite(sample.get("observed_epoch"))
+    age = finite(sample.get("reference_age_seconds"))
+    remaining = finite(sample.get("seconds_left"))
+    gap = finite(sample.get("gap_pct_from_official"))
+    live_gap = finite(sample.get("gap_pct_from_live"))
+    if (start is None or None in (target, price, tick, now, age, remaining, gap, live_gap)
+            or price <= 0 or target <= 0 or not 0 <= age <= 15 or
+            tick > now + 2 or now-tick > 15 or
+            not 0 < remaining <= 900 or abs((900-(now-start))-remaining) > 20
+            or not 0 <= now-start < 900):
+        return False
+    if sample.get("minute_slot") != int((now-start)//60):
+        return False
+    computed = 100*(price/target-1)
+    return abs(computed-gap) <= .001 and abs(computed-live_gap) <= .001
 
 
 def evaluate_minutes(rows):
@@ -157,12 +196,23 @@ def evaluate_minutes(rows):
             continue
         seen.add(key)
         g = groups.setdefault(slot, {"minute":slot+1, "officially_settled_samples":0,
-                                     "parity_mismatches":0,"missing_or_unrated":0,
+                                     "parity_mismatches":0,"input_unavailable":0,
+                                     "replay_mismatches":0,"missing_or_unrated":0,
                                      "graded":0, "correct":0, "sum_brier":0.0,
-                                     "up_wins":0,"bins":{}})
+                                     "up_wins":0,"bins":{},"book_statuses":{}})
         g["officially_settled_samples"] += 1
+        book = s.get("book") or {}
+        book_state = str(book.get("status") or "unknown") if isinstance(book,dict) else "unknown"
+        book_state = book_state if book_state in ("fresh","rapid_move_recheck","stale","unavailable") else "unknown"
+        g["book_statuses"][book_state] = g["book_statuses"].get(book_state,0)+1
+        if s.get("input_parity") == "UNAVAILABLE":
+            g["input_unavailable"] += 1
+            continue
         if s.get("input_parity") != "MATCH":
             g["parity_mismatches"] += 1
+            continue
+        if not replay_input_parity(s):
+            g["replay_mismatches"] += 1
             continue
         p = finite(s.get("theoretical_up_probability"))
         if p is None or not 0 < p < 1 or s.get("shadow_source") != SHADOW_VERSION:
@@ -191,6 +241,9 @@ def evaluate_minutes(rows):
                                 "sufficient_for_review":count>=30})
         result.append({"market_minute":slot+1,"officially_settled_samples":g["officially_settled_samples"],
                        "input_parity_mismatches":g["parity_mismatches"],
+                       "unavailable_inputs":g["input_unavailable"],
+                       "archived_replay_mismatches":g["replay_mismatches"],
+                       "book_statuses":g["book_statuses"],
                        "missing_or_unrated":g["missing_or_unrated"],"graded":n,
                        "theoretical_brier":round(g["sum_brier"]/n,5) if n else None,
                        "neutral_brier":.25,
