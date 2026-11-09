@@ -1,6 +1,9 @@
 """No-hindsight minute cohorts, source parity, and safe quote freshness tests."""
 import json
 import unittest
+from unittest.mock import patch
+
+import app
 
 from minute_research import (SOURCE, VERSION, book_freshness,
                              minute_observation, evaluate_minutes)
@@ -112,6 +115,35 @@ class MinuteEvidenceTests(unittest.TestCase):
         self.assertEqual(future["minute_slot"],8)
         self.assertTrue(1 <= future["market_minute"] <= 15)
         self.assertEqual(future["input_parity"],"MATCH")
+
+    def test_persistent_capture_once_per_market_minute_with_no_rewrite(self):
+        sample=make()
+        with patch.object(app, "_minute_research_saved_key", None), \
+             patch.object(app, "execute") as execute:
+            self.assertTrue(app.save_minute_observation(sample))
+            self.assertFalse(app.save_minute_observation(sample))
+            self.assertEqual(execute.call_count, 1)
+            sql, values = execute.call_args.args[:2]
+            self.assertIn("ON CONFLICT(id) DO NOTHING", sql)
+            self.assertEqual(values[0], SLUG+":2")
+            self.assertEqual(json.loads(values[4])["input_parity"], "MATCH")
+
+    def test_endpoints_are_read_only_and_officially_scored(self):
+        sample=make()
+        row=(SLUG,2,json.dumps(sample),"UP")
+        with patch.object(app, "iter_query_rows", return_value=[row]) as query:
+            report=app.minute_calibration_report()
+        self.assertEqual(report["minutes"][0]["graded"],1)
+        sql=query.call_args.args[0]
+        self.assertIn("final_reference_source='OFFICIAL_MARKET_SETTLEMENT'",sql)
+        self.assertIn("MIN(winner)=MAX(winner)",sql)
+        current={"market":SLUG,"market_quote_guard":{"status":"fresh"},
+                 "minute_research_latest":{"status":"captured","input_parity":"MATCH"}}
+        with patch.object(app,"state",current), \
+             patch.object(app,"iter_query_rows",side_effect=AssertionError("unexpected DB")):
+            status=app.live_integrity()
+        self.assertEqual(status["quote"]["status"],"fresh")
+        self.assertFalse(status["orders_enabled"])
 
 
 if __name__ == "__main__":
