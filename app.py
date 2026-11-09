@@ -1639,6 +1639,7 @@ def _read_status_history():
   return data
 
 from probability_calibration import calibrate as _calibrate_probability
+from calibration_alignment import match_halfway_live_state, eligible_halfway_history
 
 _probability_cache={"at":0.0,"market":None,"gap":None,"data":None}
 
@@ -1651,6 +1652,12 @@ def direction_probability():
  gap=number(current.get("target_gap_pct"))
  if current.get("status")!="available" or not current.get("is_reference") or not slug or "btc-updown-15m-" not in slug or gap is None:
   return {"status":"unavailable","reason":"fresh_official_15m_reference_required"}
+ # The history contains only HALFWAY checkpoints. Never show a time-mismatched
+ # probability elsewhere in a round (nor on stale/partial official data).
+ matched=match_halfway_live_state(current,state.get("reference_price"),
+                                 state.get("seconds_left"),state.get("updated"),time.time())
+ if matched["status"]!="matched":
+  return matched
  now=time.monotonic()
  if (_probability_cache["data"] is not None and _probability_cache["market"]==slug and
      _probability_cache["gap"]==round(gap,3) and now-_probability_cache["at"]<30):
@@ -1664,12 +1671,14 @@ def direction_probability():
    if not past_market or "btc-updown-15m-" not in past_market or past_market==slug:continue
    try:
     snap=json.loads(raw)
-    behavior=snap.get("target_behavior") or {}
-    if behavior.get("status")!="available" or not behavior.get("is_reference"):continue
+    if not eligible_halfway_history(snap):continue
+    behavior=snap["target_behavior"]
     value=number(behavior.get("target_gap_pct"))
     if value is not None:verified.append((past_market,value,winner))
    except (ValueError,TypeError,AttributeError):continue
   result=_calibrate_probability(verified,gap,current_market=slug)
+  result={**result,"checkpoint":"HALFWAY","seconds_left_band":matched["seconds_left_band"],
+          "alignment":"same_one_minute_checkpoint_band"}
  except Exception:
   result={"status":"unavailable","reason":"verified_history_unavailable"}
  _probability_cache.update(at=now,market=slug,gap=round(gap,3),data=result)
