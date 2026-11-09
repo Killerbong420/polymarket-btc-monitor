@@ -4,6 +4,8 @@ Provider requests run in one bounded background worker, never in /api/live.
 The provider's chances are its estimates, not calibrated odds from our model.
 """
 import asyncio
+import json
+from terry_research import normalize, summarize_history, summarize_forward, probability
 from datetime import datetime, timezone
 import os
 import time
@@ -89,6 +91,12 @@ def _setup_table(execute):
     execute("""CREATE TABLE IF NOT EXISTS terry_15m_comparisons (
         market TEXT PRIMARY KEY, captured_at TEXT NOT NULL, ours TEXT NOT NULL,
         terry TEXT NOT NULL, terry_call_at TEXT, result TEXT NOT NULL DEFAULT 'PENDING')""")
+    execute("""CREATE TABLE IF NOT EXISTS terry_15m_history (
+        market TEXT PRIMARY KEY, saved_at TEXT NOT NULL, payload_json TEXT NOT NULL)""")
+    execute("""CREATE TABLE IF NOT EXISTS terry_15m_shadow (
+        market TEXT NOT NULL, minute_slot INTEGER NOT NULL,
+        captured_at TEXT NOT NULL, terry_up_probability REAL NOT NULL,
+        our_side TEXT, PRIMARY KEY (market, minute_slot))""")
 
 
 def _save_pair(execute, sample):
@@ -131,10 +139,89 @@ def _grade_and_summarize(execute, windows):
     }
 
 
+def _save_forward_sample(execute, sample, provider, now=None):
+    """Freeze Terry's live chance once per market-minute, never backfill.
+
+    Our same-time direction is optional and NEVER treated as a probability.
+    Only fresh, same-market, 15m provider data can be saved.
+    """
+    now = time.time() if now is None else now
+    if sample.get("status") not in ("live", "waiting"):
+        return None
+    if (not isinstance(provider, dict) or provider.get("market") != sample.get("market")
+            or provider.get("horizon") != "15m"):
+        return None
+    end = _epoch(provider.get("window_end"))
+    if not end or not 0 < end - now <= 900:
+        return None
+    slot = int((900 - (end - now)) // 60)
+    if not 0 <= slot < 15:
+        return None
+    chances = provider.get("chance_now")
+    up = probability(chances.get("up")) if isinstance(chances, dict) else None
+    down = probability(chances.get("down")) if isinstance(chances, dict) else None
+    if up is None or down is None or abs(up + down - 1) > .02:
+        return None
+    our = sample.get("our_call")
+    direction = _side(our.get("side")) if isinstance(our, dict) else None
+    execute("""INSERT INTO terry_15m_shadow
+        (market,minute_slot,captured_at,terry_up_probability,our_side)
+        VALUES(?,?,?,?,?) ON CONFLICT(market,minute_slot) DO NOTHING""",
+        (sample["market"], slot, datetime.fromtimestamp(now, timezone.utc).isoformat(), up, direction))
+    return (sample["market"], slot)
+
+
+def _archive_history(execute, windows):
+    """Persist newly settled, whitelisted provider records across API lookback limits."""
+    records = {}
+    for window in windows:
+        record = normalize(window)
+        if record:
+            records[record["market"]] = record
+    if not records:
+        return 0
+    markets = list(records)
+    sql = "SELECT market FROM terry_15m_history WHERE market IN (" + ",".join("?" for _ in markets) + ")"
+    existing = {r[0] for r in execute(sql, tuple(markets), fetch=True)}
+    missing = [records[m] for m in markets if m not in existing]
+    now = datetime.now(timezone.utc).isoformat()
+    for i in range(0, len(missing), 40):
+        batch = missing[i:i+40]
+        query = "INSERT INTO terry_15m_history (market,saved_at,payload_json) VALUES "
+        query += ",".join("(?,?,?)" for _ in batch) + " ON CONFLICT(market) DO NOTHING"
+        values = tuple(value for record in batch for value in
+                       (record["market"], now, json.dumps(record, separators=(",", ":"))))
+        execute(query, values)
+    return len(missing)
+
+
+def _research_report(execute):
+    """Bounded reads: no research computation on user-facing HTTP requests."""
+    rows = execute("SELECT payload_json FROM terry_15m_history ORDER BY market DESC LIMIT 5000", fetch=True)
+    history = []
+    outcomes = {}
+    for (blob,) in rows:
+        try:
+            item = json.loads(blob)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(item, dict):
+            history.append(item)
+            outcomes[item.get("market")] = item.get("result")
+    points = execute("""SELECT market,minute_slot,terry_up_probability,our_side
+                        FROM terry_15m_shadow ORDER BY captured_at DESC LIMIT 10000""", fetch=True)
+    forward = [(market, int(slot), up, ours, outcomes[market])
+               for market, slot, up, ours in points if market in outcomes]
+    return {"historical_calls": summarize_history(history),
+            "forward_minute_checkpoints": summarize_forward(forward)}
+
+
+
 async def worker(local_state, execute):
     """Sole owner of provider API polling and comparison writes."""
     global _LAST_SAVED_MARKET, _TABLE_READY, _SUMMARY
     last_history = 0.0
+    last_sample = None
     async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), follow_redirects=False) as client:
         while True:
             delay = 10
@@ -162,6 +249,14 @@ async def worker(local_state, execute):
                         await asyncio.to_thread(_setup_table, execute)
                         _TABLE_READY = True
                     sample = snapshot(local_state())
+                    if sample.get("status") in ("live", "waiting"):
+                        provider = _market(data)
+                        pair = (sample.get("market"), int(time.time() // 60))
+                        if pair != last_sample:
+                            recorded = await asyncio.to_thread(
+                                _save_forward_sample, execute, sample, provider)
+                            if recorded:
+                                last_sample = pair
                     if (sample.get("status") == "live" and sample.get("our_call")
                             and sample.get("market") != _LAST_SAVED_MARKET):
                         await asyncio.to_thread(_save_pair, execute, sample)
@@ -173,7 +268,10 @@ async def worker(local_state, execute):
                             windows = historical.json().get("windows", [])
                             if not isinstance(windows, list):
                                 raise ValueError("invalid_provider_history")
-                            _SUMMARY = await asyncio.to_thread(_grade_and_summarize, execute, windows)
+                            await asyncio.to_thread(_archive_history, execute, windows)
+                            paired = await asyncio.to_thread(_grade_and_summarize, execute, windows)
+                            research = await asyncio.to_thread(_research_report, execute)
+                            _SUMMARY = {**paired, "research": research}
                             last_history = time.monotonic()
                         except (httpx.HTTPError, ValueError, TypeError, KeyError):
                             # A history outage never slows or changes current predictions.
