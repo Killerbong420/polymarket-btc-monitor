@@ -21,7 +21,7 @@ _BREAKS = {"BREAKOUT_WATCH", "NECKLINE_BREAK_WATCH", "RETEST_HELD"}
 def setup_tables(execute):
     execute("""CREATE TABLE IF NOT EXISTS pattern_lifecycle (
       id TEXT PRIMARY KEY, market TEXT NOT NULL, source TEXT NOT NULL,
-      pattern TEXT NOT NULL, direction INTEGER NOT NULL,
+      pattern TEXT NOT NULL, anchor_epoch INTEGER NOT NULL, direction INTEGER NOT NULL,
       phase TEXT NOT NULL, initial_phase TEXT NOT NULL,
       first_seen_epoch REAL NOT NULL, last_bar_epoch INTEGER NOT NULL,
       confirmed_epoch INTEGER, breakout_epoch INTEGER, completed_epoch INTEGER,
@@ -73,7 +73,7 @@ def _new_event(market, signal, bar_epoch, now):
     key = "|".join((market,source,pattern,str(int(anchor))))
     identity = hashlib.sha256(key.encode()).hexdigest()[:32]
     initial = "BREAKOUT" if signal.get("phase") in _BREAKS else "FORMING"
-    return (identity,market,source,pattern,direction,initial,initial,now,int(bar_epoch),
+    return (identity,market,source,pattern,int(anchor),direction,initial,initial,now,int(bar_epoch),
             None,int(bar_epoch) if initial=="BREAKOUT" else None,None,None,None,
             trigger,invalid,objective,fit,"PENDING")
 
@@ -85,7 +85,7 @@ def _advance(row, bar_epoch, close):
         return None
     # Strict continuity: never infer event ordering across missing candles.
     if bar_epoch != last_bar + 60:
-        return None
+        return ("EXPIRED","OBSERVATION_GAP",confirmed,breakout,completed,invalidated,bar_epoch)
     age = bar_epoch - first_seen
     if age > 30*60:
         return ("EXPIRED","TIMED_OUT",confirmed,breakout,completed,invalidated,bar_epoch)
@@ -103,11 +103,11 @@ def _advance(row, bar_epoch, close):
 
 
 def _recent(execute, market):
-    rows=execute("""SELECT id,market,source,pattern,phase,initial_phase,first_seen_epoch,
+    rows=execute("""SELECT id,market,source,pattern,anchor_epoch,phase,initial_phase,first_seen_epoch,
      last_bar_epoch,confirmed_epoch,breakout_epoch,completed_epoch,invalidated_epoch,
      expired_epoch,trigger_usd,invalidation_usd,objective_usd,initial_fit_pct,result
      FROM pattern_lifecycle ORDER BY first_seen_epoch DESC LIMIT 12""",fetch=True)
-    columns=("id","market","source","pattern","phase","initial_phase","first_seen_epoch",
+    columns=("id","market","source","pattern","anchor_epoch","phase","initial_phase","first_seen_epoch",
              "last_bar_epoch","confirmed_epoch","breakout_epoch","completed_epoch",
              "invalidated_epoch","expired_epoch","trigger_usd","invalidation_usd",
              "objective_usd","initial_fit_pct","result")
@@ -162,11 +162,11 @@ def record_completed_bar(execute, market, signal, candle, now=None):
         candidate=_new_event(market,signal,bar_epoch,now)
         if candidate:
             execute("""INSERT INTO pattern_lifecycle (
-              id,market,source,pattern,direction,phase,initial_phase,
+              id,market,source,pattern,anchor_epoch,direction,phase,initial_phase,
               first_seen_epoch,last_bar_epoch,confirmed_epoch,breakout_epoch,
               completed_epoch,invalidated_epoch,expired_epoch,
               trigger_usd,invalidation_usd,objective_usd,initial_fit_pct,result)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(id) DO NOTHING""", candidate)
         return _recent(execute,market)
     except (ValueError,TypeError,OverflowError):
