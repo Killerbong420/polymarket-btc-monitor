@@ -96,7 +96,7 @@ class DojiWatchTests(unittest.TestCase):
         self.assertIn("DOJI FORMING", html)
         self.assertIn("DOJI CONFIRMED", html)
         self.assertIn("FORMATION WATCH", html)
-        self.assertIn("node.textContent=doji?'FORMATION WATCH'+doji", html)
+        self.assertIn("node.textContent=(doji||whale)?'FORMATION WATCH'+doji+whale", html)
         self.assertIn("setInterval(()=>{if(!document.hidden)renderPatterns()},1000)", html)
         self.assertNotIn("displayDoji()", html)
         self.assertIn('d["doji_watch"]=anticipate_doji(reference,now=time.time())', app)
