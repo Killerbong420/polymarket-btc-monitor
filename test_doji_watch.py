@@ -87,17 +87,25 @@ class DojiWatchTests(unittest.TestCase):
         result = anticipate_doji(feed(sample(minute - 60, 48)), now=minute + 2)
         self.assertNotEqual(result["status"], "confirmed")
 
-    def test_ui_is_read_only_and_exposes_watch(self):
+    def test_doji_is_combined_with_formation_watch_no_extra_polls(self):
         html = (Path(__file__).resolve().parent / "terminal.html").read_text(encoding="utf-8")
         app = (Path(__file__).resolve().parent / "app.py").read_text(encoding="utf-8")
-        self.assertIn('id="dojiWatch"', html)
-        self.assertIn("d=s.doji_watch||{}", html)
-        self.assertIn("d[\"doji_watch\"]=anticipate_doji(reference,now=time.time())", app)
+        self.assertNotIn('id="dojiWatch"', html)
+        self.assertEqual(html.count('id="structureWatch"'), 1)
+        self.assertIn("const d=s.doji_watch||{}", html)
+        self.assertIn("DOJI FORMING", html)
+        self.assertIn("DOJI CONFIRMED", html)
+        self.assertIn("FORMATION WATCH", html)
+        self.assertIn("node.textContent=doji?'FORMATION WATCH'+doji", html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)renderPatterns()},1000)", html)
+        self.assertNotIn("displayDoji()", html)
+        self.assertIn('d["doji_watch"]=anticipate_doji(reference,now=time.time())', app)
         self.assertIn('"doji_watch":state.get("doji_watch")', app)
-        segment = html.split("/* No extra fetch or model calls.", 1)[1].split("</script>", 1)[0]
+        segment = html.split("/* Render official BRTI Doji evidence inside Formation Watch", 1)[1].split("</script>", 1)[0]
         self.assertNotIn("fetch(", segment)
         self.assertNotIn("meterUpPct", segment)
         self.assertNotIn("meterDownPct", segment)
+
 
 
 if __name__ == "__main__":
