@@ -23,13 +23,12 @@ class CheckpointBoardTest(unittest.TestCase):
         self.assertEqual(early_ai['graded'],0)
         self.assertIsNone(early_ai['accuracy_pct'])
 
-    def test_five_min_strict_window_kept_separate(self):
-        data=build_scoreboard([],{'wins':70,'losses':30,
-            'late':{'wins':0,'losses':0,'capture_audit':{'sampled':36,'within_window':0}}})
-        self.assertEqual(data['five'][0]['graded'],100)
-        self.assertEqual(data['five'][1]['graded'],0)
-        self.assertIsNone(data['five'][1]['accuracy_pct'])
-        self.assertEqual(data['late_audit']['within_window'],0)
-        self.assertEqual(len(data['fifteen']),6)
+    def test_only_15m_market_checkpoints_are_returned(self):
+        result=build_scoreboard([])
+        self.assertEqual(result["status"],"available")
+        self.assertEqual(len(result["fifteen"]),6)
+        self.assertNotIn("five", result)
+        self.assertNotIn("late_audit", result)
+
 
 if __name__=='__main__':unittest.main()
