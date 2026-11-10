@@ -394,6 +394,34 @@ window.btcNoteRequest=function(name,ms,ok){
 <canvas id="brtiLineCanvas" role="img" aria-label="Official Polymarket US BRTI index line, official price to beat, and eligible final-average forecast. No candlesticks or contract values."></canvas>
   <div id="brtiLineLegend"><span><i></i>BRTI index</span><span><i class="target"></i>Official target</span><span><i class="forecast"></i>Projected final average (when verified)</span></div>
 </section>
+<div id="dojiWatch" role="status" aria-live="polite" style="font-size:12px;line-height:1.35;padding:8px 10px;margin:8px 0;border:1px solid #3b526b;border-radius:9px;color:#b6c9db;background:#0c1b2a">DOJI WATCH · Monitoring the final seconds of each 1-minute BRTI candle</div>
+<script>
+/* No extra fetch or model calls. Pre-close pattern evidence never changes direction odds. */
+(()=>{
+ const node=document.getElementById('dojiWatch');
+ function displayDoji(){
+  const s=window.btcServerStatus||{}, d=s.doji_watch||{};
+  const now=Date.now()/1000, stamp=Date.parse(s.updated||'')/1000;
+  const fresh=s.status==='running'&&typeof s.market==='string'&&s.market.includes('btc-updown-15m-')&&
+    Number.isFinite(stamp)&&now-stamp>=-3&&now-stamp<=15&&d.source==='Polymarket US BTC reference / BRTI';
+  node.style.borderColor='#3b526b';
+  if(fresh&&d.status==='forming'&&Number(d.candle_end_epoch)>now){
+   node.textContent='⚠ DOJI FORMING · '+String(d.pattern||'STANDARD_DOJI').replaceAll('_',' ')+
+     ' · '+Math.max(0,Math.ceil(Number(d.candle_end_epoch)-now))+'s before candle close · unconfirmed, may change';
+   node.style.borderColor='#d1a65a';
+  }else if(fresh&&d.status==='confirmed'&&now-Number(d.candle_end_epoch)>=0&&now-Number(d.candle_end_epoch)<=12){
+   node.textContent='✓ DOJI CONFIRMED · '+String(d.pattern||'STANDARD_DOJI').replaceAll('_',' ')+
+     ' · completed 1-minute candle · not an UP/DOWN prediction';
+  }else{
+   node.textContent='DOJI WATCH · Scanning near-close 1-minute BRTI candles · no active confirmed setup';
+  }
+ }
+ window.addEventListener('btc-status-updated',displayDoji);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)displayDoji();});
+ setInterval(()=>{if(!document.hidden)displayDoji()},1000);
+ displayDoji();
+})();
+</script>
 <div class="card" id="patternPanel" style="border-left:4px solid #e5a45d;margin-top:10px"><div class="label">PATTERN ANALYSIS · SERVER SIGNALS</div><div class="value wait" id="patternName">ANALYZING</div><div class="small" id="patternDetails">Waiting for server pattern analysis</div><div class="small" id="minuteForecast">NEXT 60 SECONDS · Awaiting forecast</div><div class="small" id="minuteReversal">REVERSAL WATCH · Awaiting BRTI evidence</div><p class="small">Pattern analysis continues on the server; no calibrated probabilities.</p></div></div><style>
 /* Preserve hidden nodes for legacy polling code while simplifying the visible UI. */
 #fastPanel,#final15Panel,#strongPanel,#primaryPanel{display:none!important}
