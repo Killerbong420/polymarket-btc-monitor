@@ -7,7 +7,7 @@ No Sonar feed or Sonar proprietary logic is involved.
 """
 import math
 
-VERSION = "independent-pattern-map-v2"
+VERSION = "independent-pattern-map-v3"
 
 
 def _mean(values):
@@ -59,6 +59,7 @@ def _flag_candidate(bars, offset, atr):
     return {"pattern": "BULL_FLAG" if direction > 0 else "BEAR_FLAG",
             "bias": "UP" if direction > 0 else "DOWN",
             "direction_sign": direction, "trigger": trigger,
+            "anchor_epoch":bars[end][0],
             "invalidation": invalidation, "pole_usd": round(size, 2),
             "retracement_pct": round(100*retreat, 1),
             "pattern_match_score_pct": min(95, max(0, score)),
@@ -110,6 +111,7 @@ def _double_turn(bars, atr):
                                    "bias":bias, "trigger_usd":round(neckline,2),
                                    "invalidation_usd":round(invalidation,2),
                                    "observed_gap_candles":newest-older,
+                                   "anchor_epoch":recent[newest][0],
                                    "pattern_match_score_pct":None if phase=="INVALIDATED" else min(95,max(0,score)),
                                    "score_basis":"heuristic_geometry_v1"})
                 break

@@ -421,29 +421,83 @@ window.btcNoteRequest=function(name,ms,ok){
  displayDoji();
 })();
 </script>
-<div id="structureWatch" role="status" aria-live="polite" style="font-size:12px;line-height:1.4;padding:8px 10px;margin:6px 0 9px;border:1px solid #3b526b;border-radius:9px;color:#b6c9db;background:#0c1b2a">PATTERN WATCH · Waiting for completed exchange candles</div>
+<div id="structureWatch" role="status" aria-live="polite" style="font-size:12px;line-height:1.45;padding:8px 10px;margin:6px 0 9px;border:1px solid #3b526b;border-radius:9px;color:#b6c9db;background:#0c1b2a">PATTERN WATCH · Waiting for completed exchange candles</div>
+<details id="patternLifecyclePanel" style="margin:0 0 10px;border:1px solid #34465b;border-radius:9px;padding:8px 10px;color:#b6c9db;font-size:12px">
+<summary style="cursor:pointer;font-weight:700">Saved pattern timeline · forming / confirmed / breakout / completed / invalidated</summary>
+<div id="patternLifecycleRows" style="margin-top:8px">Collecting new pattern observations; existing patterns are not backfilled.</div>
+<p style="font-size:11px;opacity:.85;margin:8px 0 0">CONFIRMED = observed structure persisted, not a guaranteed reversal. COMPLETED = price closed beyond a frozen pattern objective after breakout; not proof of Polymarket profit. EXPIRED = insufficient follow-through or a missing candle. Initial pattern fit is not an outcome probability.</p>
+</details>
 <script>
 /* Independent, read-only pattern observations; no extra requests or forecast overrides. */
 (()=>{
  const node=document.getElementById('structureWatch');
+ const historyNode=document.getElementById('patternLifecycleRows');
  const dollars=v=>Number(v).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
+ const label=s=>String(s||'').replaceAll('_',' ');
+ const clock=t=>Number.isFinite(Number(t))&&Number(t)>0?new Date(Number(t)*1000).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'—';
+ let lastTimelineKey='';
+ function drawHistory(rows){
+  const key=rows.map(x=>[x.id,x.phase,x.last_bar_epoch,x.result].join(':')).join('|');
+  if(key===lastTimelineKey)return;
+  lastTimelineKey=key;
+  historyNode.replaceChildren();
+  if(!rows.length){historyNode.textContent='Collecting newly observed patterns. No past signals are backfilled.';return;}
+  for(const event of rows.slice(0,8)){
+   const box=document.createElement('div');
+   box.style.cssText='padding:8px 0;border-top:1px solid #2e4057;line-height:1.5';
+   const title=document.createElement('strong');
+   title.textContent=label(event.pattern)+' · '+label(event.phase);
+   title.style.color=event.phase==='COMPLETED'?'#4ade80':event.phase==='INVALIDATED'?'#fca5a5':'#e2e8f0';
+   box.append(title);
+   const meta=document.createElement('div');
+   const initial=Number.isFinite(Number(event.initial_fit_pct))?' · initial match '+Number(event.initial_fit_pct).toFixed(0)+'%':'';
+   meta.textContent=(event.source||'exchange')+initial+' · trigger '+dollars(event.trigger_usd)+
+    ' · invalidation '+dollars(event.invalidation_usd)+' · objective '+dollars(event.objective_usd);
+   box.append(meta);
+   const stamps=[label(event.initial_phase)+' '+clock(event.first_seen_epoch)];
+   if(event.confirmed_epoch)stamps.push('CONFIRMED '+clock(event.confirmed_epoch));
+   if(event.breakout_epoch)stamps.push('BREAKOUT '+clock(event.breakout_epoch));
+   if(event.completed_epoch)stamps.push('COMPLETED '+clock(event.completed_epoch));
+   if(event.invalidated_epoch)stamps.push('INVALIDATED '+clock(event.invalidated_epoch));
+   if(event.expired_epoch)stamps.push('EXPIRED '+clock(event.expired_epoch));
+   const trail=document.createElement('div');
+   trail.textContent=stamps.join(' → ')+(event.result&&event.result!=='PENDING'?' · '+label(event.result):'');
+   box.append(trail);
+   historyNode.append(box);
+  }
+ }
  function renderPatterns(){
   const s=window.btcServerStatus||{}, d=s.external||{}, p=d.early_patterns||{};
+  const rows=Array.isArray(s.pattern_lifecycle?.recent)?s.pattern_lifecycle.recent:[];
+  drawHistory(rows);
   const age=Date.now()/1000-Date.parse(s.updated||'')/1000;
   const candleAge=Number(d.candle_age_seconds);
   const live=s.status==='running'&&typeof s.market==='string'&&s.market.includes('btc-updown-15m-')&&
     Number.isFinite(age)&&age>=-3&&age<=18&&Number.isFinite(candleAge)&&candleAge>=0&&candleAge<=90;
   node.style.borderColor='#3b526b';
   if(live&&p.status==='watch'&&typeof p.pattern==='string'){
-   const label=p.pattern.replaceAll('_',' ');
-   const phase=String(p.phase||'FORMING').replaceAll('_',' ');
-   const fit=Number.isFinite(p.pattern_match_score_pct)&&p.phase!=='INVALIDATED'
-     ?' · Pattern match '+Math.round(p.pattern_match_score_pct)+'%':' · Pattern match unavailable';
+   const tracked=rows.find(x=>x.market===s.market&&x.source===d.source&&
+       x.pattern===p.pattern&&Number(x.anchor_epoch)===Number(p.anchor_epoch));
+   const phase=tracked?.phase|| (p.phase==='NECKLINE_BREAK_WATCH'||p.phase==='BREAKOUT_WATCH'?'BREAKOUT':p.phase);
+   if(phase==='INVALIDATED'||phase==='EXPIRED'){
+    node.textContent='PATTERN WATCH · '+label(p.pattern)+' · '+label(phase)+
+      (tracked?' · prior warning saved in timeline':' · no earlier warning recorded');
+    node.style.borderColor='#b16b73';
+    return;
+   }
+   if(phase==='COMPLETED'){
+    node.textContent='PATTERN WATCH · '+label(p.pattern)+' · COMPLETED · frozen objective reached '+dollars(tracked.objective_usd)+
+      ' · prior warning saved in timeline';
+    node.style.borderColor='#3b987f';
+    return;
+   }
+   const fit=Number.isFinite(p.pattern_match_score_pct) && p.phase!=='INVALIDATED'
+      ?' · Pattern match '+Math.round(p.pattern_match_score_pct)+'%':' · Pattern match unavailable';
    const trigger=Number.isFinite(p.trigger_usd)?' · watch '+dollars(p.trigger_usd):'';
    const invalid=Number.isFinite(p.invalidation_usd)?' · invalid above/below '+dollars(p.invalidation_usd):'';
-   node.textContent='PATTERN WATCH · '+label+' · '+phase+fit+trigger+invalid+
+   node.textContent='PATTERN WATCH · '+label(p.pattern)+' · '+label(phase)+fit+trigger+invalid+
     ' · '+(d.source||'exchange 1m')+' · rule-based fit score, NOT outcome odds';
-   node.style.borderColor=p.phase==='INVALIDATED'?'#b16b73':p.phase==='RETEST_HELD'?'#3b987f':'#d1a65a';
+   node.style.borderColor=phase==='BREAKOUT'?'#3b987f':'#d1a65a';
   }else if(live&&p.status==='monitoring'){
    node.textContent='PATTERN WATCH · Scanning for forming flags, double turns, breakouts and retests';
   }else{
