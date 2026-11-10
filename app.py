@@ -11,6 +11,7 @@ from live_trade_stream import stream_loop
 from market_chart_history import record_brti, snapshot as chart_history_snapshot, latest_tip, official_chart_sampler, eligible_tick_market
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from price_action import analyze_price_action, shadow_price_action
+from doji_watch import anticipate_doji
 from bot_library import study_strategies, consensus
 from settlement_forecast import forecast_settlement, regime_shadow_forecast
 from brti_volatility_shadow import brti_volatility_shadow, evaluate_shadow
@@ -1004,6 +1005,9 @@ async def loop():
      else:state["brti_chart"]={"market":slug,"source":"Polymarket US reference API",
        "points":[],"status":"unavailable","reason":reference.get("reason","No verified BRTI observations")}
      ref_public={k:v for k,v in reference.items() if k!="points"}
+     # Read-only, preclose Doji watch; neither a settlement forecast nor a probability.
+     d["doji_watch"]=anticipate_doji(reference,now=time.time())
+     state["doji_watch"]=d["doji_watch"]
      # Compact genuine timestamped official BRTI samples, NOT a projected path.
      # Do not fill gaps with synthetic observations; keep the payload bounded.
      recent_points=[(int(t),round(float(p),2)) for t,p in ref_points
@@ -1074,6 +1078,7 @@ async def loop():
      for key in ("phase","seconds_left","score"): state.pop(key,None)
      state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No verified Polymarket US 15-minute market: "+str(reason15))
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
+     state["doji_watch"]={"status":"unavailable","reason":"market_unavailable"}
      state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},settlement_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},quick_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},guarded_primary={"status":"unavailable","direction":"WAIT"},manual_entry_review={"status":"unavailable"},reversal_evidence={"status":"unavailable"},missed_checkpoints=[],market_quote_guard={"status":"unavailable","reason":"market_unavailable"},minute_research_latest={"status":"unavailable","reason":"market_unavailable"})
      state["ai_disabled"]=True
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error")}
@@ -1103,6 +1108,7 @@ async def loop():
                  settlement_forecast={"status":"unavailable","reason":"Monitoring feed error"},
                  guarded_primary={"status":"unavailable","direction":"WAIT"},
                  manual_entry_review={"status":"unavailable"})
+    state["doji_watch"]={"status":"unavailable","reason":"monitor_feed_error"}
     db_error=None
     try:(await asyncio.to_thread(execute, "SELECT 1",fetch=True))
     except Exception:db_error="Database query failed"
@@ -1638,6 +1644,7 @@ def lightweight_live():
  """Read-only in-memory live feed independent of historical SQL."""
  return {"status":state.get("status"),"updated":state.get("updated"),
          "market":state.get("market"),"signal":state.get("signal"),
+         "doji_watch":state.get("doji_watch"),
          "error":state.get("error"),"external":state.get("external") or {},
          "brti_chart":state.get("brti_chart"),"reference_price":state.get("reference_price"),
          "target_behavior":state.get("target_behavior"),"settlement_forecast":state.get("settlement_forecast"),"quick_forecast":state.get("quick_forecast"),
