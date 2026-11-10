@@ -12,6 +12,7 @@ from market_chart_history import record_brti, snapshot as chart_history_snapshot
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from price_action import analyze_price_action, shadow_price_action
 from doji_watch import anticipate_doji
+from early_pattern_context import analyze_early_patterns
 from bot_library import study_strategies, consensus
 from settlement_forecast import forecast_settlement, regime_shadow_forecast
 from brti_volatility_shadow import brti_volatility_shadow, evaluate_shadow
@@ -448,7 +449,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Coinbase BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"price_action":analyze_price_action(candles,"Coinbase Exchange BTC-USD"),"bot_research_signals":study_strategies(candles,"Coinbase Exchange BTC-USD"),"source":"Coinbase Exchange BTC-USD","market_shock":measure_market_shock(candles,source="Coinbase Exchange BTC-USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"price_action":analyze_price_action(candles,"Coinbase Exchange BTC-USD"),"early_patterns":analyze_early_patterns(candles,"Coinbase Exchange BTC-USD"),"bot_research_signals":study_strategies(candles,"Coinbase Exchange BTC-USD"),"source":"Coinbase Exchange BTC-USD","market_shock":measure_market_shock(candles,source="Coinbase Exchange BTC-USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Coinbase: "+str(e)[:150])
  # Kraken OHLC uses BTC/USD minute candles; last candle is incomplete.
  try:
@@ -468,7 +469,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Kraken BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"price_action":analyze_price_action([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"bot_research_signals":study_strategies([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"source":"Kraken BTC/USD","market_shock":measure_market_shock([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],source="Kraken BTC/USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"price_action":analyze_price_action([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"early_patterns":analyze_early_patterns([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"bot_research_signals":study_strategies([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"source":"Kraken BTC/USD","market_shock":measure_market_shock([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],source="Kraken BTC/USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
