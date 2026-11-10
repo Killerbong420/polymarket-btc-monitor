@@ -85,7 +85,10 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("chart.insertAdjacentElement('beforebegin',title)", self.html)
         self.assertIn("if(forecast)cards.insertAdjacentElement('afterend',forecast)", self.html)
         self.assertIn("if(history)(exchanges||forecast||cards).insertAdjacentElement('afterend',history)", self.html)
-        self.assertIn("if(flip){flip.id='flipPanel';panel.insertAdjacentElement('afterend',flip);}", self.html)
+        # Removed obsolete two-way flip watch from the visible dashboard and script.
+        for removed in ('TWO-WAY FLIP WATCH', 'id="scalp"', 'id="scalpInfo"',
+                        "function activeFlip(", "activeFlip(d,fastFresh)", "flipPanel"):
+            self.assertNotIn(removed, self.html)
         self.assertIn("patternFold=document.createElement('details')", self.html)
         self.assertIn("disclosure.id='fivePathDetails'", self.html)
         self.assertIn("if(!el('fivePathDetails')?.open)", self.html)

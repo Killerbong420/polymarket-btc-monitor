@@ -32,6 +32,10 @@ class EarlyPatternContextTests(unittest.TestCase):
                 self.assertEqual(result["status"],"watch")
                 self.assertEqual(result["pattern"],kind)
                 self.assertEqual(result["phase"],"FORMING")
+                self.assertIsInstance(result["pattern_match_score_pct"],int)
+                self.assertGreaterEqual(result["pattern_match_score_pct"],0)
+                self.assertLessEqual(result["pattern_match_score_pct"],95)
+                self.assertEqual(result["score_basis"],"heuristic_geometry_v1")
                 self.assertTrue(result["trigger_usd"] > result["invalidation_usd"] if sign>0
                                 else result["trigger_usd"] < result["invalidation_usd"])
                 self.assertFalse(result["probability_calibrated"])
@@ -53,6 +57,8 @@ class EarlyPatternContextTests(unittest.TestCase):
                 b=analyze_early_patterns(bars)
                 self.assertEqual(b["phase"],"BREAKOUT_WATCH")
                 self.assertTrue(b["volume_confirmed"])
+                self.assertGreaterEqual(b["pattern_match_score_pct"],0)
+                self.assertLessEqual(b["pattern_match_score_pct"],95)
                 trigger=b["trigger_usd"]
                 last_close=trigger+sign*2
                 bars.append([bars[-1][0]+60,
@@ -72,6 +78,7 @@ class EarlyPatternContextTests(unittest.TestCase):
                 bars.append([last[0]+60,min(last[4],invalid)-1,max(last[4],invalid)+1,last[4],invalid,10])
                 result=analyze_early_patterns(bars)
                 self.assertEqual(result["phase"],"INVALIDATED")
+                self.assertIsNone(result["pattern_match_score_pct"])
 
     def test_missing_stale_and_malformed_candles_are_unavailable(self):
         bars=make_bars()
@@ -90,10 +97,14 @@ class EarlyPatternContextTests(unittest.TestCase):
         self.assertIn('from early_pattern_context import analyze_early_patterns',app)
         self.assertEqual(app.count('"early_patterns":analyze_early_patterns('),2)
         self.assertIn('id="structureWatch"',html)
+        self.assertIn("p.pattern_match_score_pct",html)
+        self.assertIn("rule-based fit score, NOT outcome odds",html)
         section=html.split("/* Independent, read-only pattern observations;",1)[1].split("</script>",1)[0]
         self.assertNotIn("fetch(",section)
         self.assertNotIn("meterUpPct",section)
         self.assertNotIn("meterDownPct",section)
+        self.assertNotIn("probability_up",section)
+        self.assertNotIn("probability_down",section)
 
 
 if __name__=="__main__":

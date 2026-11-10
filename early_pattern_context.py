@@ -7,7 +7,7 @@ No Sonar feed or Sonar proprietary logic is involved.
 """
 import math
 
-VERSION = "independent-pattern-map-v1"
+VERSION = "independent-pattern-map-v2"
 
 
 def _mean(values):
@@ -44,14 +44,25 @@ def _flag_candidate(bars, offset, atr):
         return None
     if direction < 0 and (tail_low < end_price - .27*size or tail_high > end_price + .78*size):
         return None
+    # Pattern-fit score is a deterministic geometric index (0-95), NOT a
+    # statistically calibrated probability of continuation or settlement.
+    pole_strength = min(1.0, size / max(3.2 * atr, 0.001))
+    retracement_fit = max(0.0, 1.0 - abs(retreat - .34) / .33)
+    compression_fit = max(0.0, 1.0 - (tail_high - tail_low) / (.85 * size))
+    steps = [direction * (a[4] - b[4]) for a, b in zip(tail, tail[1:])]
+    countertrend_fit = sum(x >= 0 for x in steps) / len(steps)
+    score = round(100 * (.30 * pole_strength + .28 * retracement_fit +
+                         .25 * compression_fit + .17 * countertrend_fit))
     buffer = max(.12*atr, bars[-1][4]*.000012)
-    trigger = tail_high + buffer if direction > 0 else tail_low - buffer
+    trigger = tail_high + buffer if direction > 0 else tail_low
     invalidation = end_price - direction*.75*size
     return {"pattern": "BULL_FLAG" if direction > 0 else "BEAR_FLAG",
             "bias": "UP" if direction > 0 else "DOWN",
             "direction_sign": direction, "trigger": trigger,
             "invalidation": invalidation, "pole_usd": round(size, 2),
-            "retracement_pct": round(100*retreat, 1)}
+            "retracement_pct": round(100*retreat, 1),
+            "pattern_match_score_pct": min(95, max(0, score)),
+            "score_basis": "heuristic_geometry_v1"}
 
 
 def _double_turn(bars, atr):
@@ -89,10 +100,18 @@ def _double_turn(bars, atr):
                     phase = "NECKLINE_BREAK_WATCH"
                 else:
                     phase = "FORMING"
+                # Relative similarity/depth/separation measures pattern match,
+                # not the probability of a profitable reversal.
+                similarity = max(0.0, 1.0 - abs(values[newest]-values[older])/(.55*atr))
+                depth_fit = min(1.0, depth/(2.0*atr))
+                separation_fit = min(1.0, (newest-older)/7.0)
+                score = round(100*(.45*similarity + .35*depth_fit + .20*separation_fit))
                 candidates.append({"status": "watch", "pattern":name, "phase":phase,
                                    "bias":bias, "trigger_usd":round(neckline,2),
                                    "invalidation_usd":round(invalidation,2),
-                                   "observed_gap_candles":newest-older})
+                                   "observed_gap_candles":newest-older,
+                                   "pattern_match_score_pct":None if phase=="INVALIDATED" else min(95,max(0,score)),
+                                   "score_basis":"heuristic_geometry_v1"})
                 break
             if candidates:
                 break
@@ -141,20 +160,25 @@ def analyze_early_patterns(candles, source="exchange BTC/USD"):
                 if sign*(breakout[4]-trigger) > 0:
                     if sign*(last[4]-invalidation) <= 0:
                         result["phase"] = "INVALIDATED"
+                        result["pattern_match_score_pct"] = None
                     elif ((last[1] if sign>0 else last[2])*sign <= sign*(trigger+.25*sign*atr)
                           and sign*(last[4]-trigger) >= 0):
                         result["phase"] = "RETEST_HELD"
+                        result["pattern_match_score_pct"] = min(95, result["pattern_match_score_pct"] + 4)
                     else:
                         continue
                     return result
             if offset == 1:
                 if sign*(close-invalidation) <= 0:
                     result["phase"] = "INVALIDATED"
+                    result["pattern_match_score_pct"] = None
                     return result
                 if sign*(close-trigger) > 0:
                     baseline = _mean([b[5] for b in bars[-16:-1]])
                     result["phase"] = "BREAKOUT_WATCH"
                     result["volume_confirmed"] = bool(baseline > 0 and bars[-1][5] >= baseline)
+                    result["pattern_match_score_pct"] = min(95, max(0,
+                        result["pattern_match_score_pct"] + (5 if result["volume_confirmed"] else -8)))
                     return result
             if offset == 0:
                 result["phase"] = "FORMING"
