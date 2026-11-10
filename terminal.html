@@ -437,10 +437,12 @@ window.btcNoteRequest=function(name,ms,ok){
   if(live&&p.status==='watch'&&typeof p.pattern==='string'){
    const label=p.pattern.replaceAll('_',' ');
    const phase=String(p.phase||'FORMING').replaceAll('_',' ');
+   const fit=Number.isFinite(p.pattern_match_score_pct)&&p.phase!=='INVALIDATED'
+     ?' · Pattern match '+Math.round(p.pattern_match_score_pct)+'%':' · Pattern match unavailable';
    const trigger=Number.isFinite(p.trigger_usd)?' · watch '+dollars(p.trigger_usd):'';
    const invalid=Number.isFinite(p.invalidation_usd)?' · invalid above/below '+dollars(p.invalidation_usd):'';
-   node.textContent='PATTERN WATCH · '+label+' · '+phase+trigger+invalid+
-    ' · '+(d.source||'exchange 1m')+' · independent context, not settlement probability';
+   node.textContent='PATTERN WATCH · '+label+' · '+phase+fit+trigger+invalid+
+    ' · '+(d.source||'exchange 1m')+' · rule-based fit score, NOT outcome odds';
    node.style.borderColor=p.phase==='INVALIDATED'?'#b16b73':p.phase==='RETEST_HELD'?'#3b987f':'#d1a65a';
   }else if(live&&p.status==='monitoring'){
    node.textContent='PATTERN WATCH · Scanning for forming flags, double turns, breakouts and retests';
