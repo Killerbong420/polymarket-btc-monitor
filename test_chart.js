@@ -11,11 +11,9 @@ for(const endpoint of ['/api/candles','/api/brti-chart']){
  assert.ok(!html.includes("fetch('"+endpoint+"'"),endpoint+' must not be polled by the browser');
 }
 assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)updateServer\(\)\},4000\)/);
-assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)refreshFive\(\)\},4000\)/);
 assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)refreshTip\(\)\},3000\)/);
+assert.doesNotMatch(html,/\/api\/five-minute|fiveMinutePanel|refreshFive\(/);
 assert.match(html,/if\(statusInFlight\)return/);
-assert.match(html,/if\(fiveBusy\|\|document.hidden\)return/);
-assert.match(html,/finally\{clearTimeout\(timeout\);fiveBusy=false;\}/);
 assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)refreshRoundTiles\(\)\},10000\)/);
 const summaryScript=scripts.find(s=>s.includes('function updatePolymarketSummary(d)'));
 assert.ok(summaryScript,'official market summary updater is retained');
@@ -91,4 +89,4 @@ assert.equal(element('pmApiTarget').textContent,'—');
  console.log('PASS: real BRTI line, official price-to-beat, forecast guard, stale/rollover handling, no cost controls');
 }
 
-console.log('PASS: chart-light dashboard JS, guarded 4s status/five polling, 3s BRTI tips, and official BRTI target freshness');
+console.log('PASS: chart-light dashboard JS, guarded 4s status polling, 3s BRTI tips, and official BRTI target freshness');
