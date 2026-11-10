@@ -178,9 +178,9 @@ class TerminalUITest(unittest.TestCase):
         # A 5-minute zoom into the 15-minute BRTI chart is not a market call.
         self.assertIn('data-range="5m"', self.html)
 
-    def test_last_36_verified_round_tiles_for_both_markets(self):
+    def test_last_36_verified_round_tiles_15m_only(self):
         self.assertIn("LAST 36 VERIFIED 15-MINUTE ROUNDS",self.html)
-        self.assertIn("LAST 36 VERIFIED 5-MINUTE ROUNDS",self.html)
+        self.assertNotIn("LAST 36 VERIFIED 5-MINUTE ROUNDS",self.html)
         self.assertIn("fetch('/api/round-tiles'",self.html)
         self.assertIn("correct call",self.html)
         self.assertIn("No verified",self.html)
