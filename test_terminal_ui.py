@@ -76,8 +76,6 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn('id="patternName"', self.html)
         self.assertIn("ext.chart_pattern", self.html)
         self.assertIn("if(statusInFlight)return", self.html)
-        self.assertIn("if(fiveBusy||document.hidden)return", self.html)
-        self.assertIn("setInterval(()=>{if(!document.hidden)refreshFive()},4000)", self.html)
 
     def test_mobile_layout_uses_compact_order_and_expands_advanced_evidence(self):
         self.assertIn('id="mainTitle"', self.html)
@@ -90,8 +88,6 @@ class TerminalUITest(unittest.TestCase):
                         "function activeFlip(", "activeFlip(d,fastFresh)", "flipPanel"):
             self.assertNotIn(removed, self.html)
         self.assertIn("patternFold=document.createElement('details')", self.html)
-        self.assertIn("disclosure.id='fivePathDetails'", self.html)
-        self.assertIn("if(!el('fivePathDetails')?.open)", self.html)
         self.assertIn("const shell=document.createElement('details');shell.className='verified-rounds'", self.html)
         self.assertIn("body:not(.show-advanced) #marketDataPanel", self.html)
         self.assertIn("body:not(.show-advanced) #dataDiagnosticsPanel", self.html)
@@ -174,22 +170,17 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn('id="futureForecastCard"', self.html)
         self.assertIn('id="futureForecastPrice"', self.html)
 
-    def test_five_minute_path_focuses_on_brtI_without_market_value(self):
-        panel = self.html.split("/* Secondary, independently graded five-minute market;",1)[1]
-        self.assertIn('id="fivePathChart"', panel)
-        self.assertIn('id="fiveLiveProjection"', panel)
-        self.assertIn('id="fiveReversal"', panel)
-        self.assertIn("official_target_usd", panel)
-        self.assertIn("projected_settlement_average_usd", panel)
-        self.assertNotIn("fair price", panel.lower())
-        self.assertNotIn("auto-trader", panel.lower())
-        self.assertNotIn("Chance of UP", panel)
-        self.assertIn("No contract pricing or trade signals", panel)
+    def test_no_separate_five_minute_market_mode(self):
+        for old in ("fiveMinutePanel", "fivePathChart", "fiveDirection",
+                    "fiveTiles", "fiveLateTiles", "refreshFive()",
+                    "api/five-minute", "lateCheckpointAudit"):
+            self.assertNotIn(old, self.html)
+        # A 5-minute zoom into the 15-minute BRTI chart is not a market call.
+        self.assertIn('data-range="5m"', self.html)
 
     def test_last_36_verified_round_tiles_for_both_markets(self):
         self.assertIn("LAST 36 VERIFIED 15-MINUTE ROUNDS",self.html)
         self.assertIn("LAST 36 VERIFIED 5-MINUTE ROUNDS",self.html)
-        self.assertIn("fiveLateTiles",self.html)
         self.assertIn("fetch('/api/round-tiles'",self.html)
         self.assertIn("correct call",self.html)
         self.assertIn("No verified",self.html)
