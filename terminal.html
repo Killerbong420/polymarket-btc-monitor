@@ -207,12 +207,8 @@ body{max-width:920px!important;padding:12px 10px calc(48px + env(safe-area-inset
 #primaryPanel{order:2}
 #fastPanel{order:3}
 #strongPanel{order:4}
-#fiveMinutePanel{order:5;grid-column:1/-1}
-#fiveMinutePanel .value{font-size:30px!important}
-#fiveMinutePanel .label{font-size:12px}
-#fiveMinutePanel p.small{font-size:11px;margin:8px 0 0}
-#fivePathDetails,#patternFold{margin:10px 0;padding:10px 12px;background:#101c2b;border:1px solid #33485d;border-radius:10px}
-#fivePathDetails>summary,#patternFold>summary{font-weight:750;font-size:12px;color:#b3dbff;cursor:pointer}
+#patternFold{margin:10px 0;padding:10px 12px;background:#101c2b;border:1px solid #33485d;border-radius:10px}
+#patternFold>summary{font-weight:750;font-size:12px;color:#b3dbff;cursor:pointer}
 #patternFold #patternPanel{margin:10px 0 0!important}
 #futureForecastCard{border-color:#4a698a!important}
 #futureForecastCard .value{font-size:clamp(22px,5.5vw,31px)}
@@ -294,7 +290,7 @@ body:not(.show-advanced) #futureForecastCard p.small{display:none!important}
 
 @media(max-width:430px){#brtiLineCanvas{height:clamp(265px,78vw,350px)}#brtiRangeTabs button{padding:8px 10px}#brtiLineHead{font-size:10px}}
 </style><style>
-/* Rule-based dashboard: keep charts, 5m/15m calls, flip watch and verified checkpoint results.
+/* Rule-based dashboard: keep official 15m charts and verified checkpoint results.
    Legacy AI data remains archived in the database but is not presented as current predictions. */
 #aiConfirmationPanel,#aiDecisionLog,#serverHistory,#externalIntelPanel,#newsInfluence,
 #researchDashboard,#futureAiPrice,#futureShadowPrice {display:none!important}
@@ -340,7 +336,7 @@ window.btcNoteRequest=function(name,ms,ok){
    k+' '+(v.samples.length?Math.round(v.samples.reduce((a,b)=>a+b,0)/v.samples.length)+'ms avg':'waiting')+
    (v.failures?' · '+v.failures+' failed':'')).join(' | ');
 };
-</script><h1 id="mainTitle">₿ BTC · 15-MINUTE MARKET</h1><p id="mainSubtitle">Official BRTI target · 15-minute priority · 5-minute companion</p><section class="card" id="monitorHealth"><div class="row" style="justify-content:space-between"><div class="label">MONITOR ALERTS</div><span class="status" id="healthLabel">CHECKING</span></div><div id="healthAlerts" aria-live="polite"></div><div id="networkTiming" class="small" style="margin-top:8px">Browser timing: collecting</div><details><summary class="small">Alert history</summary><div id="healthHistory"></div></details></section>
+</script><h1 id="mainTitle">₿ BTC · 15-MINUTE MARKET</h1><p id="mainSubtitle">Official BRTI target · 15-minute market and pattern research</p><section class="card" id="monitorHealth"><div class="row" style="justify-content:space-between"><div class="label">MONITOR ALERTS</div><span class="status" id="healthLabel">CHECKING</span></div><div id="healthAlerts" aria-live="polite"></div><div id="networkTiming" class="small" style="margin-top:8px">Browser timing: collecting</div><details><summary class="small">Alert history</summary><div id="healthHistory"></div></details></section>
 <section class="card" id="marketShockPanel" data-level="unavailable" aria-label="BTC market shock indicator">
  <div class="row" style="justify-content:space-between;align-items:center">
   <span class="label">⚡ MARKET SHOCK · BTC/USD</span><span class="status" id="marketShockStatus">CHECKING</span>
@@ -1085,7 +1081,6 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
 <section class="card" id="checkpointBoard" aria-label="Independently graded Bitcoin checkpoint accuracy">
  <div class="row" style="justify-content:space-between"><strong class="label">MODEL CHECKPOINT SCOREBOARD</strong><span id="checkpointUpdated" class="small">Reading verified settlements</span></div>
  <table><thead><tr><th>Forecast / checkpoint</th><th>Wins / calls</th><th>Accuracy</th></tr></thead><tbody id="checkpointRows"><tr><td>Awaiting official settlement history</td><td>—</td><td>—</td></tr></tbody></table>
- <div id="lateCheckpointAudit" class="xnote">Strict 5-minute 2:30 scoring is separate from legacy late calls.</div>
  <div class="xnote">Timing matters: later predictions have more information and are not directly comparable to early ones. Only frozen calls with verified settlements are scored; no calibration or profitable trading is implied.</div>
 </section>
 <section class="card" id="serverHistory"><div class="label">AI ACCURACY · LAST 100 SETTLED PREDICTIONS (15M)</div><div class="row"><span class="status" id="serverState">Connecting…</span><span class="small" id="serverCounts"></span></div><div class="result-grid" aria-label="Server prediction results"><div class="result-tile"><div class="result-number up" id="winCount">0</div><div class="result-label">WINS · LAST 100</div></div><div class="result-tile"><div class="result-number down" id="lossCount">0</div><div class="result-label">LOSSES · LAST 100</div></div><div class="result-tile"><div class="result-number wait" id="pendingCount">0</div><div class="result-label">PENDING · ALL</div></div><div class="result-tile"><div class="result-number" id="winRate">—</div><div class="result-label">LAST 100 ACCURACY</div></div></div><div class="small" id="winLossRatio" aria-live="polite">AI WIN/LOSS RATIO · —</div><div class="small" id="serverLatest" aria-live="polite">Checking saved predictions…</div><div class="result-foot" id="settlementInfo">Settlement verification: checking…</div><p class="small">Win/loss and accuracy use the 100 most recent settled 15-minute AI_REVIEW predictions (or fewer if not yet available). Pending predictions are counted separately and excluded from accuracy. Fallbacks are excluded. Older records remain stored for historical analysis; verified Polymarket settlement is required to score a prediction.</p></section><section class="card" id="peerBotsPanel"><div class="row" style="justify-content:space-between"><div class="label">BOT STRATEGY STUDIES · 15-MIN MARKET</div><span class="status">RESEARCH ONLY</span></div><div id="peerBotsLive" class="small">Waiting for fresh BTC exchange candles…</div><p class="small">MACD trend, Bollinger reversals, ATR breakouts and range/liquidity price action. These are independent public-indicator studies, not another trader's live signals. Compare their settled win rates and prediction coverage under Detailed logs.</p></section><script>(()=>{const $=id=>document.getElementById(id);function safeText(v){return String(v??'—')}
@@ -1411,9 +1406,6 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
     tr.append(td,n,rate);rows.append(tr);
    };
    for(const entry of data.fifteen||[])add('15m '+entry.label+' · '+(entry.method==='PRICE_PATH'?'Price path':'AI'),entry);
-   for(const entry of data.five||[])add('5m '+entry.label,entry);
-   const audit=data.late_audit||{};
-   put('lateCheckpointAudit','Strict 2:30 audit · '+(audit.within_window||0)+' within window / '+(audit.sampled||0)+' sampled; earlier/later captures excluded. The 5-minute late panel shows independently verified calls only.');
    put('checkpointUpdated','Last 100 settled per checkpoint (or fewer)');
   }catch(e){put('checkpointUpdated','Verified grading temporarily unavailable');}
   finally{clearTimeout(timer);loading=false}
@@ -1461,113 +1453,6 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  if(toggle)(patternFold||ai||history||forecast||cards).insertAdjacentElement('afterend',toggle);
 })();
 </script><script>
-/* Secondary, independently graded five-minute market; primary 15m layout unchanged. */
-(()=>{
- const primary=document.getElementById('final15Panel');
- if(!primary)return;
- const panel=document.createElement('section');
- panel.id='fiveMinutePanel';
- panel.className='card';
- panel.style.cssText='border-left:4px solid #b79aff;margin-top:10px';
- panel.innerHTML='<div class="row" style="justify-content:space-between"><span class="label">5-MINUTE POLYMARKET · SECONDARY</span><span class="small" id="fiveCountdown">Checking market</span></div><div class="value wait" id="fiveDirection">WAIT</div><div class="small" id="fiveTarget">Official target: awaiting verified contract</div><div class="small" id="fiveForecast">Frozen prediction: awaiting fresh BRTI</div><div class="small" id="fiveLiveProjection" style="margin-top:8px;font-weight:600">Live projected settlement: awaiting verified BRTI</div><div class="small" id="fiveLead">Projected gap versus official target: —</div><div class="small" id="fiveReversal">Reversal evidence: checking</div><svg id="fivePathChart" viewBox="0 0 640 220" role="img" aria-label="Official five-minute BRTI observations, price to beat, and illustrative projected final-minute mean" style="width:100%;height:auto;display:none;max-height:230px;margin-top:10px;background:#0a151c;border-radius:8px"></svg><div class="small" id="fiveVisualNote">Observed official BRTI ticks only. Dotted path is illustrative; final result is the last 60-second average, not the last traded price.</div><div class="small" id="fiveScore" style="margin-top:8px;font-weight:700">Early 5m accuracy: collecting</div><div class="small" id="fiveLateScore" style="margin-top:4px;font-weight:700">2:30 checkpoint accuracy: collecting</div><details style="margin-top:6px"><summary class="small">Last 5m predictions and results</summary><div id="fiveRecent" class="small"></div></details><div class="small" id="fiveMarketLink"></div><p class="small">Independent 5-minute BRTI forecast. Early and 2:30-left calls are frozen and graded separately against verified settlements. The 2:30 call is captured with 120–150 seconds remaining; missed checkpoints are not backfilled. Older off-window calls remain in the audit but are excluded from the strict 2:30 accuracy. Does not affect 15-minute signals or win rate.</p>';
- primary.insertAdjacentElement('afterend',panel);
- const path=panel.querySelector('#fivePathChart'),note=panel.querySelector('#fiveVisualNote');
- if(path){
-  const disclosure=document.createElement('details');disclosure.id='fivePathDetails';
-  const summary=document.createElement('summary');summary.textContent='Show 5-minute BRTI reference path';
-  path.insertAdjacentElement('beforebegin',disclosure);
-  disclosure.append(summary,path);
-  if(note)disclosure.append(note);
- }
- const el=id=>document.getElementById(id);
- const money=v=>v!==null&&v!==undefined&&Number.isFinite(Number(v))?'USD '+Number(v).toFixed(2):'—';
- function drawFivePath(visual){
-  const svg=el('fivePathChart');
-  if(!el('fivePathDetails')?.open){svg.style.display='none';return;}
-  svg.replaceChildren();
-  const pts=Array.isArray(visual?.observed_points)?visual.observed_points.filter(p=>Array.isArray(p)&&p.length===2&&Number.isFinite(Number(p[0]))&&Number.isFinite(Number(p[1]))&&Number(p[1])>0):[];
-  const start=Number(visual?.window_start_epoch),end=Number(visual?.window_end_epoch);
-  const target=Number(visual?.official_target_usd),mean=Number(visual?.projected_settlement_average_usd);
-  const current=Number(visual?.current_reference_usd);
-  if(visual?.status!=='available'||pts.length<2||!(end>start)||![target,mean,current].every(Number.isFinite)){
-   svg.style.display='none';return;
-  }
-  svg.style.display='block';
-  const width=640,height=220,left=18,right=94,top=18,bottom=25;
-  const values=pts.map(p=>Number(p[1])).concat([target,mean,current]);
-  const min=Math.min(...values),max=Math.max(...values),pad=Math.max(3,(max-min)*.12);
-  const lo=min-pad,hi=max+pad;
-  const X=t=>left+(Math.max(start,Math.min(end,t))-start)/(end-start)*(width-left-right);
-  const Y=p=>top+(hi-p)/(hi-lo)*(height-top-bottom);
-  const ns='http://www.w3.org/2000/svg';
-  const make=(tag,props,text)=>{
-   const n=document.createElementNS(ns,tag);
-   for(const [k,v] of Object.entries(props||{}))n.setAttribute(k,String(v));
-   if(text!==undefined)n.textContent=text;
-   svg.append(n);return n;
-  };
-  make('rect',{x:X(end-60),y:top,width:X(end)-X(end-60),height:height-top-bottom,fill:'#315443','fill-opacity':'.27'});
-  make('line',{x1:X(end-60),y1:top,x2:X(end-60),y2:height-bottom,stroke:'#6fa48a','stroke-dasharray':'3 5','stroke-opacity':'.7'});
-  for(let i=0;i<3;i++){
-   const v=lo+(hi-lo)*(i+1)/4;
-   make('line',{x1:left,y1:Y(v),x2:X(end),y2:Y(v),stroke:'#34434a','stroke-opacity':'.7'});
-  }
-  make('line',{x1:left,y1:Y(target),x2:X(end),y2:Y(target),stroke:'#d7dde4','stroke-width':'1.2','stroke-dasharray':'5 5'});
-  let path='',previous=null;
-  for(const p of pts){
-   const t=Number(p[0]),v=Number(p[1]);
-   path+=(previous===null||t-previous>10?'M':'L')+X(t).toFixed(1)+','+Y(v).toFixed(1)+' ';
-   previous=t;
-  }
-  make('path',{d:path,fill:'none',stroke:'#fb9d37','stroke-width':'2.6','stroke-linecap':'round','stroke-linejoin':'round'});
-  const last=pts[pts.length-1];
-  make('circle',{cx:X(Number(last[0])),cy:Y(Number(last[1])),r:3.2,fill:'#fb9d37'});
-  // The dotted guide is illustrative; its endpoint is a final-minute AVERAGE, not a future spot tick.
-  make('line',{x1:X(Number(last[0])),y1:Y(Number(last[1])),x2:X(end-30),y2:Y(mean),stroke:'#71b8ff','stroke-width':'2','stroke-dasharray':'4 6'});
-  make('line',{x1:X(end-60),y1:Y(mean),x2:X(end),y2:Y(mean),stroke:'#71b8ff','stroke-width':'2.5','stroke-dasharray':'4 4'});
-  make('text',{x:X(end)+6,y:Math.max(13,Math.min(height-20,Y(target)+4)),fill:'#d7dde4','font-size':'13'},target.toFixed(2));
-  make('text',{x:X(end)+6,y:Math.max(13,Math.min(height-20,Y(mean)-6)),fill:'#71b8ff','font-size':'13'},'AVG '+mean.toFixed(2));
-  make('text',{x:X(end-60)+5,y:height-6,fill:'#8aa99b','font-size':'12'},'Final 60s');
- }
- let fiveBusy=false;
- async function refreshFive(){
- if(fiveBusy||document.hidden)return;
- fiveBusy=true;
- const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),4500);
- try{
-   const response=await fetch('/api/five-minute',{cache:'no-store',signal:controller.signal});
-   if(!response.ok)throw Error('Unavailable');
-   const data=await response.json(),live=data.live||{},accuracy=data.accuracy||{};
-   const dir=['UP','DOWN'].includes(live.direction)?live.direction:'WAIT';
-   el('fiveDirection').textContent=dir;
-   el('fiveDirection').className='value '+(dir==='UP'?'up':dir==='DOWN'?'down':'wait');
-   el('fiveCountdown').textContent=live.seconds_left!=null?Math.floor(live.seconds_left/60)+':'+String(Math.max(0,live.seconds_left%60)).padStart(2,'0')+' left':(live.reason||'Checking');
-   el('fiveTarget').textContent='Official target: '+money(live.target);
-   el('fiveForecast').textContent=(live.phase==='LATE_2M30'?'FROZEN 2:30 CHECKPOINT':'FROZEN EARLY CHECKPOINT')+' · Projected final 60s BRTI mean: '+money(live.forecast)+' · '+(live.reason||live.status||'Checking official market');
-   const visual=live.visual_forecast||{},verified=visual.status==='available'&&visual.source==='Polymarket US BTC reference / BRTI'&&Math.abs(Number(visual.official_target_usd)-Number(live.target))<=0.02;
-   el('fiveLiveProjection').textContent=verified?'LIVE BRTI · '+money(visual.current_reference_usd)+' · projected final 60s mean '+money(visual.projected_settlement_average_usd):'Live projection unavailable · '+(visual.reason||'Awaiting verified reference');
-   el('fiveLead').textContent=verified?'Projected gap vs official target: '+(visual.projected_gap_usd>=0?'+':'')+Number(visual.projected_gap_usd).toFixed(2)+' USD · heuristic range '+money(visual.downside_scenario_usd)+' to '+money(visual.upside_scenario_usd):'Projected gap versus official target: —';
-   el('fiveReversal').textContent=verified?(visual.reversal_warning?'REVERSAL WATCH · observed short and longer BRTI slopes disagree':'No opposing BRTI slopes detected')+' · '+(visual.quality||'UNRATED')+' data quality · not a probability':'Reversal evidence: unavailable';
-   el('fiveVisualNote').textContent='Official BRTI ticks only · updated '+(verified?Math.round(visual.reference_age_seconds||0)+'s behind latest index':'when fresh')+'. Dashed path is illustrative; settlement uses the final 60-second AVERAGE. No contract pricing or trade signals.';
-   drawFivePath(verified?visual:null);
-   el('fiveScore').textContent='Early 5m accuracy: '+(accuracy.graded?accuracy.accuracy_pct+'%':'collecting')+' · '+(accuracy.wins||0)+' WIN / '+(accuracy.losses||0)+' LOSS · last '+(accuracy.graded||0)+'/100 settled';
-   const late=accuracy.late||{};
-   el('fiveLateScore').textContent='2:30 checkpoint accuracy: '+(late.graded?late.accuracy_pct+'%':'collecting')+' · '+(late.wins||0)+' WIN / '+(late.losses||0)+' LOSS · last '+(late.graded||0)+'/100 settled';
-   el('fiveRecent').replaceChildren();
-   for(const item of (accuracy.recent||[])){
-    const line=document.createElement('div');
-    line.textContent=item.market+' · '+item.direction+' · '+item.result;
-    el('fiveRecent').append(line);
-   }
-   const link=el('fiveMarketLink');link.replaceChildren();
-   if(live.url&&/^https:\/\/polymarket\.us\/event\/(?:cpc-)?btc-updown-5m-[a-zA-Z0-9-]+$/.test(live.url)){
-    const a=document.createElement('a');a.href=live.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='View current 5m market on Polymarket';link.append(a);
-   }
-  }catch(e){el('fiveCountdown').textContent='Feed unavailable';}finally{clearTimeout(timeout);fiveBusy=false;}
- }
- refreshFive();setInterval(()=>{if(!document.hidden)refreshFive()},4000);
-})();
-</script><script>
 /* Recent verified rounds. Never uses odds, contract value, or live guessed outcomes. */
 (()=>{
  const css=document.createElement('style');
@@ -1586,35 +1471,28 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  `;
  document.head.append(css);
  const el=id=>document.getElementById(id);
- function create(parent,title,id,late){
+ function create(parent,title,id){
   if(!parent)return;
   const shell=document.createElement('details');shell.className='verified-rounds';
   const heading=document.createElement('summary');heading.className='round-title';heading.textContent=title+' · tap to expand';
   const meta=document.createElement('div');meta.className='round-meta';meta.id=id+'Meta';meta.textContent='Collecting verified results…';
   shell.append(heading,meta);
-  function row(name,gridId){
-   const label=document.createElement('div');label.className='round-sub';label.textContent=name;
-   const grid=document.createElement('div');grid.className='round-grid';grid.id=gridId;grid.setAttribute('aria-label',name+' recent verified outcomes');
-   shell.append(label,grid);
-  }
-  row(late?'EARLY FORECAST':'FINAL AI FORECAST',id);
-  if(late)row('2:30 LEFT FORECAST · SAME ROUNDS','fiveLateTiles');
+  const label=document.createElement('div');label.className='round-sub';label.textContent='FINAL AI FORECAST';
+  const grid=document.createElement('div');grid.className='round-grid';grid.id=id;grid.setAttribute('aria-label','Recent verified 15-minute outcomes');
+  shell.append(label,grid);
   const legend=document.createElement('div');legend.className='round-legend';
-  legend.textContent='▲ Official UP · ▼ Official DOWN · white outline = correct call · faded = incorrect · dashed = no verified call. Oldest → newest.';
+  legend.textContent='▲ Official UP · ▼ Official DOWN · white outline = correct call · faded = incorrect. Oldest → newest.';
   shell.append(legend);parent.append(shell);
  }
- create(el('serverHistory'),'LAST 36 VERIFIED 15-MINUTE ROUNDS','fifteenTiles',false);
- create(el('fiveMinutePanel'),'LAST 36 VERIFIED 5-MINUTE ROUNDS','fiveTiles',true);
- function draw(id,rounds,phase){
+ create(el('serverHistory'),'LAST 36 VERIFIED 15-MINUTE ROUNDS','fifteenTiles');
+ function draw(id,rounds){
   const grid=el(id);if(!grid)return;grid.replaceChildren();
   for(const r of rounds.slice(-36)){
    if(!['UP','DOWN'].includes(r.winner))continue;
-   const correct=phase==='early'?r.early_correct:phase==='late'?r.late_correct:r.correct;
-   const predicted=phase==='early'?r.early_prediction:phase==='late'?r.late_prediction:r.prediction;
    const tile=document.createElement('span');tile.className='round-tile';
-   if(correct===null||correct===undefined){tile.classList.add('missing');tile.textContent='–';}
-   else{tile.classList.add(r.winner==='UP'?'up':'down',correct?'right':'wrong');tile.textContent=r.winner==='UP'?'▲':'▼';}
-   tile.title=r.market+' · official '+r.winner+' · '+(correct==null?'No verified '+phase+' call':phase+' predicted '+predicted+' · '+(correct?'RIGHT':'WRONG'));
+   tile.classList.add(r.winner==='UP'?'up':'down',r.correct?'right':'wrong');
+   tile.textContent=r.winner==='UP'?'▲':'▼';
+   tile.title=r.market+' · official '+r.winner+' · predicted '+r.prediction+' · '+(r.correct?'RIGHT':'WRONG');
    tile.setAttribute('aria-label',tile.title);grid.append(tile);
   }
  }
@@ -1627,14 +1505,12 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
    if(!response.ok)throw Error('History unavailable');
    const data=await response.json();
    if(data.status!=='observed'||data.ordering!=='oldest_to_newest')throw Error('Unverified history');
-   const f=data.fifteen||{},m=data.five||{};
-   const fr=Array.isArray(f.rounds)?f.rounds:[],mr=Array.isArray(m.rounds)?m.rounds:[];
-   draw('fifteenTiles',fr,'fifteen');draw('fiveTiles',mr,'early');draw('fiveLateTiles',mr,'late');
-   const fs=f.summary||{},ms=m.summary||{},ls=m.late_summary||{};
+   const f=data.fifteen||{},fr=Array.isArray(f.rounds)?f.rounds:[];
+   draw('fifteenTiles',fr);
+   const fs=f.summary||{};
    if(el('fifteenTilesMeta'))el('fifteenTilesMeta').textContent=(fs.rounds||0)+' rounds · '+(fs.up||0)+' UP / '+(fs.down||0)+' DOWN · '+(fs.correct||0)+' right / '+(fs.incorrect||0)+' wrong';
-   if(el('fiveTilesMeta'))el('fiveTilesMeta').textContent=(ms.rounds||0)+' rounds · '+(ms.up||0)+' UP / '+(ms.down||0)+' DOWN · early '+(ms.correct||0)+'/'+(ms.scored||0)+' right · 2:30 '+(ls.correct||0)+'/'+(ls.scored||0)+' right';
   }catch(e){
-   for(const id of ['fifteenTilesMeta','fiveTilesMeta'])if(el(id))el(id).textContent='Verified history temporarily unavailable; retaining previous tiles';
+   if(el('fifteenTilesMeta'))el('fifteenTilesMeta').textContent='Verified history temporarily unavailable; retaining previous tiles';
   }finally{clearTimeout(timeout);busy=false;}
  }
  refreshRoundTiles();
