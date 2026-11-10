@@ -13,6 +13,7 @@ import httpx
 from exchange_prices import fetch_snapshot, public_snapshot
 from market_chart_history import record_exchange
 from live_trade_stream import stream_snapshot
+from large_execution_watch import examine_stream, combine_watches
 
 FEEDS = [('CoinDesk','https://www.coindesk.com/arc/outboundfeeds/rss/'),
          ('Cointelegraph','https://cointelegraph.com/rss'),
@@ -103,6 +104,7 @@ def streaming_flow(source, now=None):
     if result["status"] != "fresh":
         return None
     result["transport"] = "websocket"
+    result["large_trade_watch"] = examine_stream(sample, source, now)
     result["connected_since_epoch"] = sample["connected_since_epoch"]
     result["latest_trade_age_seconds"] = round(now - sample["latest_trade_epoch"], 2)
     for seconds in (10, 30):
@@ -269,6 +271,7 @@ def public_intelligence():
         item=d[key];ts=item.get('fetched_epoch')
         item['age_seconds']=round(max(0,now-ts)) if ts else None
         if ts and now-ts>(300 if key=='news' else 60):item['status']='stale'
+    d['large_trade_activity']=combine_watches(d['trade_flow'],d['order_book'],now)
     d['coverage']='BTC/USD last prices from Coinbase, Kraken, Bitstamp, Gemini, Bitfinex, Binance.US; Binance Global and OKX BTC/USDT shown separately. Coinbase/Kraken live observed trade flow with REST fallback, Kraken depth, and selected news. WebSocket gaps are possible; unavailable venues remain labeled; no full global trade-flow or on-chain coverage.'
     return d
 
