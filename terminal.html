@@ -421,7 +421,7 @@ window.btcNoteRequest=function(name,ms,ok){
   return '';
  }
  function whaleContext(s,now){
-  // Uses current backend market snapshot; no new network requests.
+  // Data already supplied by the current backend status snapshot; no new fetch.
   const a=s.external?.external_intelligence?.large_trade_activity||{};
   const stamp=Date.parse(s.updated||'')/1000;
   if(s.status!=='running'||typeof s.market!=='string'||
@@ -431,7 +431,17 @@ window.btcNoteRequest=function(name,ms,ok){
    return ' · LARGE-TRADE WATCH: waiting for current trade samples';
   if(a.status==='watch'){
    const side=a.side==='BUY_SIDE'?'BUY-SIDE':a.side==='SELL_SIDE'?'SELL-SIDE':'MIXED';
-   const amt=n=>'
+   const amt=n=>'USD '+Math.round(Number(n||0)).toLocaleString('en-US');
+   const count=Number(a.large_execution_count)||0;
+   const venues=Array.isArray(a.eligible_venues)?a.eligible_venues.join(' + '):'exchange';
+   return ' · LARGE-TRADE WATCH: '+side+' · '+count+' unusually large execution'+(count===1?'':'s')+
+      ' · largest '+amt(a.largest_execution_usd)+' · '+venues+' · possible big-player activity, identity unknown';
+  }
+  if(a.status==='monitoring')
+   return ' · LARGE-TRADE WATCH: no unusually large executions in qualified 30s samples';
+  return ' · LARGE-TRADE WATCH: awaiting reliable exchange coverage';
+ }
+ const clock=t=>Number.isFinite(Number(t))&&Number(t)>0?new Date(Number(t)*1000).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'—';
  let lastTimelineKey='';
  function drawHistory(rows){
   const key=rows.map(x=>[x.id,x.phase,x.last_bar_epoch,x.result].join(':')).join('|');
