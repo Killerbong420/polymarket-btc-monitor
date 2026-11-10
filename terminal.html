@@ -480,7 +480,8 @@ window.btcNoteRequest=function(name,ms,ok){
        x.pattern===p.pattern&&Number(x.anchor_epoch)===Number(p.anchor_epoch));
    const phase=tracked?.phase|| (p.phase==='NECKLINE_BREAK_WATCH'||p.phase==='BREAKOUT_WATCH'?'BREAKOUT':p.phase);
    if(phase==='INVALIDATED'||phase==='EXPIRED'){
-    node.textContent='PATTERN WATCH · '+label(p.pattern)+' · '+label(phase)+' · previous warning saved in timeline';
+    node.textContent='PATTERN WATCH · '+label(p.pattern)+' · '+label(phase)+
+      (tracked?' · prior warning saved in timeline':' · no earlier warning recorded');
     node.style.borderColor='#b16b73';
     return;
    }
