@@ -84,6 +84,7 @@ def anticipate_doji(reference, now=None):
                 candle.pop("observed")
                 return {**base, **candle, "status": "forming",
                         "seconds_until_close": round(left, 1),
+                        "candle_end_epoch": minute + 60,
                         "body_to_range_pct": round(ratio * 100, 1),
                         "reason": "Near-open body before the candle finishes; can invalidate at close"}
             return {**base, "status": "monitoring", "reason": "no_doji_shape_yet",
