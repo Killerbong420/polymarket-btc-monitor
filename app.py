@@ -25,7 +25,6 @@ from decision_engine import reversal_evidence, guarded_decision, manual_entry_re
 from forward_eval import evaluate_guarded
 from round_tiles import report as recent_round_tiles
 from quick_forecast import quick_forecast
-import five_min_monitor
 import terry_calls
 from checkpoint_scoreboard import build_scoreboard
 from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
@@ -65,7 +64,7 @@ def execute(sql, params=(), fetch=False):
    # This avoids serving stale counts immediately after a settlement or new call.
    operation=sql.lstrip().split(None,1)[0].upper() if sql.strip() else ""
    if operation in ("INSERT","UPDATE","DELETE","REPLACE","CREATE","DROP","ALTER") and any(
-      name in sql.lower() for name in ("signals","ai_decisions","five_min_","research_calls")):
+      name in sql.lower() for name in ("signals","ai_decisions","research_calls")):
     _history_write_version+=1
    if fetch: return cur.fetchall()
   finally:
@@ -1172,7 +1171,6 @@ async def read_only_diagnostics_loop():
      "quick_forecast_status":(state.get("quick_forecast") or {}).get("status"),
      "ai_status":(public_state() or {}).get("status"),
      "ai_path_informed":(public_state() or {}).get("price_path_informed"),
-     "five_minute":{k:five_min_monitor.state.get(k) for k in ("status","market","direction","target","forecast","reason")},
      "ai_performance":current.get("ai_performance"),
      "database_reporting_error":bool(current.get("database_error")),
      "numeric_accuracy_status":prices.get("status"),
@@ -1184,7 +1182,7 @@ async def read_only_diagnostics_loop():
      "manual_entry_review":state.get("manual_entry_review"),
      "target_validation":state.get("target_validation"),
      "active_alert_codes":[a.get("code") for a in state.get("alerts",[]) if isinstance(a,dict)]
-    } | diagnostic_extras(state,five_min_monitor.state,first_five_quick_report)
+    } | diagnostic_extras(state,first_five_quick_report)
    summary=await asyncio.to_thread(gather)
    print("BTC_READ_ONLY_DIAG "+json.dumps(summary,default=str,separators=(",",":")),flush=True)
   except Exception as exc:
@@ -1200,10 +1198,6 @@ async def lifespan(app):
  context_task=asyncio.create_task(intelligence_loop())
  trade_stream_task=asyncio.create_task(stream_loop())
  chart_task=asyncio.create_task(official_chart_sampler(state))
- async def five_min_worker():
-  async with httpx.AsyncClient(headers={"User-Agent":"BTCResearchMonitor/1.0"}) as client:
-   await five_min_monitor.loop(client,execute,verified_winner,state,postgres=bool(DB))
- five_task=asyncio.create_task(five_min_worker())
  # Paper-trading worker disabled: prediction-only mode.
  async def historical_job():
   try:
@@ -1224,10 +1218,9 @@ async def lifespan(app):
  context_task.cancel()
  trade_stream_task.cancel()
  chart_task.cancel()
- five_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,status_history_task,history_task,context_task,trade_stream_task,chart_task,diagnostics_task,five_task,terry_task,*pending_predictions):
+ for running in (task,status_history_task,history_task,context_task,trade_stream_task,chart_task,diagnostics_task,terry_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
@@ -1690,12 +1683,6 @@ def round_tiles_report():
  except Exception:
   return JSONResponse({"status":"unavailable","reason":"Verified round history database unavailable"},status_code=503)
 
-@app.get("/api/five-minute")
-def five_minute_report():
- """Serve the worker's published snapshot; HTTP polling never repeats SQL."""
- live=dict(five_min_monitor.state)
- return {"live":live,"accuracy":live.get("accuracy") or {"status":"collecting"}}
-
 @app.get("/api/quick-accuracy")
 def quick_accuracy_report():
  try:return first_five_quick_report()
@@ -1713,7 +1700,7 @@ def checkpoint_scoreboard_report():
    return _checkpoint_display_cache["data"]
   rows=iter_query_rows("""SELECT market,checkpoint,calls_json,winner FROM research_calls
      WHERE winner IN ('UP','DOWN') ORDER BY created_at DESC LIMIT 1500""")
-  data=build_scoreboard(rows,five_min_monitor.report(execute))
+  data=build_scoreboard(rows)
   data["updated_epoch"]=now
   _checkpoint_display_cache.update(updated=now,data=data)
   return data

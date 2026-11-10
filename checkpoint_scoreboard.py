@@ -40,19 +40,8 @@ def summarize_checkpoint_rows(rows, limit=100):
             item["accuracy_pct"]=round(item["wins"]/item["graded"]*100,1)
     return [grouped[(checkpoint,method)] for checkpoint,_ in CHECKPOINTS for method,_ in METHODS]
 
-def build_scoreboard(rows,five_report=None):
-    result=summarize_checkpoint_rows(rows)
-    five_report=five_report or {}
-    def five_item(key,label,stats):
-        wins=int(stats.get("wins") or 0)
-        losses=int(stats.get("losses") or 0)
-        n=wins+losses
-        return {"market":"5m","checkpoint":key,"label":label,
-                "name":"Frozen BRTI forecast","wins":wins,"losses":losses,
-                "graded":n,"accuracy_pct":round(wins/n*100,1) if n else None,
-                "basis":"Verified settlements only, no retroactive checkpoint assignment"}
-    five=[five_item("EARLY","First available",five_report),
-          five_item("LATE_2M30","2:30 left · strict",five_report.get("late") or {})]
-    return {"status":"available","fifteen":result,"five":five,"window_size":100,
-            "limitations":"Different checkpoints have different samples and information. Accuracy improves naturally as expiry approaches; no profitability, calibration, or prediction guarantee is inferred.",
-            "late_audit":(five_report.get("late") or {}).get("capture_audit")}
+def build_scoreboard(rows):
+    """Only settled 15-minute market checkpoints are shown."""
+    result = summarize_checkpoint_rows(rows)
+    return {"status":"available","fifteen":result,"window_size":100,
+            "limitations":"Different 15-minute checkpoints have different samples and information. Accuracy naturally changes near expiry; no profitability, calibration, or guarantee is implied."}

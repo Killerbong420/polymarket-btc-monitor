@@ -5,7 +5,6 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import app
-import five_min_monitor
 
 
 class DatabaseResponsivenessTests(unittest.IsolatedAsyncioTestCase):
@@ -28,28 +27,6 @@ class DatabaseResponsivenessTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(app, 'execute', side_effect=slow_database):
             await self.assert_loop_responsive(app.settle(AsyncMock()))
-
-    async def test_five_minute_report_does_not_block_live_loop(self):
-        original = dict(five_min_monitor.state)
-
-        def slow_report(execute):
-            time.sleep(0.2)
-            return {}
-
-        async def run_once():
-            task = asyncio.create_task(five_min_monitor.live_loop(AsyncMock(), lambda *a: [], {}))
-            try:
-                await asyncio.sleep(0.3)
-            finally:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-
-        try:
-            with patch.object(five_min_monitor, 'discover', AsyncMock(return_value=(None, 'test'))), patch.object(five_min_monitor, 'report', side_effect=slow_report):
-                await self.assert_loop_responsive(run_once())
-        finally:
-            five_min_monitor.state.clear()
-            five_min_monitor.state.update(original)
 
     async def test_historical_learning_never_holds_up_live_prices(self):
         from threading import Event
@@ -86,6 +63,3 @@ class DatabaseResponsivenessTests(unittest.IsolatedAsyncioTestCase):
             app._outcome_feedback_cache.clear()
             app._outcome_feedback_cache.update(old_cache)
 
-    async def test_five_minute_http_uses_worker_snapshot_without_sql(self):
-        with patch.dict(five_min_monitor.state, {'accuracy': {'wins': 55, 'losses': 45}}), patch.object(app, 'execute', side_effect=AssertionError('HTTP must not query SQL')):
-            self.assertEqual(app.five_minute_report()['accuracy']['wins'], 55)
