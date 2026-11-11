@@ -15,6 +15,20 @@ def trade(builder,ident,when,price,amount=1):
     return builder.append((when,price,amount,"buy",ident),now=when)
 
 
+def feed_minute(builder,events=None,until=70,skip_heartbeats=(),heartbeat_overrides=None):
+    # Simulate the actual ordered stream: heartbeat once a second, with
+    # qualifying match messages interspersed before that second's heartbeat.
+    events=events or {}
+    heartbeat_overrides=heartbeat_overrides or {}
+    for sec in range(-2,until+1):
+        now=BASE+sec
+        if sec in events:
+            for ident,price in events[sec]:
+                trade(builder,ident,now,price)
+        if sec not in skip_heartbeats:
+            beat(builder,heartbeat_overrides.get(sec,builder.last_trade_id),now)
+
+
 def rest_history(last_start=BASE-60,count=35):
     return [[last_start-(count-1-i)*60,100,101,100.1,100.5,3]
             for i in range(count)]
@@ -29,25 +43,19 @@ class CoinbaseMinuteBuilderTests(unittest.TestCase):
 
     def test_candle_waits_for_true_close_and_heartbeat(self):
         b=self.new_builder()
-        self.assertTrue(trade(b,101,BASE+1,100,2))
-        self.assertTrue(trade(b,102,BASE+10,110,1))
-        self.assertTrue(trade(b,103,BASE+55,105,3))
-        beat(b,103,BASE+58)
+        feed_minute(b,{1:[(101,100)],10:[(102,110)],55:[(103,105)]})
         self.assertEqual(b.snapshot(BASE+61)["status"],"warming")
-        beat(b,103,BASE+69)
         ready=b.snapshot(BASE+70)
         self.assertEqual(ready["status"],"available")
         self.assertEqual(ready["transport"],"websocket_matches_heartbeat")
         bar=ready["candles"][-1]
         self.assertEqual(bar[:5],[BASE,100,110,100,105])
-        self.assertEqual(bar[5],6)
+        self.assertEqual(bar[5],3)
         self.assertEqual(ready["last_completed_epoch"],BASE+60)
 
     def test_id_gap_rejects_candle_without_interpolating(self):
         b=self.new_builder()
-        self.assertTrue(trade(b,101,BASE+3,100))
-        self.assertTrue(trade(b,103,BASE+10,110))
-        beat(b,103,BASE+69)
+        feed_minute(b,{3:[(101,100)],10:[(103,110)]})
         result=b.snapshot(BASE+70)
         self.assertEqual(result["status"],"warming")
         self.assertEqual(result["candles"],[])
@@ -55,45 +63,38 @@ class CoinbaseMinuteBuilderTests(unittest.TestCase):
 
     def test_heartbeat_detects_lost_match(self):
         b=self.new_builder()
-        self.assertTrue(trade(b,101,BASE+2,100))
-        beat(b,103,BASE+59)  # last trade 103 reported but 102+103 unseen
-        beat(b,103,BASE+69)
+        feed_minute(b,{2:[(101,100)]},heartbeat_overrides={59:103})  # missed 102+103
         self.assertEqual(b.snapshot(BASE+70)["candles"],[])
 
     def test_heartbeat_gap_rejects_minute(self):
         b=self.new_builder()
-        self.assertTrue(trade(b,101,BASE+1,100))
-        beat(b,101,BASE+18)  # 21-second heartbeat outage
-        beat(b,101,BASE+69)
+        feed_minute(b,{1:[(101,100)]},skip_heartbeats=set(range(2,18)))
         self.assertEqual(b.snapshot(BASE+70)["candles"],[])
 
     def test_disconnect_clears_all_unreliable_stream_bars(self):
         b=self.new_builder()
-        trade(b,101,BASE+1,100)
-        beat(b,101,BASE+69)
+        feed_minute(b,{1:[(101,100)]})
         self.assertEqual(len(b.snapshot(BASE+70)["candles"]),1)
         b.disconnected("connection_closed")
         self.assertEqual(b.snapshot(BASE+71)["status"],"unavailable")
         self.assertEqual(b.snapshot(BASE+71)["candles"],[])
         b.connected(BASE+73)  # cannot complete partial reconnect minute
         beat(b,105,BASE+74)
-        trade(b,106,BASE+75,107)
-        beat(b,106,BASE+129)
+        for sec in range(75,131):
+            now=BASE+sec
+            if sec==75:trade(b,106,now,107)
+            beat(b,b.last_trade_id,now)
         self.assertEqual(b.snapshot(BASE+130)["candles"],[])
 
     def test_only_completed_minute_not_current_partial(self):
         b=self.new_builder()
-        trade(b,101,BASE+1,100)
-        beat(b,101,BASE+59)
-        trade(b,102,BASE+62,115)
-        beat(b,102,BASE+69)
+        feed_minute(b,{1:[(101,100)],62:[(102,115)]})
         result=b.snapshot(BASE+70)
         self.assertEqual([x[0] for x in result["candles"]],[BASE])
 
     def test_stale_heartbeat_cannot_sign_complete_bar(self):
         b=self.new_builder()
-        trade(b,101,BASE+4,100)
-        beat(b,101,BASE+59)
+        feed_minute(b,{4:[(101,100)]},until=59)
         self.assertEqual(b.snapshot(BASE+70)["reason"],"coinbase_heartbeat_stale")
 
 
