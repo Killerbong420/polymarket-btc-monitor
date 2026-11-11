@@ -78,6 +78,7 @@ def _double_turn(bars, atr):
         if sign < 0:
             pivots = [i for i in range(1, len(recent)-1) if
                       values[i] < values[i-1] and values[i] <= values[i+1]]
+        found_for_side = False
         for newest in reversed(pivots):
             if len(recent) - 1 - newest > 5:
                 continue
@@ -114,10 +115,21 @@ def _double_turn(bars, atr):
                                    "anchor_epoch":recent[newest][0],
                                    "pattern_match_score_pct":None if phase=="INVALIDATED" else min(95,max(0,score)),
                                    "score_basis":"heuristic_geometry_v1"})
+                found_for_side = True
                 break
-            if candidates:
+            if found_for_side:
                 break
-    return candidates[0] if candidates else None
+    if not candidates:
+        return None
+    # A previously invalidated shape must not hide a valid opposite setup.
+    # Prefer observed neckline breaks to forming patterns, then recent pivots.
+    # This is descriptive selection, NOT a calibrated breakout probability.
+    return max(candidates, key=lambda item: (
+        item["phase"] != "INVALIDATED",
+        item["phase"] == "NECKLINE_BREAK_WATCH",
+        item["anchor_epoch"],
+        item["pattern_match_score_pct"] or 0,
+    ))
 
 
 def analyze_early_patterns(candles, source="exchange BTC/USD"):

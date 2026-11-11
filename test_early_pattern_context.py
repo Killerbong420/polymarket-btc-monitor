@@ -3,7 +3,7 @@ import math
 import unittest
 from pathlib import Path
 
-from early_pattern_context import analyze_early_patterns
+from early_pattern_context import analyze_early_patterns, _double_turn
 
 
 def make_bars(pole=1, extend=None):
@@ -79,6 +79,36 @@ class EarlyPatternContextTests(unittest.TestCase):
                 result=analyze_early_patterns(bars)
                 self.assertEqual(result["phase"],"INVALIDATED")
                 self.assertIsNone(result["pattern_match_score_pct"])
+
+    def test_invalidated_double_top_cannot_hide_confirmed_double_bottom(self):
+        # Both recognizable shapes coexist. The earlier top is now invalid,
+        # while the later bottom has broken its neckline on a completed bar.
+        bars = [[1800000000 + 60*i, 99.0, 105.0, 102.0, 102.0, 10.0]
+                for i in range(19)]
+        bars[2][2] = 111.0
+        bars[14][2] = 110.9
+        bars[7][1] = 95.0
+        bars[15][1] = 95.1
+        bars[-1][2] = 115.0
+        bars[-1][4] = 114.0
+        original = [b.copy() for b in bars]
+        result = _double_turn(bars, atr=2.0)
+        self.assertEqual(result["pattern"], "DOUBLE_BOTTOM")
+        self.assertEqual(result["phase"], "NECKLINE_BREAK_WATCH")
+        self.assertEqual(result["bias"], "UP")
+        self.assertEqual(bars, original)
+
+    def test_newer_valid_double_bottom_wins_over_older_forming_top(self):
+        bars = [[1800000000 + 60*i, 99.0, 105.0, 102.0, 102.0, 10.0]
+                for i in range(19)]
+        bars[2][2] = 111.0
+        bars[14][2] = 110.9
+        bars[7][1] = 95.0
+        bars[15][1] = 95.1
+        # Both shapes remain unbroken; newest real pivot gets priority.
+        result = _double_turn(bars, atr=2.0)
+        self.assertEqual(result["pattern"], "DOUBLE_BOTTOM")
+        self.assertEqual(result["phase"], "FORMING")
 
     def test_missing_stale_and_malformed_candles_are_unavailable(self):
         bars=make_bars()
