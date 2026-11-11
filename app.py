@@ -40,10 +40,12 @@ except ImportError:
 POLL = 5
 DB = os.getenv("DATABASE_URL", "")
 _history_write_version=0
-state = {"status":"starting","signal":"WAIT","flip":"WAIT","market":None,"updated":None,"error":None}
+state = {"status":"starting","signal":"WAIT","flip":"WAIT","market":None,"updated":None,"error":None,
+         "database_ready":False,"database_setup_error":None}
 @contextmanager
 def connect():
- c=psycopg.connect(DB) if DB else sqlite3.connect("monitor.db",timeout=10)
+ # Bounded connection attempts; stale Postgres must not trap worker threads.
+ c=psycopg.connect(DB,connect_timeout=5) if DB else sqlite3.connect("monitor.db",timeout=10)
  try:
   yield c
   c.commit()
@@ -944,9 +946,8 @@ def track_prediction(task):
  return task
 
 async def loop():
- # Each database operation owns its connection inside the worker thread.
- # Synchronous Postgres I/O must never stall HTTP or the BRTI sampler.
- (await asyncio.to_thread(setup))
+ # The real-time 15m price feed must never wait for Postgres setup.
+ # Database initialization and retry run in their own background worker.
  ai_task=None
  settlement_task=None
  last_settlement_check=None
@@ -987,7 +988,7 @@ async def loop():
      candle=d.get("pattern_candle")
      context=d.get("early_patterns") or {}
      pattern_key=(slug,d.get("source"),candle[0]) if isinstance(candle,(tuple,list)) and len(candle)>=6 else None
-     if pattern_key and pattern_key!=_pattern_lifecycle_cache["key"] and time.monotonic()>=_pattern_lifecycle_cache["retry_after"]:
+     if state.get("database_ready") and pattern_key and pattern_key!=_pattern_lifecycle_cache["key"] and time.monotonic()>=_pattern_lifecycle_cache["retry_after"]:
       try:
        saved=(await asyncio.to_thread(record_completed_bar,execute,slug,context,candle,time.time()))
        if saved.get("status") in ("available","collecting"):
@@ -998,7 +999,7 @@ async def loop():
        # Never freeze live BRTI monitoring on optional pattern-history writes.
        state["pattern_lifecycle_error"]=type(pattern_exc).__name__
        _pattern_lifecycle_cache["retry_after"]=time.monotonic()+20
-     try:d["outcome_feedback"]=live_outcome_feedback(slug)
+     try:d["outcome_feedback"]=live_outcome_feedback(slug) if state.get("database_ready") else {"status":"unavailable","reason":"database_not_ready"}
      except Exception:d["outcome_feedback"]={"status":"unavailable"}
      terms=fifteen.get("assetPriceTerms") or {}
      ptb=terms.get("priceToBeat") or {}
@@ -1038,12 +1039,15 @@ async def loop():
      behavior=target_behavior(d,target,slug,reference)
      forecast_now=time.time()
      quick=quick_forecast(reference,now=forecast_now)
-     try:
-      (await asyncio.to_thread(track_first_five_quick, slug,reference,quick,forecast_now))
-      state["quick_accuracy_error"]=None
-     except Exception as quick_exc:
-      # A logging issue must never freeze the live 15-minute prediction loop.
-      state["quick_accuracy_error"]=type(quick_exc).__name__
+     if state.get("database_ready"):
+      try:
+       (await asyncio.to_thread(track_first_five_quick, slug,reference,quick,forecast_now))
+       state["quick_accuracy_error"]=None
+      except Exception as quick_exc:
+       # A logging issue must never freeze the live 15-minute prediction loop.
+       state["quick_accuracy_error"]=type(quick_exc).__name__
+     else:
+      state["quick_accuracy_error"]="database_not_ready"
      price_path=forecast_settlement(reference,d,target,left15,now=forecast_now)
      regime_shadow=regime_shadow_forecast(reference,d,target,left15,now=forecast_now)
      reversal=reversal_evidence(reference,left15)
@@ -1052,11 +1056,14 @@ async def loop():
      entry_review=manual_entry_review(guarded_live,quote,slug)
      d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow,quick_forecast=quick,reversal_evidence=reversal,guarded_primary=guarded_live,manual_entry_review=entry_review)
      state.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,quick_forecast=quick,reversal_evidence=reversal,guarded_primary=guarded_live,manual_entry_review=entry_review)
-     try:
-      (await asyncio.to_thread(capture_polymarket_quote, quote))
-      state["quote_storage_error"]=None
-     except Exception as quote_exc:
-      state["quote_storage_error"]=type(quote_exc).__name__+": "+str(quote_exc)[:150]
+     if state.get("database_ready"):
+      try:
+       (await asyncio.to_thread(capture_polymarket_quote, quote))
+       state["quote_storage_error"]=None
+      except Exception as quote_exc:
+       state["quote_storage_error"]=type(quote_exc).__name__+": "+str(quote_exc)[:150]
+     else:
+      state["quote_storage_error"]="database_not_ready"
      state["target_validation"]=target_validation
      d["target_validation"]=target_validation
      # Research-only minute capture. Compare live feature inputs at decision
@@ -1072,7 +1079,7 @@ async def loop():
          "gap_pct_from_official","gap_pct_from_live",
          "theoretical_up_probability","version")}
      global _minute_research_retry_monotonic
-     if sample.get("status")=="captured" and time.monotonic()>=_minute_research_retry_monotonic:
+     if state.get("database_ready") and sample.get("status")=="captured" and time.monotonic()>=_minute_research_retry_monotonic:
       try:
        await asyncio.to_thread(save_minute_observation,sample)
        state["minute_research_write_error"]=None
@@ -1080,16 +1087,16 @@ async def loop():
        # Never block or disable the current official BRTI prediction.
        state["minute_research_write_error"]=type(minute_exc).__name__
        _minute_research_retry_monotonic=time.monotonic()+20
-     captured={r[0] for r in (await asyncio.to_thread(execute, "SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True))}
+     captured={r[0] for r in (await asyncio.to_thread(execute, "SELECT checkpoint FROM research_calls WHERE market=?",(slug,),fetch=True))} if state.get("database_ready") else set()
      plan=checkpoint_plan(left15,captured)
      state["missed_checkpoints"]=plan["missed"]
      for name in plan["due"]:
-      if d.get("price") is not None:
+      if state.get("database_ready") and d.get("price") is not None:
        key=(slug,name)
        if key not in checkpoints or checkpoints[key].done():
         checkpoints[key]=track_prediction(asyncio.create_task(capture_checkpoint(client,slug,name,round(left15),json.loads(json.dumps(d)),direction,flip,score,fifteen)))
      checkpoints={k:v for k,v in checkpoints.items() if not v.done()}
-     d["paper_position"]=(await asyncio.to_thread(paper.position_context, execute,slug))
+     d["paper_position"]=(await asyncio.to_thread(paper.position_context,execute,slug)) if state.get("database_ready") else {"status":"unavailable","reason":"database_not_ready"}
      state["ai_disabled"]=True
     else:
      for key in ("phase","seconds_left","score"): state.pop(key,None)
@@ -1110,12 +1117,13 @@ async def loop():
       state["settlement_task_error"]=(type(settlement_error).__name__+": "+str(settlement_error)[:180]) if settlement_error else None
      except asyncio.CancelledError:
       state["settlement_task_error"]="cancelled"
-    if (settlement_task is None or settlement_task.done()) and (last_settlement_check is None or time.monotonic()-last_settlement_check>=30):
+    if state.get("database_ready") and (settlement_task is None or settlement_task.done()) and (last_settlement_check is None or time.monotonic()-last_settlement_check>=30):
      settlement_task=track_prediction(asyncio.create_task(settle(client)))
      last_settlement_check=time.monotonic()
     state["settlement_task_running"]=settlement_task is not None and not settlement_task.done()
     state["alerts"]=health_checks(state,public_state(),DB)
-    (await asyncio.to_thread(persist_alerts, execute,state["alerts"]))
+    if state.get("database_ready"):
+     (await asyncio.to_thread(persist_alerts,execute,state["alerts"]))
    except Exception as e:
     for key in ("phase","seconds_left","score"): state.pop(key,None)
     state.update(status="feed error",signal="WAIT",flip="WAIT",quick_forecast={"status":"unavailable","reason":"Monitoring feed error"},error=type(e).__name__+": "+str(e)[:200],updated=datetime.now(timezone.utc).isoformat())
@@ -1187,8 +1195,31 @@ async def read_only_diagnostics_loop():
    print("BTC_READ_ONLY_DIAG_ERROR "+type(exc).__name__,flush=True)
   await asyncio.sleep(600)
 
+async def database_setup_worker(retry_seconds=15):
+ """Retry durable database setup without delaying official live 15m monitoring.
+
+ Do not substitute local SQLite if the configured Postgres database is offline.
+ Never claim settlement/accuracy results were recorded while the DB is down.
+ """
+ while True:
+  try:
+   if state.get("database_ready"):
+    await asyncio.to_thread(execute,"SELECT 1",fetch=True)
+   else:
+    await asyncio.to_thread(setup)
+   state["database_ready"]=True
+   state["database_setup_error"]=None
+  except asyncio.CancelledError:
+   raise
+  except Exception as exc:
+   state["database_ready"]=False
+   state["database_setup_error"]=type(exc).__name__
+  await asyncio.sleep(retry_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app):
+ database_task=asyncio.create_task(database_setup_worker())
  task=asyncio.create_task(loop())
  # Database history is optional for initial page load. Never block /api/status
  # behind slow SQL while background migrations or archival reads run.
@@ -1201,6 +1232,7 @@ async def lifespan(app):
  diagnostics_task=asyncio.create_task(read_only_diagnostics_loop())
  yield
  task.cancel()
+ database_task.cancel()
  status_history_task.cancel()
  diagnostics_task.cancel()
  context_task.cancel()
@@ -1208,7 +1240,7 @@ async def lifespan(app):
  chart_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,status_history_task,context_task,trade_stream_task,chart_task,diagnostics_task,*pending_predictions):
+ for running in (task,database_task,status_history_task,context_task,trade_stream_task,chart_task,diagnostics_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"disabled","reason":"Seven-day bulk market collection disabled to protect live monitoring.","requested":0,"verified":0}
@@ -1784,7 +1816,7 @@ async def _status_history_worker():
  while True:
   try:
    # Main live worker gets first use of PostgreSQL at service boot.
-   while state.get("status")=="starting":
+   while state.get("status")=="starting" or not state.get("database_ready"):
     await asyncio.sleep(2)
    await asyncio.to_thread(_read_status_history)
    _status_cache["worker_error"]=None
