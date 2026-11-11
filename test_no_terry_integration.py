@@ -24,8 +24,8 @@ class NoTerryIntegrationTests(unittest.TestCase):
         self.assertIn('id="checkpointBoard"',html)
 
     def test_live_api_has_no_provider_payload(self):
-        with TestClient(app.app) as client:
-            result=client.get("/api/live")
+        client=TestClient(app.app)
+        result=client.get("/api/live")
         self.assertEqual(result.status_code,200)
         self.assertNotIn("terry_calls",result.json())
 
