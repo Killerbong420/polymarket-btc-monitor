@@ -8,6 +8,7 @@ The normal Coinbase REST candles can fill missing *verified* historical minutes.
 from collections import OrderedDict
 import math
 import time
+from datetime import datetime
 
 SOURCE="Coinbase Exchange BTC-USD"
 MAX_MINUTES=70
@@ -73,8 +74,8 @@ class CoinbaseMinuteBuilder:
         observed=_number(message.get("last_trade_id"))
         instant=_number(message.get("time_epoch"))
         if instant is None:
-            from live_trade_stream import _epoch
-            instant=_epoch(message.get("time"))
+            try:instant=datetime.fromisoformat(str(message.get("time")).replace("Z","+00:00")).timestamp()
+            except (TypeError,ValueError,OverflowError):instant=None
         if observed is None or observed!=int(observed) or instant is None or abs(now-instant)>12:
             self.failure_reason="invalid_heartbeat"
             self._mark_gap(self.heartbeat_at or now,now)
