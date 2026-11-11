@@ -14,7 +14,10 @@ assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)updateServer\(\)\}
 assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)refreshTip\(\)\},3000\)/);
 assert.doesNotMatch(html,/\/api\/five-minute|fiveMinutePanel|refreshFive\(/);
 assert.match(html,/if\(statusInFlight\)return/);
-assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)refreshRoundTiles\(\)\},10000\)/);
+assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)refreshRoundTiles\(\)\},60000\)/);
+assert.match(html,/setInterval\(\(\)=>\{if\(!document.hidden\)refreshHistory\(\)\},20000\)/);
+assert.doesNotMatch(html,/new WebSocket\(protocol.*exchange-flow/);
+assert.match(html,/window\.addEventListener\('btc-status-updated',paint\)/);
 const summaryScript=scripts.find(s=>s.includes('function updatePolymarketSummary(d)'));
 assert.ok(summaryScript,'official market summary updater is retained');
 const elements=new Map(),listeners={};
