@@ -168,13 +168,15 @@ class CoinbaseMinuteBuilder:
 def compose_coinbase_candles(rest_candles,stream,now=None):
     """Join only actual, timestamped Coinbase observations into a contiguous tail.
 
-    REST is authoritative on overlapping minute candles (not every WebSocket
-    minute must match exactly if some matches were delayed). WebSocket bars
-    enter ONLY when heartbeat/trade-ID coverage was sufficient.
+    A heartbeat-verified WebSocket candle is primary when it agrees with
+    Coinbase REST on the same minute. On conflicting OHLCV, REST wins and
+    a mismatch is recorded. WebSocket bars can extend a late REST history.
+    Both data paths are authentic Coinbase observations, never interpolation.
     """
     now=time.time() if now is None else float(now)
     bars={}
     provenance={}
+    conflicting_minutes=0
     for source,items in (("rest",rest_candles or []),
                          ("websocket",stream.get("candles",[]) if stream.get("status")=="available" else [])):
         for candle in items[-MAX_MINUTES:]:
@@ -191,8 +193,17 @@ def compose_coinbase_candles(rest_candles,stream,now=None):
                 if ts+60>now:
                     continue
                 start=int(ts)
-                # Do not override genuine REST bars with inferred trade candles.
-                if start in bars and source=="websocket":continue
+                if start in bars and source=="websocket":
+                    old=bars[start]
+                    price_tolerance=max(.06,close*.000001)
+                    consistent=(all(abs(a-b)<=price_tolerance
+                                   for a,b in zip(old[1:5],[low,high,op,close]))
+                                and abs(old[5]-volume)<=max(.0000001,old[5]*.005))
+                    if not consistent:
+                        # A partially received trade sample can disagree with
+                        # a historical candle despite healthy heartbeats.
+                        conflicting_minutes+=1
+                        continue
                 bars[start]=[start,low,high,op,close,volume]
                 provenance[start]=source
             except (ValueError,TypeError,OverflowError):
@@ -217,5 +228,6 @@ def compose_coinbase_candles(rest_candles,stream,now=None):
             "last_completed_epoch":last+60,"candle_age_seconds":round(age,1),
             "verified_minutes":len(suffix),
             "websocket_minutes":sum(provenance[b[0]]=="websocket" for b in suffix),
+            "rest_reconciliation_conflicts":conflicting_minutes,
             "candles":suffix}
     return result
