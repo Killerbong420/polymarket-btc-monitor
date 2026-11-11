@@ -18,7 +18,7 @@ def fresh_bars():
 
 
 def kraken_ohlc(bars):
-    records=[[b[0],b[3],b[2],b[1],b[4],b[4],b[5],10] for b in bars]
+    records=[[b[0],b[3],b[2],b[1],b[4],b[4],max(b[5],10),10] for b in bars]
     records.append([bars[-1][0]+60,bars[-1][4],bars[-1][2],
                     bars[-1][1],bars[-1][4],bars[-1][4],1,1])
     return {"error":[],"result":{"XXBTZUSD":records,"last":bars[-1][0]}}
