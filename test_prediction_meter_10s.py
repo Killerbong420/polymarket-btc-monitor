@@ -1,51 +1,74 @@
-"""Regression gates for read-only ten-second live prediction presentation."""
-import re
+"""Regression gates for the replacement of the retired 10-second probability meter."""
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-HTML = (ROOT / "terminal.html").read_text(encoding="utf-8")
-APP = (ROOT / "app.py").read_text(encoding="utf-8")
+ROOT=Path(__file__).resolve().parent
+HTML=(ROOT/"terminal.html").read_text(encoding="utf-8")
+APP=(ROOT/"app.py").read_text(encoding="utf-8")
 
 
-class TenSecondPredictionMeterTests(unittest.TestCase):
-    def test_live_prediction_is_presented_every_ten_seconds(self):
-        self.assertIn("const PREDICTION_DISPLAY_MS=10000;", HTML)
-        self.assertIn("setInterval(updateMeter,PREDICTION_DISPLAY_MS)", HTML)
-        self.assertNotIn("setInterval(updateMeter,15000)", HTML)
-        self.assertIn("if(document.hidden||meterInFlight)return", HTML)
-        self.assertIn("document.addEventListener('visibilitychange'", HTML)
+class FormationVisualGuideTests(unittest.TestCase):
+    def test_probability_meter_is_removed_from_default_page(self):
+        for obsolete in ('id="directionMeter"','id="meterDownPct"',
+                         'id="meterUpPct"','id="meterDownFill"',
+                         'id="meterUpFill"','const PREDICTION_DISPLAY_MS=10000;',
+                         'setInterval(updateMeter','fetch(\'/api/direction-probability\'',
+                         '15-MIN BTC · 10s LIVE PREDICTION / HISTORICAL PROBABILITY'):
+            self.assertNotIn(obsolete,HTML)
 
-    def test_uses_fresh_current_guarded_15m_model_not_locked_checkpoint(self):
-        self.assertIn("snapshot&&snapshot.guarded_primary", HTML)
-        self.assertIn("snapshot.status!=='running'", HTML)
-        self.assertIn("ref.source!=='Polymarket US BTC reference / BRTI'", HTML)
-        self.assertIn("ref.status!=='fresh'", HTML)
-        self.assertIn("tickAge>15", HTML)
-        self.assertIn("updateAge>15", HTML)
-        self.assertIn("remaining<=0||remaining>900", HTML)
-        self.assertIn("forecast.status!=='available'", HTML)
-        self.assertIn("Waiting for fresh verified 15-minute BRTI forecast", HTML)
-        self.assertNotIn("const call=byId('final15Signal')", HTML)
+    def test_visual_guide_occupies_former_meter_slot(self):
+        self.assertIn('id="formationVisualGuide"',HTML)
+        self.assertIn('id="formationGuideChart"',HTML)
+        self.assertIn('id="formationGuideTitle"',HTML)
+        self.assertIn('id="formationGuideCall"',HTML)
+        self.assertIn('id="formationGuideTrigger"',HTML)
+        self.assertIn('id="formationGuideInvalidation"',HTML)
+        self.assertIn('id="formationGuideObjective"',HTML)
+        self.assertIn('id="formationReferenceGuide" open',HTML)
+        self.assertIn("for(const id of ['formationVisualGuide','fastPanel','strongPanel','final15Panel'])",HTML)
+        self.assertIn("chart.insertAdjacentElement('afterend',cards)",HTML)
 
-    def test_calibrated_history_and_live_forecast_are_not_conflated(self):
-        self.assertIn("fetch('/api/direction-probability'", HTML)
-        self.assertIn("Historical calibrated UP/DOWN frequency", HTML)
-        self.assertIn("separate from live forecast", HTML)
-        self.assertIn("no made-up odds", HTML)
-        self.assertIn("clearProbabilities();", HTML)
+    def test_all_six_reference_shapes_render_without_network_access(self):
+        for kind in ("DOUBLE_TOP","DOUBLE_BOTTOM","BULL_FLAG","BEAR_FLAG","DOJI","INVALIDATED"):
+            self.assertIn('data-guide="'+kind+'"',HTML)
+        script=HTML.split('/* Read-only reference graphics.',1)[1].split('</script>',1)[0]
+        self.assertIn("document.createElementNS(ns,tag)",script)
+        self.assertIn("for(const ref of document.querySelectorAll('.formation-reference-card'))",script)
+        self.assertIn("shapes={",script)
+        self.assertNotIn("fetch(",script)
+        self.assertNotIn("XMLHttpRequest",script)
+        self.assertNotIn("WebSocket(",script)
+        self.assertNotIn("setInterval(",script)
 
-    def test_backend_forecasts_remain_faster_and_no_extra_network_loop(self):
-        self.assertRegex(APP, r"(?m)^POLL = 5$")
-        self.assertIn("guarded_live=guarded_decision(", APP)
-        self.assertIn('state.update(reference_price=ref_public', APP)
-        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},4000)", HTML)
-        self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},3000)", HTML)
-        meter = HTML.split("const PREDICTION_DISPLAY_MS=10000;",1)[1].split("</script>",1)[0]
-        self.assertNotIn("fetch('/api/live'", meter)
-        self.assertNotIn("fetch('/api/status'", meter)
-        self.assertNotIn("POST", meter)
+    def test_live_guide_tracks_only_fresh_coinbase_formation(self):
+        script=HTML.split('/* Read-only reference graphics.',1)[1].split('</script>',1)[0]
+        self.assertIn("window.btcServerStatus",script)
+        self.assertIn("s.external?.early_patterns",script)
+        self.assertIn("p.source==='Coinbase Exchange BTC-USD'",script)
+        self.assertIn("p.candle_age_seconds<=75",script)
+        self.assertIn("live&&p.status==='watch'",script)
+        self.assertIn("tracked?.objective_usd",script)
+        self.assertIn("kind='DOJI'",script)
+        self.assertIn("phase==='INVALIDATED'",script)
+        self.assertIn("phase==='EXPIRED'",script)
+        self.assertIn("call='⊘ NO ACTIVE CALL'",script)
+        self.assertIn("s.doji_watch",script)
+        self.assertIn("btc-status-updated",script)
+        self.assertIn("No Kraken substitution",script)
+        self.assertNotIn("Kraken BTC/USD",script)
+        self.assertNotIn("random(",script.lower())
+        self.assertNotIn("Math.random(",script)
+        self.assertIn("SCHEMATIC REFERENCE · NOT LIVE PRICE HISTORY",HTML)
+        self.assertIn("not official Polymarket settlement prices",script)
+
+    def test_underlying_brtI_predictions_unchanged_and_no_new_polling(self):
+        self.assertIn("POLL = 5",APP)
+        self.assertIn("guarded_live=guarded_decision(",APP)
+        self.assertIn("state.update(reference_price=ref_public",APP)
+        self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},4000)",HTML)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},3000)",HTML)
+        self.assertIn("renderPatterns()",HTML)
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
     unittest.main()
