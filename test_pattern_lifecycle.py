@@ -163,6 +163,60 @@ class PatternLifecycleTests(unittest.TestCase):
         self.assertNotIn("fetch(",block)
         self.assertNotIn("meterUpPct",block)
 
+    def test_early_warning_lead_time_and_pre_breakout_invalidations(self):
+        from pattern_lifecycle import _recent
+        # 8 reached breakout after early warning, 2 invalidated before,
+        # 2 expired/no complete observation (excluded from denominator).
+        for i in range(12):
+            phase="COMPLETED" if i<8 else "INVALIDATED" if i<10 else "EXPIRED"
+            first=self.first+i*60
+            br=first+120 if i<8 else None
+            invalid=first+60 if 8<=i<10 else None
+            expired=first+60 if i>=10 else None
+            self.execute("""INSERT INTO pattern_lifecycle (
+              id,market,source,pattern,anchor_epoch,direction,phase,initial_phase,
+              first_seen_epoch,last_bar_epoch,breakout_epoch,invalidated_epoch,
+              expired_epoch,trigger_usd,invalidation_usd,objective_usd,
+              initial_fit_pct,result)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              (str(i),self.market,self.source,"DOUBLE_TOP",first-60,-1,
+               phase,"FORMING",float(first),first+120,br,invalid,
+               expired,100,110,90,80,"PENDING"))
+        metrics=_recent(self.execute,self.market)["early_warning_stats"]
+        top=next(x for x in metrics["by_pattern"] if x["pattern"]=="DOUBLE_TOP")
+        self.assertEqual(top["early_warnings"],12)
+        self.assertEqual(top["breakouts"],8)
+        self.assertEqual(top["invalidated_before_breakout"],2)
+        self.assertEqual(top["expired_or_open"],2)
+        self.assertEqual(top["lead_samples"],8)
+        self.assertEqual(top["avg_lead_seconds"],120.0)
+        self.assertEqual(top["early_breakout_rate_pct"],80.0)
+        self.assertTrue(top["rate_sample_sufficient"])
+        self.assertIsNone(next(x for x in metrics["by_pattern"]
+                               if x["pattern"]=="BULL_FLAG")["early_breakout_rate_pct"])
+        # A setup seen already breaking out must not be counted as early.
+        self.execute("""INSERT INTO pattern_lifecycle (
+          id,market,source,pattern,anchor_epoch,direction,phase,initial_phase,
+          first_seen_epoch,last_bar_epoch,breakout_epoch,trigger_usd,
+          invalidation_usd,objective_usd,initial_fit_pct,result)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+          ("late",self.market,self.source,"DOUBLE_TOP",self.first+1000,-1,
+           "COMPLETED","BREAKOUT",float(self.first+1000),self.first+1120,
+           self.first+1000,100,110,90,80,"PENDING"))
+        top2=next(x for x in _recent(self.execute,self.market)["early_warning_stats"]["by_pattern"]
+                  if x["pattern"]=="DOUBLE_TOP")
+        self.assertEqual(top2["early_warnings"],12)
+
+    def test_early_warning_panel_is_read_only(self):
+        html=(Path(__file__).resolve().parent/"terminal.html").read_text(encoding="utf-8")
+        self.assertIn('id="formationEarlyWarning"',html)
+        self.assertIn("drawEarlyWarnings(s.pattern_lifecycle?.early_warning_stats)",html)
+        self.assertIn("n+fail>=10",html)
+        self.assertIn("avg_lead_seconds",html)
+        part=html.split("function drawEarlyWarnings(info)",1)[1].split("function drawFollowThrough(info)",1)[0]
+        self.assertNotIn("fetch(",part)
+        self.assertNotIn("meterDownPct",part)
+
     def test_integration_keeps_main_forecast_untouched(self):
         root=Path(__file__).resolve().parent
         app=(root/"app.py").read_text()

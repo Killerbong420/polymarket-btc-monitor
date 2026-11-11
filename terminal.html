@@ -392,6 +392,7 @@ window.btcNoteRequest=function(name,ms,ok){
 <div id="structureWatch" role="status" aria-live="polite" style="font-size:12px;line-height:1.45;padding:8px 10px;margin:6px 0 9px;border:1px solid #3b526b;border-radius:9px;color:#b6c9db;background:#0c1b2a">FORMATION WATCH · Waiting for completed exchange candles</div>
 <details id="patternLifecyclePanel" style="margin:0 0 10px;border:1px solid #34465b;border-radius:9px;padding:8px 10px;color:#b6c9db;font-size:12px">
 <summary style="cursor:pointer;font-weight:700">Formation results & saved timeline · observed follow-through</summary>
+<div id="formationEarlyWarning" aria-label="Observed early formation warnings" style="margin:8px 0;padding:8px 0;border-top:1px solid #2e4057;color:#b6c9db">Early warning results collecting.</div>
 <div id="formationFollowThrough" aria-label="Observed pattern objective follow-through" style="margin:8px 0;padding:8px 0;border-top:1px solid #2e4057;color:#b6c9db">Follow-through results collecting; 10 resolved examples needed per pattern before a percentage is shown.</div>
 <div id="patternLifecycleRows" style="margin-top:8px">Collecting new pattern observations; existing patterns are not backfilled.</div>
 <p style="font-size:11px;opacity:.85;margin:8px 0 0">CONFIRMED = observed structure persisted, not a guaranteed reversal. COMPLETED = price closed beyond a frozen pattern objective after breakout; not proof of Polymarket profit. EXPIRED = insufficient follow-through or a missing candle. Initial pattern fit is not an outcome probability.</p>
@@ -402,6 +403,7 @@ window.btcNoteRequest=function(name,ms,ok){
  const node=document.getElementById('structureWatch');
  const historyNode=document.getElementById('patternLifecycleRows');
  const performanceNode=document.getElementById('formationFollowThrough');
+ const earlyNode=document.getElementById('formationEarlyWarning');
  const dollars=v=>Number(v).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
  const label=s=>String(s||'').replaceAll('_',' ');
  /* Render official BRTI Doji evidence inside Formation Watch, not a second line.
@@ -444,6 +446,35 @@ window.btcNoteRequest=function(name,ms,ok){
   return ' · LARGE-TRADE WATCH: awaiting reliable exchange coverage';
  }
  const clock=t=>Number.isFinite(Number(t))&&Number(t)>0?new Date(Number(t)*1000).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'—';
+ let lastEarlyKey='';
+ function drawEarlyWarnings(info){
+  const list=Array.isArray(info?.by_pattern)?info.by_pattern:[];
+  const key=JSON.stringify(list.map(x=>[x.pattern,x.early_warnings,x.breakouts,x.invalidated_before_breakout,x.avg_lead_seconds]));
+  if(key===lastEarlyKey)return;
+  lastEarlyKey=key;
+  earlyNode.replaceChildren();
+  const heading=document.createElement('strong');
+  heading.textContent='EARLY FORMATION WARNINGS · BREAKOUTS / FAILED SETUPS';
+  earlyNode.append(heading);
+  const note=document.createElement('div');
+  note.style.cssText='font-size:11px;margin:4px 0 8px;color:#a4bcd2';
+  note.textContent='Only formations first seen before breakout · missed candles/unfinished setups excluded from breakout rate · not trading wins';
+  earlyNode.append(note);
+  for(const x of list){
+   if(!['DOUBLE_TOP','DOUBLE_BOTTOM','BULL_FLAG','BEAR_FLAG'].includes(x.pattern))continue;
+   const div=document.createElement('div');
+   div.style.cssText='font-size:12px;padding:5px 0;border-top:1px solid #273a50';
+   const n=Number(x.breakouts)||0,fail=Number(x.invalidated_before_breakout)||0;
+   const shown=x.rate_sample_sufficient===true&&n+fail>=10&&Number.isFinite(x.early_breakout_rate_pct);
+   const lead=Number.isFinite(x.avg_lead_seconds)&&Number(x.lead_samples)>0?
+    ' · average early warning '+Math.round(x.avg_lead_seconds)+'s (n='+Number(x.lead_samples)+')':
+    ' · lead time collecting';
+   div.textContent=label(x.pattern)+' · '+n+' breakouts / '+fail+' failed before breakout'+
+     (shown?' · '+Number(x.early_breakout_rate_pct).toFixed(1)+'% reached breakout':' · rate needs 10 resolved')+
+     lead;
+   earlyNode.append(div);
+  }
+ }
  let lastFollowKey='';
  function drawFollowThrough(info){
   const list=Array.isArray(info?.by_pattern)?info.by_pattern:[];
@@ -513,6 +544,7 @@ window.btcNoteRequest=function(name,ms,ok){
   const rows=Array.isArray(s.pattern_lifecycle?.recent)?s.pattern_lifecycle.recent:[];
   drawHistory(rows);
   drawFollowThrough(s.pattern_lifecycle?.follow_through);
+  drawEarlyWarnings(s.pattern_lifecycle?.early_warning_stats);
   const now=Date.now()/1000;
   const doji=dojiContext(s,now),whale=whaleContext(s,now);
   const age=now-Date.parse(s.updated||'')/1000;
@@ -1455,7 +1487,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
     if(!item.graded)rate.className='xempty';
     tr.append(td,n,rate);rows.append(tr);
    };
-   for(const entry of data.fifteen||[])add('15m '+entry.label+' · '+(entry.method==='PRICE_PATH'?'Price path':'AI'),entry);
+   for(const entry of data.fifteen||[]){if(entry.method==='PRICE_PATH')add('15m '+entry.label+' · Price path',entry);}
    put('checkpointUpdated','Last 100 settled per checkpoint (or fewer)');
   }catch(e){put('checkpointUpdated','Verified grading temporarily unavailable');}
   finally{clearTimeout(timer);loading=false}
