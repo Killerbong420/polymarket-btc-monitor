@@ -547,6 +547,8 @@ window.btcNoteRequest=function(name,ms,ok){
   drawEarlyWarnings(s.pattern_lifecycle?.early_warning_stats);
   const now=Date.now()/1000;
   const doji=dojiContext(s,now),whale=whaleContext(s,now);
+  const transport=p.formation_feed==='websocket_verified'?' · LIVE COINBASE WEBSOCKET 1m':
+                  p.formation_feed==='rest_verified'?' · COINBASE REST 1m':'';
   const age=now-Date.parse(s.updated||'')/1000;
   const candleAge=Number(p.candle_age_seconds);
   const live=s.status==='running'&&typeof s.market==='string'&&s.market.includes('btc-updown-15m-')&&
@@ -574,10 +576,10 @@ window.btcNoteRequest=function(name,ms,ok){
    const trigger=Number.isFinite(p.trigger_usd)?' · watch '+dollars(p.trigger_usd):'';
    const invalid=Number.isFinite(p.invalidation_usd)?' · invalid above/below '+dollars(p.invalidation_usd):'';
    node.textContent='FORMATION WATCH · '+label(p.pattern)+' · '+label(phase)+fit+trigger+invalid+
-    ' · '+(p.source||'Coinbase BTC-USD 1m')+' · rule-based fit score, NOT outcome odds'+doji+whale;
+    ' · '+(p.source||'Coinbase BTC-USD 1m')+transport+' · rule-based fit score, NOT outcome odds'+doji+whale;
    node.style.borderColor=phase==='BREAKOUT'?'#3b987f':'#d1a65a';
   }else if(live&&p.status==='monitoring'){
-   node.textContent='FORMATION WATCH · Coinbase BTC-USD · scanning flags, double turns, breakouts and retests'+doji+whale;
+   node.textContent='FORMATION WATCH · Coinbase BTC-USD · scanning flags, double turns, breakouts and retests'+transport+doji+whale;
   }else if(s.status==='running'&&p.reason==='coinbase_feed_unavailable'){
    node.textContent='FORMATION WATCH · Coinbase candles temporarily unavailable · watch paused, no Kraken substitution'+doji+whale;
    node.style.borderColor='#b16b73';
