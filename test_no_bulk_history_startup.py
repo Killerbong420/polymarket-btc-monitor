@@ -30,7 +30,7 @@ class NoBulkHistoryStartupTests(unittest.TestCase):
     def test_official_15m_accuracy_and_pattern_persistence_remain(self):
         source=Path(app.__file__).read_text(encoding="utf-8")
         self.assertIn("settlement_task=track_prediction(asyncio.create_task(settle(client)))",source)
-        self.assertIn("record_completed_bar,execute,slug,context,candle,time.time()",source)
+        self.assertIn("record_coinbase_sequence,execute,slug,context,formation_candles,time.time()",source)
         self.assertIn("status_history_task=asyncio.create_task(_status_history_worker())",source)
         self.assertIn("trade_stream_task=asyncio.create_task(stream_loop())",source)
         self.assertIn("chart_task=asyncio.create_task(official_chart_sampler(state))",source)
