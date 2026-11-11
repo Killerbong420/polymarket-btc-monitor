@@ -95,6 +95,42 @@ class IndependentCoinbaseFormationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["pattern_candle"])
         self.assertEqual(result["formation_candles"],[])
 
+    def test_websocket_genuinely_completed_bars_repair_delayed_rest_tail(self):
+        bars=fresh_bars()
+        last_start=(int(time.time())//60-3)*60
+        shift=last_start-bars[-1][0]
+        for bar in bars:bar[0]+=shift
+        app._coinbase_formation_cache["candles"]=bars[-50:]
+        prior=bars[-1]
+        next_one=[last_start+60,prior[1],prior[2],prior[3],prior[4],prior[5]]
+        latest=[last_start+120,prior[1],prior[2],prior[3],prior[4],prior[5]]
+        now=time.time()
+        with patch.object(app,"coinbase_candle_snapshot",return_value={
+                "status":"available","candles":[next_one,latest]}):
+            context,candle,sequence=app._coinbase_formation_from_cache(now=now)
+        self.assertIn(context["status"],("watch","monitoring"))
+        self.assertEqual(context["formation_feed"],"websocket_verified")
+        self.assertEqual(context["websocket_minutes"],2)
+        self.assertEqual(candle,latest)
+        self.assertEqual(sequence[-2:],[next_one,latest])
+        self.assertLess(context["candle_age_seconds"],75)
+
+    def test_websocket_must_not_invent_one_missing_rest_minute(self):
+        bars=fresh_bars()
+        last_start=(int(time.time())//60-3)*60
+        shift=last_start-bars[-1][0]
+        for bar in bars:bar[0]+=shift
+        app._coinbase_formation_cache["candles"]=bars[-50:]
+        # One observed live minute but the previous minute is still missing.
+        latest=[last_start+120,*bars[-1][1:]]
+        with patch.object(app,"coinbase_candle_snapshot",return_value={
+                "status":"available","candles":[latest]}):
+            context,candle,sequence=app._coinbase_formation_from_cache(now=time.time())
+        self.assertEqual(context["status"],"unavailable")
+        self.assertEqual(context["reason"],"need_35_contiguous_coinbase_candles")
+        self.assertIsNone(candle)
+        self.assertEqual(sequence,[])
+
     def test_ui_uses_source_specific_age_and_does_not_invent_kraken_formations(self):
         from pathlib import Path
         html=Path(__file__).with_name("terminal.html").read_text(encoding="utf-8")
