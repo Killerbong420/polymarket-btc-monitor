@@ -95,6 +95,53 @@ class IndependentCoinbaseFormationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["pattern_candle"])
         self.assertEqual(result["formation_candles"],[])
 
+    async def test_stale_coinbase_rest_retries_bounded_window_and_recovers(self):
+        fresh=fresh_bars()
+        stale=[row.copy() for row in fresh]
+        for row in stale:row[0]-=180
+        class DelayedCoinbase(FakeClient):
+            async def get(self,url,**kwargs):
+                if "coinbase" in url:
+                    self.calls.append((url,kwargs))
+                    rows=stale if len([c for c in self.calls if isinstance(c,tuple)])==1 else fresh
+                    return SimpleNamespace(raise_for_status=lambda:None,json=lambda:rows)
+                return await super().get(url,**kwargs)
+        client=DelayedCoinbase(fresh)
+        with patch.object(app,"chart_indicators",return_value={}), \
+             patch.object(app,"classify_chart",return_value={"pattern":"RANGE"}), \
+             patch.object(app,"graph_evidence",return_value={}), \
+             patch.object(app,"analyze_price_action",return_value={}), \
+             patch.object(app,"study_strategies",return_value={}), \
+             patch.object(app,"measure_market_shock",return_value={}):
+            result=await app.spot_data(client)
+        self.assertEqual(result["source"],"Coinbase Exchange BTC-USD")
+        self.assertEqual(len(client.calls),2)
+        self.assertIn("start",client.calls[1][1]["params"])
+        self.assertIn("end",client.calls[1][1]["params"])
+        self.assertEqual(result["early_patterns"]["source"],"Coinbase Exchange BTC-USD")
+
+    async def test_stale_coinbase_retry_still_fails_closed(self):
+        fresh=fresh_bars()
+        stale=[row.copy() for row in fresh]
+        for row in stale:row[0]-=180
+        class AlwaysStale(FakeClient):
+            async def get(self,url,**kwargs):
+                if "coinbase" in url:
+                    self.calls.append((url,kwargs))
+                    return SimpleNamespace(raise_for_status=lambda:None,json=lambda:stale)
+                return await super().get(url,**kwargs)
+        client=AlwaysStale(fresh)
+        with patch.object(app,"chart_indicators",return_value={}), \
+             patch.object(app,"classify_chart",return_value={"pattern":"RANGE"}), \
+             patch.object(app,"graph_evidence",return_value={}), \
+             patch.object(app,"analyze_price_action",return_value={}), \
+             patch.object(app,"study_strategies",return_value={}), \
+             patch.object(app,"measure_market_shock",return_value={}):
+            result=await app.spot_data(client)
+        self.assertEqual(result["source"],"Kraken BTC/USD")
+        self.assertEqual(result["early_patterns"]["status"],"unavailable")
+        self.assertEqual(len(client.calls),3)
+
     def test_websocket_genuinely_completed_bars_repair_delayed_rest_tail(self):
         bars=fresh_bars()
         last_start=(int(time.time())//60-3)*60
