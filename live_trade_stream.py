@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime
 
 from websockets.asyncio.client import connect
+from coinbase_live_candles import CoinbaseMinuteBuilder
 
 ENDPOINTS = {
     "Coinbase": "wss://ws-feed.exchange.coinbase.com",
@@ -131,6 +132,14 @@ class TradeBuffer:
 
 
 BUFFERS = {source: TradeBuffer() for source in ENDPOINTS}
+# One small OHLC aggregator shares the EXISTING Coinbase trades + heartbeat
+# WebSocket. No second WebSocket, and no extra external REST calls.
+COINBASE_MINUTES = CoinbaseMinuteBuilder()
+
+
+def coinbase_candle_snapshot(now=None):
+    return COINBASE_MINUTES.snapshot(now)
+
 
 
 def stream_snapshot(source, now=None):
@@ -156,7 +165,10 @@ async def stream_exchange(source):
                     subscribe = {"method": "subscribe", "params": {
                         "channel": "trade", "symbol": ["BTC/USD"], "snapshot": False}}
                 await socket.send(json.dumps(subscribe))
-                buffer.connected(time.time())
+                current=time.time()
+                buffer.connected(current)
+                if source=="Coinbase":
+                    COINBASE_MINUTES.connected(current)
                 async for raw in socket:
                     message = json.loads(raw)
                     if not isinstance(message, dict):
@@ -165,15 +177,24 @@ async def stream_exchange(source):
                             or message.get("success") is False):
                         raise ValueError("Exchange subscription rejected")
                     now = time.time()
+                    if source=="Coinbase" and message.get("type")=="heartbeat":
+                        COINBASE_MINUTES.heartbeat(message,now=now)
                     for event in parse_trade_events(source, message):
-                        buffer.append(event, now=now)
+                        if buffer.append(event, now=now) and source=="Coinbase":
+                            COINBASE_MINUTES.append(event,now=now)
         except asyncio.CancelledError:
             buffer.disconnected("stopped")
+            if source=="Coinbase":
+                COINBASE_MINUTES.disconnected("stopped")
             raise
         except Exception as exc:
             buffer.disconnected(type(exc).__name__)
+            if source=="Coinbase":
+                COINBASE_MINUTES.disconnected(type(exc).__name__)
         else:
             buffer.disconnected("connection_closed")
+            if source=="Coinbase":
+                COINBASE_MINUTES.disconnected("connection_closed")
         if time.monotonic()-started >= 20:
             delay = 1
         else:
