@@ -7,7 +7,8 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 import httpx
 from market_intelligence import intelligence_loop, public_intelligence, public_trade_flow
-from live_trade_stream import stream_loop
+from live_trade_stream import stream_loop, coinbase_candle_snapshot
+from coinbase_live_candles import compose_coinbase_candles
 from market_chart_history import record_brti, snapshot as chart_history_snapshot, latest_tip, official_chart_sampler, eligible_tick_market
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from price_action import analyze_price_action, shadow_price_action
@@ -484,19 +485,25 @@ _coinbase_formation_cache={"candles":None}
 
 def _coinbase_formation_from_cache(now=None):
  now=time.time() if now is None else float(now)
- bars=_coinbase_formation_cache.get("candles")
- if not isinstance(bars,list) or len(bars)<35:
+ # Reconcile authentic Coinbase REST history with the existing WebSocket
+ # stream. Reject missing minutes, disconnected streams and stale observations.
+ combined=compose_coinbase_candles(
+     _coinbase_formation_cache.get("candles"),coinbase_candle_snapshot(now),now)
+ if combined["status"]!="available":
   return {"status":"unavailable","source":"Coinbase Exchange BTC-USD",
-          "reason":"coinbase_candles_not_observed"},None,[]
- age=now-(float(bars[-1][0])+60)
- if not 0<=age<=75:
-  return {"status":"unavailable","source":"Coinbase Exchange BTC-USD",
-          "reason":"coinbase_completed_candle_stale","candle_age_seconds":round(age,1)},None,[]
+          "reason":combined["reason"],"candle_age_seconds":combined.get("candle_age_seconds"),
+          "formation_transport":combined.get("transport"),
+          "verified_minutes":combined.get("verified_minutes",0)},None,[]
+ bars=combined["candles"]
  context=analyze_early_patterns(bars,"Coinbase Exchange BTC-USD")
  if context.get("status") not in ("watch","monitoring"):
-  return {**context,"reason":context.get("reason","coinbase_candles_invalid")},None,[]
- return {**context,"candle_age_seconds":round(age,1),
-         "formation_feed":"recent_verified_coinbase_candles"},bars[-1],bars[-5:]
+  return {**context,"reason":context.get("reason","coinbase_candles_invalid"),
+          "formation_transport":combined["transport"]},None,[]
+ return {**context,"candle_age_seconds":combined["candle_age_seconds"],
+         "formation_feed":combined["transport"],
+         "verified_minutes":combined["verified_minutes"],
+         "websocket_minutes":combined["websocket_minutes"],
+         "rest_reconciliation_conflicts":combined.get("rest_reconciliation_conflicts",0)},bars[-1],bars[-5:]
 
 async def spot_data(client):
  errors=[]
@@ -510,14 +517,13 @@ async def spot_data(client):
   # Exclude the current incomplete minute.
   candles=[x for x in candles if float(x[0])+60<=time.time()]
   if len(candles)<35: raise ValueError("Coinbase insufficient completed candles")
-  if time.time()-float(candles[-1][0])-60>90: raise ValueError("Coinbase latest completed candle stale")
-
   candles=candles[-80:]
-  # Cache ONLY real contiguous Coinbase candles, before the stricter
-  # momentum/volume eligibility checks for the separate forecast.
-  formation=analyze_early_patterns(candles,"Coinbase Exchange BTC-USD")
-  if formation.get("status") in ("watch","monitoring"):
-   _coinbase_formation_cache["candles"]=candles[-50:]
+  # Keep real REST seed minutes even when delayed. Missing minutes can be
+  # supplied only by fully covered trade-ID/heartbeat checked WebSocket bars.
+  # This is the existing REST request (no extra polling).
+  _coinbase_formation_cache["candles"]=candles[-70:]
+  if time.time()-float(candles[-1][0])-60>90: raise ValueError("Coinbase latest completed candle stale")
+  formation,formation_candle,formation_bars=_coinbase_formation_from_cache()
   chart=chart_indicators(candles,5)
   pattern=classify_chart(candles)
   closes=[float(x[4]) for x in candles]
@@ -525,7 +531,13 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Coinbase BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"price_action":analyze_price_action(candles,"Coinbase Exchange BTC-USD"),"early_patterns":{**formation,"candle_age_seconds":round(time.time()-float(candles[-1][0])-60,1)},"pattern_candle":candles[-1],"formation_candles":candles[-5:],"bot_research_signals":study_strategies(candles,"Coinbase Exchange BTC-USD"),"source":"Coinbase Exchange BTC-USD","market_shock":measure_market_shock(candles,source="Coinbase Exchange BTC-USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"price_action":analyze_price_action(candles,"Coinbase Exchange BTC-USD"),"early_patterns":formation,"pattern_candle":formation_candle,"formation_candles":formation_bars,
+          "coinbase_feed_health":{"status":formation.get("formation_feed","unavailable") if formation_candle else "unavailable",
+                                  "last_error":formation.get("reason") if not formation_candle else None,
+                                  "formation_candle_age_seconds":formation.get("candle_age_seconds"),
+                                  "verified_minutes":formation.get("verified_minutes"),
+                                  "websocket_minutes":formation.get("websocket_minutes"),
+                                  "rest_reconciliation_conflicts":formation.get("rest_reconciliation_conflicts")},"bot_research_signals":study_strategies(candles,"Coinbase Exchange BTC-USD"),"source":"Coinbase Exchange BTC-USD","market_shock":measure_market_shock(candles,source="Coinbase Exchange BTC-USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Coinbase: "+str(e)[:150])
  # Kraken OHLC uses BTC/USD minute candles; last candle is incomplete.
  try:
@@ -548,8 +560,15 @@ async def spot_data(client):
 
   coinbase_context,coinbase_candle,coinbase_bars=_coinbase_formation_from_cache()
   if coinbase_context.get("status")=="unavailable":
+   coinbase_context["failure_detail"]=coinbase_context.get("reason")
    coinbase_context["reason"]="coinbase_feed_unavailable"
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"price_action":analyze_price_action([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"early_patterns":coinbase_context,"pattern_candle":coinbase_candle,"formation_candles":coinbase_bars,"coinbase_feed_health":{"status":"recent_cached" if coinbase_candle else "unavailable","last_error":errors[0] if errors else "Coinbase candles unavailable","formation_candle_age_seconds":coinbase_context.get("candle_age_seconds")},"bot_research_signals":study_strategies([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"source":"Kraken BTC/USD","market_shock":measure_market_shock([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],source="Kraken BTC/USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"price_action":analyze_price_action([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"early_patterns":coinbase_context,"pattern_candle":coinbase_candle,"formation_candles":coinbase_bars,"coinbase_feed_health":{"status":coinbase_context.get("formation_feed","unavailable") if coinbase_candle else "unavailable",
+                       "last_error":errors[0] if errors else "Coinbase candles unavailable",
+                       "failure_detail":coinbase_context.get("failure_detail"),
+                       "formation_candle_age_seconds":coinbase_context.get("candle_age_seconds"),
+                       "verified_minutes":coinbase_context.get("verified_minutes"),
+                       "websocket_minutes":coinbase_context.get("websocket_minutes"),
+                       "rest_reconciliation_conflicts":coinbase_context.get("rest_reconciliation_conflicts")},"bot_research_signals":study_strategies([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"source":"Kraken BTC/USD","market_shock":measure_market_shock([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],source="Kraken BTC/USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
