@@ -288,7 +288,11 @@ body:not(.show-advanced) #futureForecastCard p.small{display:none!important}
 #marketShockPanel[data-level="normal"] #marketShockHeadline{color:#83d7b6}
 #marketShockDetails,#marketShockSource{line-height:1.5;overflow-wrap:anywhere}
 
-@media(max-width:430px){#brtiLineCanvas{height:clamp(265px,78vw,350px)}#brtiRangeTabs button{padding:8px 10px}#brtiLineHead{font-size:10px}}
+@media(max-width:430px){#brtiLineCanvas{height:clamp(330px,92vw,420px)}#brtiRangeTabs button{padding:8px 10px}#brtiLineHead{font-size:10px}}
+/* Readable official BTC chart: room for labels, clear overlays, no heavy library. */
+#brtiLineCanvas{box-shadow:inset 0 0 0 1px #203548,0 10px 26px #0003}
+#brtiOverlayLegend{max-width:100%;overflow-wrap:anywhere;color:#9ab5ca}
+#brtiLineStatus{font-variant-numeric:tabular-nums}
 </style><style>
 /* Rule-based dashboard: keep official 15m charts and verified checkpoint results.
    Legacy AI data remains archived in the database but is not presented as current predictions. */
@@ -1118,9 +1122,15 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
   const observedXEnd=selected==='round'?now:m.end>now?now:now;
   const left=13,right=Math.min(91,Math.max(65,w*.19)),top=23,bottom=32;
   const pw=w-left-right,ph=h-top-bottom,plotRight=left+pw;
-  const nowX=selected==='round'?left+Math.max(0,Math.min(1,(now-m.start)/900))*pw:left+pw*.76;
+  // A literal 15-minute axis puts the first observed seconds into a few
+  // pixels. Expand the elapsed portion while compressing the *future*.
+  // Keep the time-axis transform explicit so it is never mistaken for linear
+  // elapsed-time spacing when the round has just started.
+  const roundElapsed=Math.max(0,Math.min(900,now-m.start));
+  const liveFraction=selected==='round' ? (0.64+0.36*(roundElapsed/900)) : 0.76;
+  const nowX=left+liveFraction*pw;
   const X=t=>{
-   if(t<=now||selected==='round')return left+(t-start)/(selected==='round'?900:now-start)*(selected==='round'?pw:nowX-left);
+   if(t<=now)return left+(t-start)/Math.max(1,now-start)*(nowX-left);
    return nowX+(t-now)/Math.max(1,m.end-now)*(plotRight-nowX);
   };
   const raw=hist&&Array.isArray(hist.brti_points)&&hist.brti_points.length>=2?
@@ -1135,13 +1145,19 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
    points:v.points.filter(p=>Array.isArray(p)&&finite(Number(p[0]))&&finite(Number(p[1]))&&p[0]>=start&&p[0]<=now&&p[1]>0)
     .map(p=>[Number(p[0]),Number(p[1])])})).filter(v=>v.points.length>=2);
   const last=source[source.length-1];
+  // Zoom to ACTUAL official BRTI observations and the official target.
+  // A far-away *future* forecast must not crush live movement into a flat
+  // horizontal line. Its exact USD value remains in a marked edge badge.
   const all=source.map(p=>p[1]);
   if(m.target!==null)all.push(m.target);
-  if(m.projected!==null)all.push(m.projected);
-  // Cross-exchange basis outliers do not flatten the official BRTI path.
-  for(const v of visibleVenues)for(const p of v.points)if(Math.abs(p[1]/last[1]-1)<.02)all.push(p[1]);
-  const min=Math.min(...all),max=Math.max(...all),pad=Math.max(1,(max-min)*.12);
-  const low=min-pad,high=max+pad,Y=p=>top+(high-p)/(high-low)*ph;
+  const observedLow=Math.min(...all),observedHigh=Math.max(...all);
+  const observedSpread=Math.max(3,observedHigh-observedLow);
+  if(m.projected!==null&&m.projected>=observedLow-Math.max(12,observedSpread*.7)&&
+     m.projected<=observedHigh+Math.max(12,observedSpread*.7))all.push(m.projected);
+  const min=Math.min(...all),max=Math.max(...all),pad=Math.max(2,(max-min)*.16);
+  const centered=(min+max)/2,span=Math.max(12,max-min+2*pad);
+  const low=centered-span/2,high=centered+span/2,Y=p=>top+(high-p)/(high-low)*ph;
+  const projectionOffScale=m.projected!==null&&(m.projected<low||m.projected>high);
   // Observed and future shading. Final settlement window is the last 60 seconds.
   ctx.fillStyle='#0d2425';ctx.fillRect(left,top,Math.max(0,nowX-left),ph);
   ctx.fillStyle='#242823';ctx.fillRect(nowX,top,Math.max(0,plotRight-nowX),ph);
@@ -1153,14 +1169,30 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
    ctx.beginPath();ctx.strokeStyle='#29404b';ctx.moveTo(left,y);ctx.lineTo(plotRight,y);ctx.stroke();
    ctx.fillStyle='#a5b7c4';ctx.fillText((high-(high-low)*i/4).toFixed(2),plotRight+7,y+3);
   }
-  for(let i=0;i<=3;i++){
-   const t=start+(now-start)*i/3,x=X(t);
-   ctx.beginPath();ctx.strokeStyle='#243943';ctx.moveTo(x,top);ctx.lineTo(x,h-bottom);ctx.stroke();
-   ctx.fillStyle='#91a8b8';ctx.fillText(new Date(t*1000).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),Math.max(1,Math.min(w-63,x-19)),h-10);
+  const observedWidth=nowX-left;
+  const ticks=Math.max(1,Math.min(3,Math.floor(observedWidth/105)));
+  let lastTickX=-100,lastTickLabel='';
+  for(let i=0;i<=ticks;i++){
+   const t=start+(now-start)*i/ticks,x=X(t);
+   const label=i===ticks?'LIVE':new Date(t*1000).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+   if(x-lastTickX<72||label===lastTickLabel)continue;
+   ctx.beginPath();ctx.strokeStyle='#223845';ctx.moveTo(x,top);ctx.lineTo(x,h-bottom);ctx.stroke();
+   ctx.fillStyle=i===ticks?'#73d3ff':'#9ab4c8';
+   ctx.font='10px system-ui';
+   ctx.fillText(label,Math.max(3,Math.min(plotRight-62,x-(i===ticks?13:18))),h-12);
+   lastTickX=x;lastTickLabel=label;
   }
-  ctx.beginPath();ctx.strokeStyle='#8ca4ae';ctx.lineWidth=1.1;ctx.moveTo(nowX,top);ctx.lineTo(nowX,h-bottom);ctx.stroke();
+  ctx.beginPath();ctx.strokeStyle='#6f9fb0';ctx.lineWidth=1.3;ctx.moveTo(nowX,top);ctx.lineTo(nowX,h-bottom);ctx.stroke();
+  ctx.font='bold 10px system-ui';
+  ctx.fillStyle='#78c4e3';
+  ctx.fillText(selected==='round'?'LIVE DETAIL · ELAPSED TIME EXPANDED':'LIVE PRICE DETAIL',left+6,top+15);
+  if(plotRight-nowX>=140){
+   ctx.fillStyle='#d1a063';
+   ctx.fillText('FUTURE · COMPRESSED',nowX+8,top+28);
+  }
   ctx.fillStyle='#d1a063';ctx.font='10px system-ui';
-  ctx.fillText('SETTLEMENT AVG',Math.max(nowX+3,plotRight-95),top+13);
+  if(plotRight-nowX>=95)ctx.fillText('SETTLEMENT AVG',Math.max(nowX+6,plotRight-95),top+13);
+  if(plotRight-nowX>=75){ctx.fillStyle='#9ab4c8';ctx.fillText('ROUND END',plotRight-62,h-12);}
   function line(series,color,width,dashes,maxGap,limitX){
    ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=width;ctx.setLineDash(dashes||[]);
    let prev=null;
@@ -1172,33 +1204,57 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
    }
    ctx.stroke();ctx.setLineDash([]);
   }
+  // Clip plotted lines to the observed price viewport. Markers still show
+  // true values, even when a distant forecast lies beyond the zoom range.
+  ctx.save();ctx.beginPath();ctx.rect(left,top,pw,ph);ctx.clip();
   // A dashed horizontal official price to beat, not the spot price.
-  if(m.target!==null)line([[start,m.target],[m.end,m.target]],'#dfe5ee',1.4,[6,5],4000);
+  if(m.target!==null)line([[start,m.target],[m.end,m.target]],'#dfe5ee',1.5,[6,5],4000);
   for(const v of visibleVenues){
-   ctx.globalAlpha=.57;line(v.points,v.color,1.0,[],50);ctx.globalAlpha=1;
+   ctx.globalAlpha=.42;line(v.points,v.color,1.1,[],50);ctx.globalAlpha=1;
   }
-  line(source,'#5fcfff',2.8,[],20);
+  line(source,'#5fcfff',3.2,[],20);
   if(m.projected!==null)line([last,[m.end,m.projected]],'#ff9e26',2.5,[4,6],4000);
-  ctx.beginPath();ctx.arc(X(last[0]),Y(last[1]),4,0,Math.PI*2);ctx.fillStyle='#5fcfff';ctx.fill();
-  if(m.projected!==null){ctx.beginPath();ctx.arc(plotRight,Y(m.projected),4,0,Math.PI*2);ctx.fillStyle='#ff9e26';ctx.fill();}
+  ctx.restore();
+  ctx.beginPath();ctx.arc(X(last[0]),Y(last[1]),4.5,0,Math.PI*2);ctx.fillStyle='#5fcfff';ctx.fill();
+  if(m.projected!==null&&!projectionOffScale){ctx.beginPath();ctx.arc(plotRight,Y(m.projected),4.5,0,Math.PI*2);ctx.fillStyle='#ff9e26';ctx.fill();}
   // Keep price markers readable even when current, target and forecast overlap.
   const markers=[{label:'BRTI',price:last[1],fill:'#64c9f9',ink:'#061627'}];
   if(m.target!==null)markers.push({label:'TARGET',price:m.target,fill:'#edf2f8',ink:'#15202d'});
   if(m.projected!==null)markers.push({label:'AVG',price:m.projected,fill:'#ffac39',ink:'#241709'});
   markers.sort((a,b)=>Y(a.price)-Y(b.price));
-  let prior=-99;
-  for(const item of markers){
-   const y0=Y(item.price),y=Math.max(top+10,Math.min(h-bottom-10,Math.max(y0,prior+19)));
-   prior=y;ctx.fillStyle=item.fill;ctx.fillRect(plotRight+2,y-9,right-5,18);
+  const markerGap=24,minMarkerY=top+12,maxMarkerY=h-bottom-12;
+  const markerY=markers.map(item=>Math.max(minMarkerY,Math.min(maxMarkerY,Y(item.price))));
+  for(let i=1;i<markerY.length;i++)markerY[i]=Math.max(markerY[i],markerY[i-1]+markerGap);
+  if(markerY.length&&markerY[markerY.length-1]>maxMarkerY){
+   const shift=markerY[markerY.length-1]-maxMarkerY;
+   for(let i=0;i<markerY.length;i++)markerY[i]-=shift;
+  }
+  for(let i=markerY.length-2;i>=0;i--)markerY[i]=Math.min(markerY[i],markerY[i+1]-markerGap);
+  for(let i=0;i<markers.length;i++){
+   const item=markers[i],y0=Y(item.price),y=markerY[i];
+   // Short leader connects the true horizontal level to a displaced badge.
+   ctx.beginPath();ctx.strokeStyle=item.fill;ctx.lineWidth=1;
+   ctx.moveTo(plotRight-4,Math.max(top,Math.min(top+ph,y0)));
+   ctx.lineTo(plotRight+2,y);ctx.stroke();
+   ctx.fillStyle=item.fill;ctx.fillRect(plotRight+2,y-10,right-5,20);
    ctx.fillStyle=item.ink;ctx.font='bold 10px ui-monospace,monospace';
    ctx.fillText(money(item.price),plotRight+5,y+3);
   }
+  if(projectionOffScale){
+   ctx.font='bold 10px system-ui';ctx.fillStyle='#ffb54d';
+   ctx.fillText(m.projected>high?'AVG ABOVE VIEW':'AVG BELOW VIEW',
+    Math.max(left+6,plotRight-100),m.projected>high?top+43:top+ph-9);
+  }
   ctx.fillStyle='#b4e2f6';ctx.font='bold 11px system-ui';
   ctx.fillText('BRTI '+money(last[1]),left+2,top-7);
-  status.textContent='LIVE · '+(selected==='round'?'this round':selected)+' · '+(visibleVenues.length||0)+' exchange overlays'+(m.projected!==null?' · forecast guide':'');
+  status.textContent='LIVE · '+(selected==='round'?'this round':selected)+
+   ' · official BRTI price zoom · '+visibleVenues.length+' exchange overlays'+
+   (m.projected!==null?' · forecast guide':'');
   if(overlayLegend)overlayLegend.textContent=(visibleVenues.length?visibleVenues.map(v=>v.name).join(' · '):'Exchange overlays collecting')+
-   ' · last-price samples, not the settlement index'+(hist&&hist.brti_coverage_seconds<((spans[selected]||now-m.start)-30)?' · history still accumulating':'')+
-   (selected!=='round'?' · future timeline compressed':'');
+   ' · last-price samples, not the settlement index'+
+   (hist&&hist.brti_coverage_seconds<((spans[selected]||now-m.start)-30)?' · history still accumulating':'')+
+   ' · live timeline expanded, future compressed (not linear time)'+
+   (projectionOffScale?' · orange final-average forecast outside displayed price zoom':'');
  }
  async function refreshTip(){
   if(document.hidden||tipBusy||typeof fetch!=='function')return;

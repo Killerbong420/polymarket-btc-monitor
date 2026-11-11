@@ -56,7 +56,7 @@ assert.equal(element('pmApiTarget').textContent,'—');
   addEventListener:(name,fn)=>{drawListeners[name]=fn;}};
  const browser={devicePixelRatio:1,btcServerStatus:null,
   addEventListener:(name,fn)=>{handlers[name]=fn;}};
- const testNow=Math.floor(Date.now()/900000)*900000+450000;
+ let testNow=Math.floor(Date.now()/900000)*900000+450000;
  const TestDate=class extends Date{static now(){return testNow;}};
  vm.runInNewContext(graphScript,{window:browser,document:doc,Date:TestDate});
  assert.equal(typeof browser.btcBrtiLineModel,'function');
@@ -84,6 +84,39 @@ assert.equal(element('pmApiTarget').textContent,'—');
  assert.match(graphStatus.textContent,/LIVE/);
  assert.ok(rendered.some(x=>x[0]==='lineTo'),'line chart must draw an index path');
  assert.ok(rendered.every(x=>x.every(v=>typeof v!=='number'||Number.isFinite(v))),'all plotted values must be finite');
+ // During the first minute, the previous 15-minute linear scale squeezed
+ // all actual BRTI prices into the left few pixels and repeated the same
+ // minute label 4 times. Verify that real observed points now have room.
+ const middleNow=testNow,earlyNowSec=start+35;
+ const earlyPoints=Array.from({length:15},(_,i)=>[start+3+i*2,81020+i*.4]);
+ const early={...obj,updated:new Date(earlyNowSec*1000).toISOString(),
+  reference_price:{...obj.reference_price,price_epoch:earlyNowSec-2},
+  brti_chart:{...obj.brti_chart,points:earlyPoints,sample_age_seconds:2},
+  settlement_forecast:{...obj.settlement_forecast,forecast_final_mean_usd:80900,
+   seconds_to_settlement:end-earlyNowSec}};
+ testNow=earlyNowSec*1000;
+ browser.btcServerStatus=early;rendered.length=0;
+ handlers.resize(); // force redraw when simulated time moves backward
+ assert.match(graphStatus.textContent,/LIVE/);
+ const labels=rendered.filter(x=>x[0]==='fillText');
+ assert.ok(labels.some(x=>x[1]==='LIVE DETAIL · ELAPSED TIME EXPANDED'),
+   'early round must explicitly disclose time-axis expansion');
+ const liveLabel=labels.find(x=>x[1]==='LIVE');
+ assert.ok(liveLabel&&liveLabel[2]>140,
+   'observed recent BRTI prices must occupy a useful width, not 5% of the chart');
+ assert.ok(labels.some(x=>x[1]==='AVG BELOW VIEW'),
+   'off-scale projection must be labeled, rather than flattening live prices');
+ assert.ok(!labels.some(x=>x[1]==='FUTURE · COMPRESSED')||
+           labels.find(x=>x[1]==='FUTURE · COMPRESSED')[2]>100,
+   'future annotation must not overflow the live labels');
+ const priceBadges=rendered.filter(x=>x[0]==='fillRect'&&x[4]===20);
+ assert.equal(priceBadges.length,3,'BRTI, target and forecast retain exact price badges');
+ const badgeYs=priceBadges.map(x=>x[2]).sort((a,b)=>a-b);
+ assert.ok(badgeYs.every((v,i)=>i===0||v-badgeYs[i-1]>=23.9),
+   'price badges must not overlap even if projected and target levels are close');
+ assert.ok(rendered.every(x=>x.every(v=>typeof v!=='number'||Number.isFinite(v))),
+   'early-round plot must never produce NaN or Infinity');
+ testNow=middleNow;
  browser.btcServerStatus={...obj,reference_price:{...obj.reference_price,status:'stale'}};
  handlers.resize();
  assert.match(graphStatus.textContent,/stale/);
