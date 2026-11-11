@@ -1,7 +1,6 @@
 import asyncio, json, os, sqlite3, time, uuid
 from threading import RLock as _HistoryLock
 from pathlib import Path
-from historical_15m import main as collect_15m, START as HISTORY_START, END as HISTORY_END
 from ai_confirmation import public_state, auth_state, paper_signal_state
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
@@ -1198,21 +1197,13 @@ async def lifespan(app):
  context_task=asyncio.create_task(intelligence_loop())
  trade_stream_task=asyncio.create_task(stream_loop())
  chart_task=asyncio.create_task(official_chart_sampler(state))
- # Paper-trading worker disabled: prediction-only mode.
- async def historical_job():
-  try:
-   historical_state.update(status="running",started=datetime.now(timezone.utc).isoformat())
-   await collect_15m()
-   records=json.loads(Path("historical_15m_7d.json").read_text())
-   historical_state.update(status="complete",checked=len(records),targets=sum(x["price_to_beat"] is not None for x in records),winners=sum(x["winner"] is not None for x in records),verified=sum(x["status"]=="VERIFIED" for x in records),movement_complete=sum(x.get("movement_status")=="COMPLETE" for x in records),target_movement_complete=sum(x.get("movement_status")=="COMPLETE" and x.get("price_to_beat") is not None for x in records),finished=datetime.now(timezone.utc).isoformat())
-  except Exception as exc: historical_state.update(status="error",error=str(exc)[:300])
- history_task=asyncio.create_task(historical_job())
+ # Seven-day 672-market historical backfill disabled on live service.
+ # Live BRTI, official 15m settlement grading, and pattern history are separate.
  diagnostics_task=asyncio.create_task(read_only_diagnostics_loop())
  terry_task=asyncio.create_task(terry_calls.worker(lambda: state,execute))
  yield
  task.cancel()
  status_history_task.cancel()
- history_task.cancel()
  diagnostics_task.cancel()
  terry_task.cancel()
  context_task.cancel()
@@ -1220,10 +1211,10 @@ async def lifespan(app):
  chart_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,status_history_task,history_task,context_task,trade_stream_task,chart_task,diagnostics_task,terry_task,*pending_predictions):
+ for running in (task,status_history_task,context_task,trade_stream_task,chart_task,diagnostics_task,terry_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
-historical_state={"status":"pending","requested":672,"period":HISTORY_START.isoformat()+" through "+HISTORY_END.isoformat()+" (exclusive)","verified":0}
+historical_state={"status":"disabled","reason":"Seven-day bulk market collection disabled to protect live monitoring.","requested":0,"verified":0}
 app=FastAPI(lifespan=lifespan)
 @app.get("/research-dashboard.js")
 def dashboard_script():
@@ -1519,14 +1510,13 @@ def historical_status():
  return historical_state
 @app.get("/api/historical-15m/results")
 def historical_results():
- p=Path("historical_15m_7d.json")
- if not p.exists(): return JSONResponse({"status":historical_state,"records":[]},status_code=202)
- return {"status":historical_state,"records":json.loads(p.read_text())}
+ # Never load a large archival JSON file into the live web worker.
+ return {"status":historical_state,"records":[]}
+
 @app.get("/api/historical-15m/csv")
 def historical_csv():
- p=Path("historical_15m_7d.csv")
- if not p.exists(): return JSONResponse({"status":historical_state},status_code=202)
- return FileResponse(str(p),media_type="text/csv",filename="polymarket_us_btc_15m_7d.csv")
+ return JSONResponse({"status":historical_state},status_code=410)
+
 # Keep per-visitor stream work bounded; the regular /api/status path is the fallback.
 _flow_ws_clients = 0
 
