@@ -43,8 +43,9 @@ class CoinbaseMinuteBuilderTests(unittest.TestCase):
 
     def test_candle_waits_for_true_close_and_heartbeat(self):
         b=self.new_builder()
-        feed_minute(b,{1:[(101,100)],10:[(102,110)],55:[(103,105)]})
+        feed_minute(b,{1:[(101,100)],10:[(102,110)],55:[(103,105)]},until=61)
         self.assertEqual(b.snapshot(BASE+61)["status"],"warming")
+        for sec in range(62,71):beat(b,b.last_trade_id,BASE+sec)
         ready=b.snapshot(BASE+70)
         self.assertEqual(ready["status"],"available")
         self.assertEqual(ready["transport"],"websocket_matches_heartbeat")
