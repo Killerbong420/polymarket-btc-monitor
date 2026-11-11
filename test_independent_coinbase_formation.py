@@ -72,7 +72,7 @@ class IndependentCoinbaseFormationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(result["early_patterns"]["status"],("watch","monitoring"))
         self.assertEqual(result["pattern_candle"],bars[-1])
         self.assertEqual(result["formation_candles"],bars[-5:])
-        self.assertEqual(result["coinbase_feed_health"]["status"],"recent_cached")
+        self.assertEqual(result["coinbase_feed_health"]["status"],"rest_verified")
         self.assertIn("temporary Coinbase",result["coinbase_feed_health"]["last_error"])
 
     async def test_coinbase_volume_filter_does_not_suppress_valid_formation(self):
@@ -82,7 +82,7 @@ class IndependentCoinbaseFormationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["source"],"Kraken BTC/USD")
         self.assertIn(result["early_patterns"]["status"],("watch","monitoring"))
         self.assertEqual(result["early_patterns"]["source"],"Coinbase Exchange BTC-USD")
-        self.assertEqual(result["coinbase_feed_health"]["status"],"recent_cached")
+        self.assertEqual(result["coinbase_feed_health"]["status"],"rest_verified")
 
     async def test_stale_coinbase_never_masquerades_as_live(self):
         bars=fresh_bars()
