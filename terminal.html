@@ -848,10 +848,10 @@ window.btcNoteRequest=function(name,ms,ok){
     kind='DOJI';phase=d.status.toUpperCase();doji=d;
    }
   }
-  const invalid=phase==='INVALIDATED'||phase==='EXPIRED';
+  const invalid=phase==='INVALIDATED',inactive=invalid||phase==='EXPIRED';
   const dir=kind==='DOUBLE_TOP'||kind==='BEAR_FLAG'?'bear':
             kind==='DOUBLE_BOTTOM'||kind==='BULL_FLAG'?'bull':'neutral';
-  card.dataset.bias=invalid?'neutral':dir;
+  card.dataset.bias=inactive?'neutral':dir;
   let source='Coinbase BTC-USD',status='● SCANNING',title='AWAITING COINBASE FORMATION';
   let call='WATCH ONLY · NO SIGNAL',note='Waiting for a fresh Coinbase formation. Example chart only.';
   let explanation='Waiting for a fresh completed Coinbase BTC-USD candle and an identifiable formation.';
@@ -869,7 +869,7 @@ window.btcNoteRequest=function(name,ms,ok){
    invalidation=money(typeof tracked?.invalidation_usd==='number'?tracked.invalidation_usd:p.invalidation_usd);
    objective=money(tracked?.objective_usd);
    explanation=invalid?info.INVALIDATED:info[kind];
-   if(invalid){call='⊘ NO ACTIVE CALL';status='● '+phase;}
+   if(inactive){call='⊘ NO ACTIVE CALL';status='● '+phase;}
    else if(phase==='COMPLETED'){call='OBJECTIVE REACHED · NOT A TRADE WIN';status='● COMPLETED';}
    else{call=(dir==='bull'?'▲ BULLISH':'▼ BEARISH')+
      (phase==='BREAKOUT'?' BREAKOUT WATCH':' FORMATION WATCH');}
