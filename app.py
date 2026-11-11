@@ -13,7 +13,7 @@ from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, ta
 from price_action import analyze_price_action, shadow_price_action
 from doji_watch import anticipate_doji
 from early_pattern_context import analyze_early_patterns
-from pattern_lifecycle import setup_tables as setup_pattern_lifecycle, record_completed_bar
+from pattern_lifecycle import setup_tables as setup_pattern_lifecycle, record_completed_bar, record_coinbase_sequence
 from bot_library import study_strategies, consensus
 from settlement_forecast import forecast_settlement, regime_shadow_forecast
 from brti_volatility_shadow import brti_volatility_shadow, evaluate_shadow
@@ -496,7 +496,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Coinbase BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"price_action":analyze_price_action(candles,"Coinbase Exchange BTC-USD"),"early_patterns":analyze_early_patterns(candles,"Coinbase Exchange BTC-USD"),"pattern_candle":candles[-1],"bot_research_signals":study_strategies(candles,"Coinbase Exchange BTC-USD"),"source":"Coinbase Exchange BTC-USD","market_shock":measure_market_shock(candles,source="Coinbase Exchange BTC-USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence(candles,5),"price_action":analyze_price_action(candles,"Coinbase Exchange BTC-USD"),"early_patterns":analyze_early_patterns(candles,"Coinbase Exchange BTC-USD"),"pattern_candle":candles[-1],"formation_candles":candles[-5:],"bot_research_signals":study_strategies(candles,"Coinbase Exchange BTC-USD"),"source":"Coinbase Exchange BTC-USD","market_shock":measure_market_shock(candles,source="Coinbase Exchange BTC-USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Coinbase: "+str(e)[:150])
  # Kraken OHLC uses BTC/USD minute candles; last candle is incomplete.
  try:
@@ -516,7 +516,7 @@ async def spot_data(client):
   recent=sum(vols[-5:])
   baseline=sum(vols[-20:-5])/3
   if recent<0.05 or baseline<0.05: raise ValueError("Kraken BTC volume too thin")
-  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"price_action":analyze_price_action([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"early_patterns":analyze_early_patterns([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"pattern_candle":[[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles][-1],"bot_research_signals":study_strategies([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"source":"Kraken BTC/USD","market_shock":measure_market_shock([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],source="Kraken BTC/USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+  return {"price":closes[-1],"momentum_pct":round((closes[-1]/closes[-4]-1)*100,4),"long_momentum_pct":round((closes[-1]/closes[-16]-1)*100,4),"pressure":0.0,"pressure_available":False,"volume_ratio":round(min(10,recent/baseline),2),"chart":chart,"chart_pattern":pattern,"graph_evidence":graph_evidence([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],5),"price_action":analyze_price_action([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"early_patterns":{"status":"unavailable","source":"Coinbase Exchange BTC-USD","reason":"coinbase_feed_unavailable"},"pattern_candle":None,"formation_candles":[],"bot_research_signals":study_strategies([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"source":"Kraken BTC/USD","market_shock":measure_market_shock([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],source="Kraken BTC/USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
@@ -1028,14 +1028,16 @@ async def loop():
      phase="EARLY" if left15>450 else "LATE" if left15<=180 else "MID"
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(left15),market=slug,external=d,updated=now,error=None)
      state["final_15m"]={"market":slug,"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
-     # Forward-only pattern milestone recording, at most once per completed
-     # exchange candle. Store on the persistent DB separately from predictions.
+     # Forward-only formation tracker uses Coinbase BTC-USD ONLY. The same
+     # existing OHLC response provides verified consecutive completed candles;
+     # Kraken remains an allowed fallback for the main BTC forecast only.
      candle=d.get("pattern_candle")
      context=d.get("early_patterns") or {}
-     pattern_key=(slug,d.get("source"),candle[0]) if isinstance(candle,(tuple,list)) and len(candle)>=6 else None
+     formation_candles=d.get("formation_candles") or []
+     pattern_key=(slug,"Coinbase Exchange BTC-USD",candle[0]) if d.get("source")=="Coinbase Exchange BTC-USD" and isinstance(candle,(tuple,list)) and len(candle)>=6 and formation_candles else None
      if state.get("database_ready") and pattern_key and pattern_key!=_pattern_lifecycle_cache["key"] and time.monotonic()>=_pattern_lifecycle_cache["retry_after"]:
       try:
-       saved=(await asyncio.to_thread(record_completed_bar,execute,slug,context,candle,time.time()))
+       saved=(await asyncio.to_thread(record_coinbase_sequence,execute,slug,context,formation_candles,time.time()))
        if saved.get("status") in ("available","collecting"):
         state["pattern_lifecycle"]=saved
         state["pattern_lifecycle_error"]=None

@@ -389,13 +389,13 @@ window.btcNoteRequest=function(name,ms,ok){
 <canvas id="brtiLineCanvas" role="img" aria-label="Official Polymarket US BRTI index line, official price to beat, and eligible final-average forecast. No candlesticks or contract values."></canvas>
   <div id="brtiLineLegend"><span><i></i>BRTI index</span><span><i class="target"></i>Official target</span><span><i class="forecast"></i>Projected final average (when verified)</span></div>
 </section>
-<div id="structureWatch" role="status" aria-live="polite" style="font-size:12px;line-height:1.45;padding:8px 10px;margin:6px 0 9px;border:1px solid #3b526b;border-radius:9px;color:#b6c9db;background:#0c1b2a">FORMATION WATCH · Waiting for completed exchange candles</div>
+<div id="structureWatch" role="status" aria-live="polite" style="font-size:12px;line-height:1.45;padding:8px 10px;margin:6px 0 9px;border:1px solid #3b526b;border-radius:9px;color:#b6c9db;background:#0c1b2a">FORMATION WATCH · Waiting for completed Coinbase BTC-USD candles</div>
 <details id="patternLifecyclePanel" style="margin:0 0 10px;border:1px solid #34465b;border-radius:9px;padding:8px 10px;color:#b6c9db;font-size:12px">
-<summary style="cursor:pointer;font-weight:700">Formation results & saved timeline · observed follow-through</summary>
+<summary style="cursor:pointer;font-weight:700">Coinbase BTC-USD Formation results & saved timeline</summary>
 <div id="formationEarlyWarning" aria-label="Observed early formation warnings" style="margin:8px 0;padding:8px 0;border-top:1px solid #2e4057;color:#b6c9db">Early warning results collecting.</div>
 <div id="formationFollowThrough" aria-label="Observed pattern objective follow-through" style="margin:8px 0;padding:8px 0;border-top:1px solid #2e4057;color:#b6c9db">Follow-through results collecting; 10 resolved examples needed per pattern before a percentage is shown.</div>
 <div id="patternLifecycleRows" style="margin-top:8px">Collecting new pattern observations; existing patterns are not backfilled.</div>
-<p style="font-size:11px;opacity:.85;margin:8px 0 0">CONFIRMED = observed structure persisted, not a guaranteed reversal. COMPLETED = price closed beyond a frozen pattern objective after breakout; not proof of Polymarket profit. EXPIRED = insufficient follow-through or a missing candle. Initial pattern fit is not an outcome probability.</p>
+<p style="font-size:11px;opacity:.85;margin:8px 0 0">CONFIRMED = observed structure persisted, not a guaranteed reversal. COMPLETED = price closed beyond a frozen pattern objective after breakout; not proof of Polymarket profit. EXPIRED = timed out or a missing completed Coinbase candle, not proof of failure. Formation Watch uses Coinbase BTC-USD only. Initial pattern fit is not an outcome probability.</p>
 </details>
 <script>
 /* Independent, read-only pattern observations; no extra requests or forecast overrides. */
@@ -458,7 +458,7 @@ window.btcNoteRequest=function(name,ms,ok){
   earlyNode.append(heading);
   const note=document.createElement('div');
   note.style.cssText='font-size:11px;margin:4px 0 8px;color:#a4bcd2';
-  note.textContent='Only formations first seen before breakout · missed candles/unfinished setups excluded from breakout rate · not trading wins';
+  note.textContent='Coinbase BTC-USD only · first observed before breakout · missing candles/unfinished excluded from rate · not trading wins';
   earlyNode.append(note);
   for(const x of list){
    if(!['DOUBLE_TOP','DOUBLE_BOTTOM','BULL_FLAG','BEAR_FLAG'].includes(x.pattern))continue;
@@ -487,7 +487,7 @@ window.btcNoteRequest=function(name,ms,ok){
   performanceNode.append(intro);
   const detail=document.createElement('div');
   detail.style.cssText='margin-top:4px;font-size:11px;color:#a4bcd2;line-height:1.4';
-  detail.textContent='Forward-only 1m exchange closes · latest 200 resolved formations · pending/expired excluded · NOT win odds';
+  detail.textContent='Forward-only completed Coinbase 1m closes · latest 200 resolved formations · pending/expired excluded · NOT win odds';
   performanceNode.append(detail);
   if(!list.length){
    const note=document.createElement('div');
@@ -550,7 +550,8 @@ window.btcNoteRequest=function(name,ms,ok){
   const age=now-Date.parse(s.updated||'')/1000;
   const candleAge=Number(d.candle_age_seconds);
   const live=s.status==='running'&&typeof s.market==='string'&&s.market.includes('btc-updown-15m-')&&
-    Number.isFinite(age)&&age>=-3&&age<=18&&Number.isFinite(candleAge)&&candleAge>=0&&candleAge<=90;
+    Number.isFinite(age)&&age>=-3&&age<=18&&Number.isFinite(candleAge)&&candleAge>=0&&candleAge<=90&&
+    d.source==='Coinbase Exchange BTC-USD'&&p.source==='Coinbase Exchange BTC-USD';
   node.style.borderColor='#3b526b';
   if(live&&p.status==='watch'&&typeof p.pattern==='string'){
    const tracked=rows.find(x=>x.market===s.market&&x.source===d.source&&
@@ -576,9 +577,12 @@ window.btcNoteRequest=function(name,ms,ok){
     ' · '+(d.source||'exchange 1m')+' · rule-based fit score, NOT outcome odds'+doji+whale;
    node.style.borderColor=phase==='BREAKOUT'?'#3b987f':'#d1a65a';
   }else if(live&&p.status==='monitoring'){
-   node.textContent='FORMATION WATCH · Scanning flags, double turns, breakouts and retests'+doji+whale;
+   node.textContent='FORMATION WATCH · Coinbase BTC-USD · scanning flags, double turns, breakouts and retests'+doji+whale;
+  }else if(s.status==='running'&&p.reason==='coinbase_feed_unavailable'){
+   node.textContent='FORMATION WATCH · Coinbase candles temporarily unavailable · watch paused, no Kraken substitution'+doji+whale;
+   node.style.borderColor='#b16b73';
   }else{
-   node.textContent=(doji||whale)?'FORMATION WATCH'+doji+whale:'FORMATION WATCH · Waiting for fresh completed exchange candles';
+   node.textContent=(doji||whale)?'FORMATION WATCH · Coinbase candles unavailable'+doji+whale:'FORMATION WATCH · Waiting for fresh completed Coinbase BTC-USD candles';
   }
  }
  window.addEventListener('btc-status-updated',renderPatterns);

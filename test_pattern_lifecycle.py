@@ -3,14 +3,14 @@ import sqlite3
 import unittest
 from pathlib import Path
 
-from pattern_lifecycle import setup_tables, record_completed_bar
+from pattern_lifecycle import setup_tables, record_completed_bar, record_coinbase_sequence, COINBASE_SOURCE
 
 
 class PatternLifecycleTests(unittest.TestCase):
     def setUp(self):
         self.db = sqlite3.connect(":memory:")
         self.market = "cpc-btc-updown-15m-2026-11-10-2100z"
-        self.source = "Kraken BTC/USD"
+        self.source = COINBASE_SOURCE
         self.first = 1800000060
         setup_tables(self.execute)
 
@@ -217,12 +217,82 @@ class PatternLifecycleTests(unittest.TestCase):
         self.assertNotIn("fetch(",part)
         self.assertNotIn("meterDownPct",part)
 
+    def test_coinbase_history_excludes_old_kraken_rows(self):
+        self.record(self.first,105)
+        # Old Kraken records remain untouched in DB but must be excluded from
+        # the Coinbase-only Formation Watch and statistical denominators.
+        self.execute("""INSERT INTO pattern_lifecycle (
+          id,market,source,pattern,anchor_epoch,direction,phase,initial_phase,
+          first_seen_epoch,last_bar_epoch,trigger_usd,invalidation_usd,
+          objective_usd,initial_fit_pct,result)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+          ("old-kraken",self.market,"Kraken BTC/USD","BULL_FLAG",self.first,
+           1,"COMPLETED","FORMING",float(self.first),self.first+120,100,90,110,75,
+           "MEASURED_OBJECTIVE_REACHED"))
+        from pattern_lifecycle import _recent
+        info=_recent(self.execute,self.market)
+        self.assertEqual(info["source"],COINBASE_SOURCE)
+        self.assertEqual(len(info["recent"]),1)
+        self.assertTrue(all(x["source"]==COINBASE_SOURCE for x in info["recent"]))
+        flags=next(x for x in info["follow_through"]["by_pattern"] if x["pattern"]=="BULL_FLAG")
+        self.assertEqual(flags["resolved"],0)
+        self.assertEqual(record_completed_bar(self.execute,self.market,
+                         self.signal(source="Kraken BTC/USD"),self.sample(self.first+60,102),
+                         now=self.first+62)["reason"],"coinbase_candles_required")
+
+    def test_verified_recent_coinbase_sequence_repairs_one_minute_gap(self):
+        self.record(self.first,105)
+        # The prior minute was late to the backend, but is still a genuine
+        # completed Coinbase OHLC candle in this response.
+        late_bar=self.sample(self.first+60,103)
+        latest_bar=self.sample(self.first+120,98)
+        result=record_coinbase_sequence(
+            self.execute,self.market,self.signal(status="monitoring"),
+            [late_bar,latest_bar],now=self.first+122)
+        saved=result["recent"][0]
+        self.assertEqual(saved["phase"],"BREAKOUT")
+        self.assertEqual(saved["confirmed_epoch"],self.first+60)
+        self.assertEqual(saved["breakout_epoch"],self.first+120)
+        self.assertIsNone(saved["expired_epoch"])
+        self.assertEqual(len(self.rows()),1)
+
+    def test_missing_coinbase_minute_still_expires_and_no_fake_replay(self):
+        self.record(self.first,105)
+        result=record_coinbase_sequence(
+            self.execute,self.market,self.signal(status="monitoring"),
+            [self.sample(self.first+120,89)],now=self.first+122)
+        self.assertEqual(result["recent"][0]["result"],"OBSERVATION_GAP")
+        self.assertEqual(result["recent"][0]["phase"],"EXPIRED")
+
+    def test_recovery_does_not_create_old_signals_or_use_kraken(self):
+        start=self.first+180
+        history=[self.sample(start-120,105),self.sample(start-60,104),self.sample(start,103)]
+        current=self.signal(anchor_epoch=start-60)
+        out=record_coinbase_sequence(self.execute,self.market,current,history,now=start+1)
+        self.assertEqual(len(out["recent"]),1)
+        self.assertEqual(out["recent"][0]["first_seen_epoch"],float(start+1))
+        # No new Kraken setups even when its OHLC candles look valid.
+        wrong=self.signal(source="Kraken BTC/USD")
+        unavailable=record_coinbase_sequence(self.execute,self.market,wrong,
+                                               history,now=start+2)
+        self.assertEqual(unavailable["reason"],"coinbase_candles_required")
+
+    def test_out_of_order_or_duplicate_candles_rejected(self):
+        latest=self.sample(self.first,105)
+        previous=self.sample(self.first-60,104)
+        for bars in ([latest,previous],[latest,latest]):
+            with self.subTest(bars=bars):
+                out=record_coinbase_sequence(self.execute,self.market,
+                    self.signal(),bars,now=self.first+1)
+                self.assertEqual(out["reason"],"invalid_coinbase_sequence")
+                self.assertEqual(len(self.rows()),0)
+
     def test_integration_keeps_main_forecast_untouched(self):
         root=Path(__file__).resolve().parent
         app=(root/"app.py").read_text()
         html=(root/"terminal.html").read_text()
         self.assertIn("from pattern_lifecycle import setup_tables",app)
-        self.assertIn("record_completed_bar,execute,slug,context,candle,time.time()",app)
+        self.assertIn("record_coinbase_sequence,execute,slug,context,formation_candles,time.time()",app)
         self.assertIn('"pattern_lifecycle":state.get("pattern_lifecycle")',app)
         self.assertIn('id="patternLifecycleRows"',html)
         self.assertIn("lastTimelineKey",html)
