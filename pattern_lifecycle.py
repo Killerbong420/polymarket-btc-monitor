@@ -16,6 +16,7 @@ OPEN = ("FORMING", "CONFIRMED", "BREAKOUT")
 DONE = ("COMPLETED", "INVALIDATED", "EXPIRED")
 _ALLOWED = {"BULL_FLAG":1, "BEAR_FLAG":-1, "DOUBLE_TOP":-1, "DOUBLE_BOTTOM":1}
 _BREAKS = {"BREAKOUT_WATCH", "NECKLINE_BREAK_WATCH", "RETEST_HELD"}
+COINBASE_SOURCE = "Coinbase Exchange BTC-USD"
 
 
 def setup_tables(execute):
@@ -55,7 +56,7 @@ def _new_event(market, signal, bar_epoch, now):
     invalid = _valid_num(signal.get("invalidation_usd"))
     fit = _valid_num(signal.get("pattern_match_score_pct"))
     direction = _ALLOWED[pattern]
-    if (not isinstance(source,str) or source not in ("Coinbase Exchange BTC-USD","Kraken BTC/USD")
+    if (not isinstance(source,str) or source != COINBASE_SOURCE
         or anchor is None or anchor != int(anchor) or anchor > bar_epoch
         or trigger is None or invalid is None or trigger<=0 or invalid<=0
         or direction*(trigger-invalid)<=0
@@ -106,7 +107,7 @@ def _recent(execute, market):
     rows=execute("""SELECT id,market,source,pattern,anchor_epoch,phase,initial_phase,first_seen_epoch,
      last_bar_epoch,confirmed_epoch,breakout_epoch,completed_epoch,invalidated_epoch,
      expired_epoch,trigger_usd,invalidation_usd,objective_usd,initial_fit_pct,result
-     FROM pattern_lifecycle ORDER BY first_seen_epoch DESC LIMIT 12""",fetch=True)
+     FROM pattern_lifecycle WHERE source=? ORDER BY first_seen_epoch DESC LIMIT 12""",(COINBASE_SOURCE,),fetch=True)
     columns=("id","market","source","pattern","anchor_epoch","phase","initial_phase","first_seen_epoch",
              "last_bar_epoch","confirmed_epoch","breakout_epoch","completed_epoch",
              "invalidated_epoch","expired_epoch","trigger_usd","invalidation_usd",
@@ -117,9 +118,9 @@ def _recent(execute, market):
     # never on the 1s browser timer or live BRTI reference sampler.
     closed=execute("""SELECT pattern,phase,COUNT(*) FROM (
       SELECT pattern,phase FROM pattern_lifecycle
-      WHERE phase IN ('COMPLETED','INVALIDATED')
+      WHERE source=? AND phase IN ('COMPLETED','INVALIDATED')
       ORDER BY first_seen_epoch DESC LIMIT 200
-    ) AS outcomes GROUP BY pattern,phase""",fetch=True)
+    ) AS outcomes GROUP BY pattern,phase""",(COINBASE_SOURCE,),fetch=True)
     results={name:{"pattern":name,"completed":0,"invalidated":0,"resolved":0,
                    "objective_rate_pct":None,"sample_sufficient":False}
              for name in _ALLOWED}
@@ -143,8 +144,8 @@ def _recent(execute, market):
     # expirations/observation gaps stay unknown rather than false positives.
     early_rows=execute("""SELECT pattern,first_seen_epoch,breakout_epoch,phase,
        invalidated_epoch,expired_epoch FROM pattern_lifecycle
-       WHERE initial_phase='FORMING'
-       ORDER BY first_seen_epoch DESC LIMIT 200""",fetch=True)
+       WHERE source=? AND initial_phase='FORMING'
+       ORDER BY first_seen_epoch DESC LIMIT 200""",(COINBASE_SOURCE,),fetch=True)
     early={name:{"pattern":name,"early_warnings":0,"breakouts":0,
                  "invalidated_before_breakout":0,"expired_or_open":0,
                  "lead_samples":0,"avg_lead_seconds":None,
@@ -174,7 +175,7 @@ def _recent(execute, market):
         item["rate_sample_sufficient"]=resolved>=10
         item["early_breakout_rate_pct"]=round(100*item["breakouts"]/resolved,1) if resolved>=10 else None
     return {"status":"available" if recent else "collecting","version":VERSION,
-            "market":market,"recent":recent,
+            "market":market,"source":COINBASE_SOURCE,"recent":recent,
             "early_warning_stats":{"status":"observed" if early_rows else "collecting",
                 "cohort_limit":200,"by_pattern":[early[name] for name in _ALLOWED],
                 "definition":"Forward-only first-seen FORMING warnings. Count prior-breakout invalidations separately from observed breakout confirmations. Expired/open excluded from rate; rate needs >=10 resolved examples. Average lead is first warning to first observed breakout, not prediction of market settlement."},
@@ -185,10 +186,12 @@ def _recent(execute, market):
             "note":"Forward-only, completed exchange candles. COMPLETED means price closed at the preset pattern objective after a prior breakout, not a verified Polymarket trade."}
 
 
-def record_completed_bar(execute, market, signal, candle, now=None):
-    """Persist once per valid 1m candle. No upstream requests and no predictions.
+def record_completed_bar(execute, market, signal, candle, now=None, *, recovery=False, summarize=True):
+    """Persist one verified Coinbase 1m candle. No new external requests or predictions.
 
     execute(sql, params=(), fetch=False) is the app's existing DB adapter.
+    Recovery can only advance already-tracked Coinbase setups using genuine
+    recently published completed candles; NEVER creates retrospective watches.
     """
     now=time.time() if now is None else float(now)
     if not isinstance(market,str) or "btc-updown-15m-" not in market:
@@ -204,11 +207,11 @@ def record_completed_bar(execute, market, signal, candle, now=None):
             or low<=0 or volume<0 or low>min(op,close) or high<max(op,close)):
             return {"status":"unavailable","reason":"invalid_candle"}
         bar_epoch=int(bar_start)+60
-        if not 0<=now-bar_epoch<=105:
+        if not 0<=now-bar_epoch<=(240 if recovery else 105):
             return {"status":"unavailable","reason":"stale_completed_candle"}
         source=signal.get("source")
-        if source not in ("Coinbase Exchange BTC-USD","Kraken BTC/USD"):
-            return {"status":"unavailable","reason":"unknown_source"}
+        if source!=COINBASE_SOURCE:
+            return {"status":"unavailable","reason":"coinbase_candles_required"}
         # Close pending setups even if the detector has switched to a newer
         # pattern. Only same-source bars may alter a stored event.
         pending=execute("""SELECT id,phase,last_bar_epoch,first_seen_epoch,
@@ -216,7 +219,7 @@ def record_completed_bar(execute, market, signal, candle, now=None):
             confirmed_epoch,breakout_epoch,completed_epoch,invalidated_epoch,expired_epoch
             FROM pattern_lifecycle
             WHERE source=? AND phase IN ('FORMING','CONFIRMED','BREAKOUT')
-            ORDER BY first_seen_epoch DESC LIMIT 80""",(source,),fetch=True)
+            ORDER BY first_seen_epoch DESC LIMIT 80""",(COINBASE_SOURCE,),fetch=True)
         for row in pending:
             changed=_advance(row,bar_epoch,close)
             if changed is None:
@@ -227,7 +230,7 @@ def record_completed_bar(execute, market, signal, candle, now=None):
               WHERE id=? AND phase=? AND last_bar_epoch=?""",
               (phase,result,bar_epoch,confirmed,breakout,completed,invalidated,expired,
                row[0],row[1],row[2]))
-        candidate=_new_event(market,signal,bar_epoch,now)
+        candidate=None if recovery else _new_event(market,signal,bar_epoch,now)
         if candidate:
             execute("""INSERT INTO pattern_lifecycle (
               id,market,source,pattern,anchor_epoch,direction,phase,initial_phase,
@@ -236,6 +239,41 @@ def record_completed_bar(execute, market, signal, candle, now=None):
               trigger_usd,invalidation_usd,objective_usd,initial_fit_pct,result)
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(id) DO NOTHING""", candidate)
-        return _recent(execute,market)
+        return _recent(execute,market) if summarize else {"status":"processed","source":COINBASE_SOURCE}
     except (ValueError,TypeError,OverflowError):
         return {"status":"unavailable","reason":"invalid_candle"}
+
+
+def record_coinbase_sequence(execute, market, signal, candles, now=None):
+    """Advance patterns through REAL recent Coinbase 1m candles in order.
+
+    Reuses the existing Coinbase OHLC response. Missed candles absent from
+    Coinbase still EXPIRE as gaps: no synthetic bars, retroactive signal
+    discovery, or alternate exchange bars are ever used.
+    """
+    now=time.time() if now is None else float(now)
+    if (not isinstance(signal,dict) or signal.get("source")!=COINBASE_SOURCE
+            or not isinstance(candles,(list,tuple)) or not candles):
+        return {"status":"unavailable","reason":"coinbase_candles_required"}
+    recent=list(candles[-5:]);ends=[]
+    for candle in recent:
+        if not isinstance(candle,(list,tuple)) or len(candle)<6:
+            return {"status":"unavailable","reason":"invalid_coinbase_sequence"}
+        timestamp=_valid_num(candle[0])
+        if timestamp is None or timestamp!=int(timestamp) or int(timestamp)%60:
+            return {"status":"unavailable","reason":"invalid_coinbase_sequence"}
+        ends.append(int(timestamp)+60)
+    if len(ends)!=len(set(ends)) or ends!=sorted(ends):
+        return {"status":"unavailable","reason":"invalid_coinbase_sequence"}
+    if not 0<=now-ends[-1]<=105:
+        return {"status":"unavailable","reason":"stale_completed_candle"}
+    # Only newest can create forward-only formations; older genuine candles
+    # advance existing open formations after a late API response.
+    empty_signal={"source":COINBASE_SOURCE,"status":"monitoring"}
+    for candle,end in zip(recent[:-1],ends[:-1]):
+        if 0<=now-end<=240:
+            result=record_completed_bar(execute,market,empty_signal,candle,
+                                        now=now,recovery=True,summarize=False)
+            if result.get("status")!="processed":
+                return result
+    return record_completed_bar(execute,market,signal,recent[-1],now=now)
