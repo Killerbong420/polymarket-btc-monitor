@@ -126,6 +126,16 @@ class VerifiedRestReconciliationTests(unittest.TestCase):
         self.assertEqual(result["verified_minutes"],1)
         self.assertEqual(result["reason"],"need_35_contiguous_coinbase_candles")
 
+    def test_matching_rest_and_websocket_prefers_heartbeat_checked_live_bar(self):
+        rest=rest_history(last_start=BASE,count=36)
+        same_bar=rest[-1].copy()
+        stream={"status":"available","candles":[same_bar]}
+        result=compose_coinbase_candles(rest,stream,now=BASE+70)
+        self.assertEqual(result["status"],"available")
+        self.assertEqual(result["transport"],"websocket_verified")
+        self.assertEqual(result["websocket_minutes"],1)
+        self.assertEqual(result["rest_reconciliation_conflicts"],0)
+
     def test_rest_overrides_conflicting_websocket_for_same_minute(self):
         rest=rest_history(last_start=BASE,count=36)
         websocket={"status":"available","candles":[[BASE,98,125,100,119,9]]}
@@ -133,6 +143,7 @@ class VerifiedRestReconciliationTests(unittest.TestCase):
         self.assertEqual(result["status"],"available")
         self.assertEqual(result["transport"],"rest_verified")
         self.assertEqual(result["candles"][-1][4],100.5)
+        self.assertEqual(result["rest_reconciliation_conflicts"],1)
 
     def test_stale_rest_and_stale_websocket_never_display_as_live(self):
         rest=rest_history(last_start=BASE-120)
