@@ -112,8 +112,36 @@ def _recent(execute, market):
              "invalidated_epoch","expired_epoch","trigger_usd","invalidation_usd",
              "objective_usd","initial_fit_pct","result")
     recent=[dict(zip(columns,row)) for row in rows]
+    # Bounded, resolved-only cohort. Do not count pending or expired setups as
+    # wins or losses. Generated on the existing once-per-candle database pass,
+    # never on the 1s browser timer or live BRTI reference sampler.
+    closed=execute("""SELECT pattern,phase,COUNT(*) FROM (
+      SELECT pattern,phase FROM pattern_lifecycle
+      WHERE phase IN ('COMPLETED','INVALIDATED')
+      ORDER BY first_seen_epoch DESC LIMIT 200
+    ) AS outcomes GROUP BY pattern,phase""",fetch=True)
+    results={name:{"pattern":name,"completed":0,"invalidated":0,"resolved":0,
+                   "objective_rate_pct":None,"sample_sufficient":False}
+             for name in _ALLOWED}
+    for name,phase,count in closed:
+        if name not in results or phase not in DONE[:2]:
+            continue
+        if phase=="COMPLETED":
+            results[name]["completed"]+=int(count)
+        else:
+            results[name]["invalidated"]+=int(count)
+    for result in results.values():
+        n=result["completed"]+result["invalidated"]
+        result["resolved"]=n
+        # Avoid presenting a fragile rate from only a few observations.
+        result["sample_sufficient"]=n>=10
+        result["objective_rate_pct"]=round(100*result["completed"]/n,1) if n>=10 else None
     return {"status":"available" if recent else "collecting","version":VERSION,
             "market":market,"recent":recent,
+            "follow_through":{"status":"observed" if any(x["resolved"] for x in results.values())
+                              else "collecting","cohort_limit":200,
+                              "by_pattern":[results[name] for name in _ALLOWED],
+                              "definition":"Completed / (completed + invalidated) among the most recent 200 resolved formations. Pending and expired excluded; not prediction win rate or Polymarket settlement."},
             "note":"Forward-only, completed exchange candles. COMPLETED means price closed at the preset pattern objective after a prior breakout, not a verified Polymarket trade."}
 
 
