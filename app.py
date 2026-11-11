@@ -1792,7 +1792,9 @@ async def _status_history_worker():
    raise
   except Exception as exc:
    _status_cache["worker_error"]=type(exc).__name__
-  await asyncio.sleep(15)
+  # Slow-changing settlement and historical accuracy are not a live feed.
+  # Leave the fast 15m forecast and BRTI sampler at their existing cadence.
+  await asyncio.sleep(45)
 
 
 @app.get("/api/status")
