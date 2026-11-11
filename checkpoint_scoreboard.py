@@ -6,7 +6,7 @@ No near-expiry synthetic backfill, no implied guarantee, and no cross-model pool
 import json
 
 CHECKPOINTS=(("EARLY","12:00 left"),("HALFWAY","7:30 left"),("LATE","3:00 left"))
-METHODS=(("AI","Independent AI"),("PRICE_PATH","BRTI price path"))
+METHODS=(("PRICE_PATH","BRTI price path"),)
 
 def summarize_checkpoint_rows(rows, limit=100):
     grouped={}
@@ -29,7 +29,7 @@ def summarize_checkpoint_rows(rows, limit=100):
             if group["graded"]>=limit:continue
             call=calls.get(method) or {}
             direction=call.get("direction") if isinstance(call,dict) else None
-            eligible=direction in ("UP","DOWN") and (method!="AI" or call.get("source")=="AI_REVIEW")
+            eligible=direction in ("UP","DOWN")
             if not eligible:
                 group["excluded_no_call"]+=1
                 continue
