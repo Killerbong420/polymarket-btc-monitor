@@ -136,8 +136,48 @@ def _recent(execute, market):
         # Avoid presenting a fragile rate from only a few observations.
         result["sample_sufficient"]=n>=10
         result["objective_rate_pct"]=round(100*result["completed"]/n,1) if n>=10 else None
+    # Evaluate real forward-only early-warning opportunities independently
+    # from the price-objective measure above. A formation seen first at BREAKOUT
+    # has no observable lead time and is never counted as an early prediction.
+    # An invalidation before any breakout is a documented failed early setup;
+    # expirations/observation gaps stay unknown rather than false positives.
+    early_rows=execute("""SELECT pattern,first_seen_epoch,breakout_epoch,phase,
+       invalidated_epoch,expired_epoch FROM pattern_lifecycle
+       WHERE initial_phase='FORMING'
+       ORDER BY first_seen_epoch DESC LIMIT 200""",fetch=True)
+    early={name:{"pattern":name,"early_warnings":0,"breakouts":0,
+                 "invalidated_before_breakout":0,"expired_or_open":0,
+                 "lead_samples":0,"avg_lead_seconds":None,
+                 "early_breakout_rate_pct":None,"rate_sample_sufficient":False}
+           for name in _ALLOWED}
+    lead_values={name:[] for name in _ALLOWED}
+    for pattern,first_seen,breakout,phase,invalidated,expired in early_rows:
+        item=early.get(pattern)
+        if item is None:continue
+        item["early_warnings"]+=1
+        if breakout is not None and first_seen is not None:
+            lead=float(breakout)-float(first_seen)
+            if 0<=lead<=1800:
+                item["breakouts"]+=1
+                lead_values[pattern].append(lead)
+            else:
+                item["expired_or_open"]+=1
+        elif phase=="INVALIDATED" and invalidated is not None:
+            item["invalidated_before_breakout"]+=1
+        else:
+            item["expired_or_open"]+=1
+    for name,item in early.items():
+        values=lead_values[name]
+        item["lead_samples"]=len(values)
+        if values:item["avg_lead_seconds"]=round(sum(values)/len(values),1)
+        resolved=item["breakouts"]+item["invalidated_before_breakout"]
+        item["rate_sample_sufficient"]=resolved>=10
+        item["early_breakout_rate_pct"]=round(100*item["breakouts"]/resolved,1) if resolved>=10 else None
     return {"status":"available" if recent else "collecting","version":VERSION,
             "market":market,"recent":recent,
+            "early_warning_stats":{"status":"observed" if early_rows else "collecting",
+                "cohort_limit":200,"by_pattern":[early[name] for name in _ALLOWED],
+                "definition":"Forward-only first-seen FORMING warnings. Count prior-breakout invalidations separately from observed breakout confirmations. Expired/open excluded from rate; rate needs >=10 resolved examples. Average lead is first warning to first observed breakout, not prediction of market settlement."},
             "follow_through":{"status":"observed" if any(x["resolved"] for x in results.values())
                               else "collecting","cohort_limit":200,
                               "by_pattern":[results[name] for name in _ALLOWED],
