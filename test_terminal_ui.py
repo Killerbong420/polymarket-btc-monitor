@@ -129,7 +129,7 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("fetch('/api/market-chart/tip'",self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)refreshTip()},3000)",self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)draw()},1000)",self.html)
-        self.assertIn("setInterval(()=>{if(!document.hidden)refreshHistory()},10000)",self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshHistory()},20000)",self.html)
         self.assertIn("if(!force&&nowMillis-lastDraw<1000/30)return",self.html)
         self.assertNotIn("requestAnimationFrame(animate)",self.html)
         self.assertIn("window.addEventListener('btc-status-updated',()=>draw())",self.html)
@@ -184,7 +184,7 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("fetch('/api/round-tiles'",self.html)
         self.assertIn("correct call",self.html)
         self.assertIn("No verified",self.html)
-        self.assertIn("setInterval(()=>{if(!document.hidden)refreshRoundTiles()},10000)",self.html)
+        self.assertIn("setInterval(()=>{if(!document.hidden)refreshRoundTiles()},60000)",self.html)
         tiles=self.html.split("/* Recent verified rounds.",1)[1]
         self.assertNotIn("fair price",tiles.lower())
         self.assertNotIn("auto-trader",tiles.lower())

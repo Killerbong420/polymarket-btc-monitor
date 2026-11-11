@@ -1044,7 +1044,7 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
   // A low-frequency heartbeat advances the time axis and expires stale ticks;
   // never redraw an unchanged canvas 30 times per second on mobile Safari.
   setInterval(()=>{if(!document.hidden)draw()},1000);
-  setInterval(()=>{if(!document.hidden)refreshHistory()},10000);
+  setInterval(()=>{if(!document.hidden)refreshHistory()},20000);
  }
 })();
 </script><section class="card" id="crossExchangePanel" aria-label="Bitcoin exchange comparison and buy sell pressure">
@@ -1067,68 +1067,47 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
  <div class="xnote">Exchange prices confirm broader spot movement but do not replace Polymarket's official BRTI settlement. HTTP response does not prove a recent executed trade. Unavailable and outlier feeds are excluded.</div>
 </section>
 <script>
-/* Read-only WebSocket flow. Browser reuses the 4s status endpoint if WS is unavailable. */
+/* Existing /api/live heartbeat already contains the same exchange trade-flow
+   snapshot. Avoid an additional per-tab 1s WebSocket connection and JSON parse.
+   This observational chart cannot replace official BRTI or price forecasts. */
 (()=>{
  const note=document.getElementById('flowLiveNote');
  const buyBar=document.getElementById('flowLiveBuy'),sellBar=document.getElementById('flowLiveSell');
- if(!note||!window.WebSocket)return;
- let socket=null,retry=null,delay=1000,stopped=false;
+ if(!note||!buyBar||!sellBar)return;
  function reset(message){
   note.textContent=message;
   buyBar.style.width='0%';sellBar.style.width='0%';
  }
- function paint(data){
-  const flow=data&&data.trade_flow;
-  if(!flow)return;
-  const streamed=(flow.exchanges||[]).filter(x=>x.status==='fresh'&&x.transport==='websocket');
-  const covered=streamed.map(x=>({source:x.source,win:x.short_windows&&x.short_windows['30s']}))
-    .filter(x=>x.win&&x.win.status==='observed');
-  if(!covered.length){
-   reset(streamed.length?'30s flow warming up or partial · waiting for observed coverage':
-     '30s live stream unavailable · REST pressure remains available above');
+ function paint(){
+  const d=window.btcServerStatus||{};
+  const age=Date.now()/1000-Date.parse(d.updated||'')/1000;
+  if(d.status!=='running'||!Number.isFinite(age)||age< -3||age>15){
+   reset('30s flow: live monitoring stale or unavailable');
    return;
   }
-  const buy=covered.reduce((s,x)=>s+(Number(x.win.buy_usd)||0),0);
-  const sell=covered.reduce((s,x)=>s+(Number(x.win.sell_usd)||0),0);
+  const flow=d.external?.external_intelligence?.trade_flow||{};
+  const streamed=Array.isArray(flow.exchanges)?flow.exchanges.filter(x=>
+   x.status==='fresh'&&x.transport==='websocket'):[];
+  const covered=streamed.map(x=>({source:x.source,win:x.short_windows&&x.short_windows['30s']}))
+   .filter(x=>x.win&&x.win.status==='observed');
+  if(!covered.length){
+   reset(streamed.length?'30s flow warming up or partial · waiting for observed coverage':
+     '30s live stream unavailable · sampled pressure remains available above');
+   return;
+  }
+  const buy=covered.reduce((sum,x)=>sum+(Number(x.win.buy_usd)||0),0);
+  const sell=covered.reduce((sum,x)=>sum+(Number(x.win.sell_usd)||0),0);
   if(!(buy+sell>0)){reset('30s flow: no eligible trades observed');return;}
   const pct=100*buy/(buy+sell);
   buyBar.style.width=pct.toFixed(1)+'%';
   sellBar.style.width=(100-pct).toFixed(1)+'%';
   note.textContent='LAST 30s · '+pct.toFixed(1)+'% buyer-initiated / '+(100-pct).toFixed(1)+
-    '% seller-initiated · '+covered.map(x=>x.source).join(' + ')+
-    ' · partial exchange coverage, not settlement or odds';
+   '% seller-initiated · '+covered.map(x=>x.source).join(' + ')+
+   ' · partial exchange coverage, not settlement or odds';
  }
- function connect(){
-  if(stopped||document.hidden||socket)return;
-  const protocol=location.protocol==='https:'?'wss:':'ws:';
-  try{
-   const ws=new WebSocket(protocol+'//'+location.host+'/ws/exchange-flow');
-   socket=ws;
-   ws.onopen=()=>{delay=1000;};
-   ws.onmessage=ev=>{try{const m=JSON.parse(ev.data);if(m.type==='exchange_flow')paint(m);}catch(_){}};
-   ws.onerror=()=>{ws.close();};
-   ws.onclose=()=>{
-    if(socket===ws)socket=null;
-    if(!stopped&&!document.hidden){
-     reset('Live flow disconnected · REST fallback active');
-     retry=setTimeout(connect,delay);
-     delay=Math.min(30000,delay*2);
-    }
-   };
-  }catch(_){reset('Live flow unavailable · REST fallback active');}
- }
- document.addEventListener('visibilitychange',()=>{
-  if(document.hidden){
-   if(retry){clearTimeout(retry);retry=null;}
-   if(socket){socket.close();socket=null;}
-  }else connect();
- });
- window.addEventListener('pagehide',()=>{
-  stopped=true;
-  if(retry)clearTimeout(retry);
-  if(socket)socket.close();
- });
- connect();
+ window.addEventListener('btc-status-updated',paint);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)paint();});
+ paint();
 })();
 </script>
 <section class="card" id="checkpointBoard" aria-label="Independently graded Bitcoin checkpoint accuracy">
@@ -1551,7 +1530,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  }
  let busy=false;
  async function refreshRoundTiles(){
-  if(busy)return;busy=true;
+  if(busy||document.hidden)return;busy=true;
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),7000);
   try{
    const response=await fetch('/api/round-tiles',{cache:'no-store',signal:controller.signal});
@@ -1567,7 +1546,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
   }finally{clearTimeout(timeout);busy=false;}
  }
  refreshRoundTiles();
- setInterval(()=>{if(!document.hidden)refreshRoundTiles()},10000);
+ setInterval(()=>{if(!document.hidden)refreshRoundTiles()},60000);
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshRoundTiles()});
 })();
 </script></body></html>

@@ -37,7 +37,7 @@ class StatusHeartbeatTests(unittest.TestCase):
         source=Path(app.__file__).read_text()
         body=source.split("async def _status_history_worker():",1)[1].split('@app.get("/api/status")',1)[0]
         self.assertIn("await asyncio.to_thread(_read_status_history)",body)
-        self.assertIn("await asyncio.sleep(15)",body)
+        self.assertIn("await asyncio.sleep(45)",body)
         self.assertNotIn("asyncio.create_task(",body)
         self.assertNotIn("asyncio.wait_for(",body)
 
