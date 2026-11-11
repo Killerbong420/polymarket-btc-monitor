@@ -95,7 +95,7 @@ class EarlyPatternContextTests(unittest.TestCase):
         app=(root/"app.py").read_text(encoding="utf-8")
         html=(root/"terminal.html").read_text(encoding="utf-8")
         self.assertIn('from early_pattern_context import analyze_early_patterns',app)
-        self.assertEqual(app.count('"early_patterns":analyze_early_patterns('),1)
+        self.assertIn('formation=analyze_early_patterns(candles,"Coinbase Exchange BTC-USD")',app)
         self.assertIn('"early_patterns":coinbase_context',app)
         self.assertIn('_coinbase_formation_from_cache()',app)
         self.assertIn('"formation_candles":candles[-5:]',app)
