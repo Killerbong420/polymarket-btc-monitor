@@ -502,7 +502,8 @@ def _coinbase_formation_from_cache(now=None):
  return {**context,"candle_age_seconds":combined["candle_age_seconds"],
          "formation_feed":combined["transport"],
          "verified_minutes":combined["verified_minutes"],
-         "websocket_minutes":combined["websocket_minutes"]},bars[-1],bars[-5:]
+         "websocket_minutes":combined["websocket_minutes"],
+         "rest_reconciliation_conflicts":combined.get("rest_reconciliation_conflicts",0)},bars[-1],bars[-5:]
 
 async def spot_data(client):
  errors=[]
@@ -535,7 +536,8 @@ async def spot_data(client):
                                   "last_error":formation.get("reason") if not formation_candle else None,
                                   "formation_candle_age_seconds":formation.get("candle_age_seconds"),
                                   "verified_minutes":formation.get("verified_minutes"),
-                                  "websocket_minutes":formation.get("websocket_minutes")},"bot_research_signals":study_strategies(candles,"Coinbase Exchange BTC-USD"),"source":"Coinbase Exchange BTC-USD","market_shock":measure_market_shock(candles,source="Coinbase Exchange BTC-USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+                                  "websocket_minutes":formation.get("websocket_minutes"),
+                                  "rest_reconciliation_conflicts":formation.get("rest_reconciliation_conflicts")},"bot_research_signals":study_strategies(candles,"Coinbase Exchange BTC-USD"),"source":"Coinbase Exchange BTC-USD","market_shock":measure_market_shock(candles,source="Coinbase Exchange BTC-USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Coinbase: "+str(e)[:150])
  # Kraken OHLC uses BTC/USD minute candles; last candle is incomplete.
  try:
@@ -565,7 +567,8 @@ async def spot_data(client):
                        "failure_detail":coinbase_context.get("failure_detail"),
                        "formation_candle_age_seconds":coinbase_context.get("candle_age_seconds"),
                        "verified_minutes":coinbase_context.get("verified_minutes"),
-                       "websocket_minutes":coinbase_context.get("websocket_minutes")},"bot_research_signals":study_strategies([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"source":"Kraken BTC/USD","market_shock":measure_market_shock([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],source="Kraken BTC/USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
+                       "websocket_minutes":coinbase_context.get("websocket_minutes"),
+                       "rest_reconciliation_conflicts":coinbase_context.get("rest_reconciliation_conflicts")},"bot_research_signals":study_strategies([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],"Kraken BTC/USD"),"source":"Kraken BTC/USD","market_shock":measure_market_shock([[b[0],b[3],b[2],b[1],b[4],b[6]] for b in candles],source="Kraken BTC/USD"),"candle_age_seconds":round(time.time()-float(candles[-1][0])-60)}
  except Exception as e: errors.append("Kraken: "+str(e)[:150])
  raise RuntimeError("External BTC feed unavailable: "+"; ".join(errors))
 def judge(d):
