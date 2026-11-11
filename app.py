@@ -1269,6 +1269,7 @@ async def lifespan(app):
  # Database history is optional for initial page load. Never block /api/status
  # behind slow SQL while background migrations or archival reads run.
  status_history_task=asyncio.create_task(_status_history_worker())
+ checkpoint_task=asyncio.create_task(_checkpoint_scoreboard_worker())
  context_task=asyncio.create_task(intelligence_loop())
  trade_stream_task=asyncio.create_task(stream_loop())
  chart_task=asyncio.create_task(official_chart_sampler(state))
@@ -1279,13 +1280,14 @@ async def lifespan(app):
  task.cancel()
  database_task.cancel()
  status_history_task.cancel()
+ checkpoint_task.cancel()
  diagnostics_task.cancel()
  context_task.cancel()
  trade_stream_task.cancel()
  chart_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,database_task,status_history_task,context_task,trade_stream_task,chart_task,diagnostics_task,*pending_predictions):
+ for running in (task,database_task,status_history_task,checkpoint_task,context_task,trade_stream_task,chart_task,diagnostics_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
  _close_idle_pg_connections()
@@ -1753,23 +1755,48 @@ def quick_accuracy_report():
  except Exception:return JSONResponse({"status":"unavailable",
    "error":"First-five-minute quick prediction database unavailable"},status_code=503)
 
-# Cached read-only checkpoint comparison; never alters frozen predictions.
-_checkpoint_display_cache={"updated":0,"data":None}
+# Checkpoint grades are archival, not part of the market heartbeat.
+# Never query SQL from the HTTP handler; a slow DB should not cause a 7-second
+# iPhone fetch timeout or block live BRTI/Formation Watch rendering.
+_checkpoint_display_cache={"updated":0.0,"data":None,"error":None}
+
+def _refresh_checkpoint_display():
+ now=time.time()
+ rows=iter_query_rows("""SELECT market,checkpoint,calls_json,winner FROM research_calls
+    WHERE winner IN ('UP','DOWN') ORDER BY created_at DESC LIMIT 1500""")
+ data=build_scoreboard(rows)
+ data["updated_epoch"]=now
+ _checkpoint_display_cache.update(data=data,updated=now,error=None)
+ return data
+
+async def _checkpoint_scoreboard_worker():
+ while True:
+  if state.get("database_ready"):
+   try:
+    await asyncio.to_thread(_refresh_checkpoint_display)
+   except asyncio.CancelledError:
+    raise
+   except Exception as exc:
+    _checkpoint_display_cache["error"]=type(exc).__name__
+  else:
+   _checkpoint_display_cache["error"]="database_reconnecting"
+  # Warm the scoreboard quickly after boot; once populated, limit SQL work.
+  await asyncio.sleep(15 if _checkpoint_display_cache["data"] is None else 45)
 
 @app.get("/api/checkpoint-scoreboard")
 def checkpoint_scoreboard_report():
- try:
-  now=time.time()
-  if _checkpoint_display_cache["data"] is not None and now-_checkpoint_display_cache["updated"]<45:
-   return _checkpoint_display_cache["data"]
-  rows=iter_query_rows("""SELECT market,checkpoint,calls_json,winner FROM research_calls
-     WHERE winner IN ('UP','DOWN') ORDER BY created_at DESC LIMIT 1500""")
-  data=build_scoreboard(rows)
-  data["updated_epoch"]=now
-  _checkpoint_display_cache.update(updated=now,data=data)
-  return data
- except Exception:
-  return JSONResponse({"status":"unavailable","reason":"Verified checkpoint history unavailable"},status_code=503)
+ now=time.time()
+ previous=_checkpoint_display_cache["data"]
+ if isinstance(previous,dict):
+  age=max(0,now-_checkpoint_display_cache["updated"])
+  if not state.get("database_ready") or _checkpoint_display_cache["error"] or age>120:
+   return {**previous,"status":"stale",
+           "reason":"database_reconnecting_or_verified_history_delayed",
+           "cache_age_seconds":round(age,1)}
+  return previous
+ return {"status":"collecting",
+         "reason":"database_reconnecting" if not state.get("database_ready") else "verified_history_warming",
+         "updated_epoch":None,"fifteen":[]}
 
 # The historical scoreboard does not change every second; cache SQL reads while
 # keeping state/AI connection information refreshed on each dashboard request.
