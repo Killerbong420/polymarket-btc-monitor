@@ -24,7 +24,6 @@ from decision_engine import reversal_evidence, guarded_decision, manual_entry_re
 from forward_eval import evaluate_guarded
 from round_tiles import report as recent_round_tiles
 from quick_forecast import quick_forecast
-import terry_calls
 from checkpoint_scoreboard import build_scoreboard
 from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
 from forward_training import training_readiness as score_training_readiness
@@ -1200,18 +1199,16 @@ async def lifespan(app):
  # Seven-day 672-market historical backfill disabled on live service.
  # Live BRTI, official 15m settlement grading, and pattern history are separate.
  diagnostics_task=asyncio.create_task(read_only_diagnostics_loop())
- terry_task=asyncio.create_task(terry_calls.worker(lambda: state,execute))
  yield
  task.cancel()
  status_history_task.cancel()
  diagnostics_task.cancel()
- terry_task.cancel()
  context_task.cancel()
  trade_stream_task.cancel()
  chart_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,status_history_task,context_task,trade_stream_task,chart_task,diagnostics_task,terry_task,*pending_predictions):
+ for running in (task,status_history_task,context_task,trade_stream_task,chart_task,diagnostics_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
 historical_state={"status":"disabled","reason":"Seven-day bulk market collection disabled to protect live monitoring.","requested":0,"verified":0}
@@ -1655,7 +1652,6 @@ def lightweight_live():
          "manual_entry_review":state.get("manual_entry_review"),"reversal_evidence":state.get("reversal_evidence"),
          "final_15m":state.get("final_15m"),"last_halfway_ai":state.get("last_halfway_ai"),
          "last_checkpoint":state.get("last_checkpoint"),
-         "terry_calls":terry_calls.snapshot(state),
          "ai_confirmation":public_state(),"settlement_task_running":state.get("settlement_task_running",False),"settlement_task_error":state.get("settlement_task_error"),
          "server_epoch":time.time()}
 
