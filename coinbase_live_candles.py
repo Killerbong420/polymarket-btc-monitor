@@ -32,6 +32,7 @@ class CoinbaseMinuteBuilder:
         self.last_trade_id=None
         self.last_trade_at=None
         self.heartbeat_at=None
+        self.first_heartbeat_at=None
         self.last_heartbeat_id=None
         self.failure_reason="websocket_not_connected"
 
@@ -42,6 +43,7 @@ class CoinbaseMinuteBuilder:
         self.last_trade_id=None
         self.last_trade_at=None
         self.heartbeat_at=None
+        self.first_heartbeat_at=None
         self.last_heartbeat_id=None
         self.failure_reason="warming_completed_candles"
 
@@ -53,6 +55,7 @@ class CoinbaseMinuteBuilder:
         self.last_trade_id=None
         self.last_trade_at=None
         self.heartbeat_at=None
+        self.first_heartbeat_at=None
         self.last_heartbeat_id=None
         self.failure_reason=str(reason)
 
@@ -82,6 +85,8 @@ class CoinbaseMinuteBuilder:
             return
         if self.heartbeat_at is not None and now-self.heartbeat_at>HEARTBEAT_FRESH_SECONDS:
             self._mark_gap(self.heartbeat_at,now)
+        if self.first_heartbeat_at is None:
+            self.first_heartbeat_at=now
         self.heartbeat_at=now
         trade_id=int(observed)
         if self.last_trade_id is None:
@@ -102,8 +107,12 @@ class CoinbaseMinuteBuilder:
             ts,price,size=_number(ts),_number(price),_number(size)
             ident=int(ident)
             if (ts is None or price is None or size is None or
-                ts<now-15 or ts>now+2 or price<=0 or size<=0 or
-                (self.last_trade_id is not None and ident<=self.last_trade_id)):
+                ts<now-15 or ts>now+2 or price<=0 or size<=0):
+                return False
+            if self.last_trade_id is not None and ident<=self.last_trade_id:
+                # The primary trade buffer has already removed exact duplicate
+                # IDs. Any backwards trade ID here is an ordering anomaly.
+                self._mark_gap(self.last_trade_at or self.connected_at,ts)
                 return False
         except (ValueError,TypeError,OverflowError):
             return False
@@ -140,7 +149,8 @@ class CoinbaseMinuteBuilder:
         for start,bar in self.bars.items():
             if now<start+60+CANDLE_CLOSE_DELAY_SECONDS:
                 continue
-            if self.connected_at>start or start in self.bad_minutes:
+            if (self.connected_at>start or self.first_heartbeat_at is None or
+                self.first_heartbeat_at>start or start in self.bad_minutes):
                 continue
             if not all(math.isfinite(float(x)) for x in bar):
                 continue
