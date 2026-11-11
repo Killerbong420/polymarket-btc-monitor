@@ -660,7 +660,10 @@ window.btcNoteRequest=function(name,ms,ok){
 @media(max-width:730px){.formation-live-grid{grid-template-columns:1fr}
  .formation-reference-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:470px){#formationVisualGuide{padding:10px!important}
- .formation-current{padding:9px}.formation-reference-grid{grid-template-columns:1fr}
+ .formation-current{padding:9px}.formation-reference-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .formation-reference-card{padding:7px}
+ .formation-reference-card h3{font-size:11px}
+ .formation-reference-card p{font-size:10px}
  .formation-chip{font-size:10px}.formation-current-title strong{font-size:20px}
  .formation-call-row{padding:9px;font-size:11px}.formation-example-chart svg{min-height:150px}}
 @media(prefers-reduced-motion:reduce){#formationVisualGuide *{transition:none!important}}
@@ -1665,7 +1668,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  chart.insertAdjacentElement('afterend',cards);
  // The reference panel has no live updater; do not show a permanent CONNECTING placeholder.
  if(reference)reference.remove();
- for(const id of ['directionMeter','fastPanel','strongPanel','final15Panel']){const panel=document.getElementById(id);if(panel)cards.append(panel)}
+ for(const id of ['formationVisualGuide','fastPanel','strongPanel','final15Panel']){const panel=document.getElementById(id);if(panel)cards.append(panel)}
  const primary=document.getElementById('currentSignal')?.closest('.card');if(primary){primary.id='primaryPanel';cards.append(primary)}
  const forecast=document.getElementById('futureForecastCard'),history=document.getElementById('serverHistory');
  const shock=document.getElementById('marketShockPanel');
