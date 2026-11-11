@@ -522,7 +522,27 @@ async def spot_data(client):
   # supplied only by fully covered trade-ID/heartbeat checked WebSocket bars.
   # This is the existing REST request (no extra polling).
   _coinbase_formation_cache["candles"]=candles[-70:]
-  if time.time()-float(candles[-1][0])-60>90: raise ValueError("Coinbase latest completed candle stale")
+  if time.time()-float(candles[-1][0])-60>90:
+   # A stale unbounded Coinbase response may be a cached snapshot. Retry
+   # once with a bounded explicit time window, without ever manufacturing bars.
+   # Keep the original cache for diagnostics until authentic fresh data arrives.
+   retry_end=int(time.time()//60)*60
+   retry_start=retry_end-70*60
+   retry=await client.get(
+       "https://api.exchange.coinbase.com/products/BTC-USD/candles",
+       params={"granularity":60,"start":datetime.fromtimestamp(retry_start,timezone.utc).isoformat(),
+               "end":datetime.fromtimestamp(retry_end,timezone.utc).isoformat()},
+       headers={"Cache-Control":"no-cache"},timeout=12)
+   retry.raise_for_status()
+   retry_raw=retry.json()
+   retry_candles=sorted(
+       [x for x in retry_raw if isinstance(x,list) and len(x)>=6
+        and float(x[0])+60<=time.time()],key=lambda x:x[0])
+   if len(retry_candles)>=35 and float(retry_candles[-1][0])>float(candles[-1][0]):
+    candles=retry_candles[-70:]
+    _coinbase_formation_cache["candles"]=candles
+   if time.time()-float(candles[-1][0])-60>90:
+    raise ValueError("Coinbase latest completed candle stale after bounded retry")
   formation,formation_candle,formation_bars=_coinbase_formation_from_cache()
   chart=chart_indicators(candles,5)
   pattern=classify_chart(candles)
