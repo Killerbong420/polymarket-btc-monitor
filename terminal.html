@@ -1127,7 +1127,7 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
   // Keep the time-axis transform explicit so it is never mistaken for linear
   // elapsed-time spacing when the round has just started.
   const roundElapsed=Math.max(0,Math.min(900,now-m.start));
-  const liveFraction=selected==='round'?.64+.36*(roundElapsed/900):.76;
+  const liveFraction=selected==='round' ? (0.64+0.36*(roundElapsed/900)) : 0.76;
   const nowX=left+liveFraction*pw;
   const X=t=>{
    if(t<=now)return left+(t-start)/Math.max(1,now-start)*(nowX-left);
@@ -1186,9 +1186,9 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
   ctx.font='bold 10px system-ui';
   ctx.fillStyle='#78c4e3';
   ctx.fillText(selected==='round'?'LIVE DETAIL · ELAPSED TIME EXPANDED':'LIVE PRICE DETAIL',left+6,top+15);
-  if(plotRight-nowX>=85){
+  if(plotRight-nowX>=140){
    ctx.fillStyle='#d1a063';
-   ctx.fillText('FUTURE · COMPRESSED',Math.min(plotRight-124,nowX+6),top+28);
+   ctx.fillText('FUTURE · COMPRESSED',nowX+8,top+28);
   }
   ctx.fillStyle='#d1a063';ctx.font='10px system-ui';
   if(plotRight-nowX>=95)ctx.fillText('SETTLEMENT AVG',Math.max(nowX+6,plotRight-95),top+13);
