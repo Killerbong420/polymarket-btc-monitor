@@ -59,6 +59,7 @@ class NonblockingSettlementTests(unittest.IsolatedAsyncioTestCase):
         app.POLL=0.01
         try:
             with (patch("app.setup"),
+                  patch.dict(app.state,{"database_ready":True}),
                   patch("app.market_15m",new=market),
                   patch("app.spot_data",new=AsyncMock(return_value={"price":None})),
                   patch("app.settle",new=blocked_settle),
@@ -102,6 +103,7 @@ class NonblockingSettlementTests(unittest.IsolatedAsyncioTestCase):
         app.state["settlement_task_error"]=None
         try:
             with (patch("app.setup"),
+                  patch.dict(app.state,{"database_ready":True}),
                   patch("app.market_15m",new=market),
                   patch("app.spot_data",new=AsyncMock(return_value={"price":None})),
                   patch("app.settle",new=failed_settle),
