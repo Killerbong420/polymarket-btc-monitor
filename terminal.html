@@ -391,7 +391,8 @@ window.btcNoteRequest=function(name,ms,ok){
 </section>
 <div id="structureWatch" role="status" aria-live="polite" style="font-size:12px;line-height:1.45;padding:8px 10px;margin:6px 0 9px;border:1px solid #3b526b;border-radius:9px;color:#b6c9db;background:#0c1b2a">FORMATION WATCH · Waiting for completed exchange candles</div>
 <details id="patternLifecyclePanel" style="margin:0 0 10px;border:1px solid #34465b;border-radius:9px;padding:8px 10px;color:#b6c9db;font-size:12px">
-<summary style="cursor:pointer;font-weight:700">Saved pattern timeline · forming / confirmed / breakout / completed / invalidated</summary>
+<summary style="cursor:pointer;font-weight:700">Formation results & saved timeline · observed follow-through</summary>
+<div id="formationFollowThrough" aria-label="Observed pattern objective follow-through" style="margin:8px 0;padding:8px 0;border-top:1px solid #2e4057;color:#b6c9db">Follow-through results collecting; 10 resolved examples needed per pattern before a percentage is shown.</div>
 <div id="patternLifecycleRows" style="margin-top:8px">Collecting new pattern observations; existing patterns are not backfilled.</div>
 <p style="font-size:11px;opacity:.85;margin:8px 0 0">CONFIRMED = observed structure persisted, not a guaranteed reversal. COMPLETED = price closed beyond a frozen pattern objective after breakout; not proof of Polymarket profit. EXPIRED = insufficient follow-through or a missing candle. Initial pattern fit is not an outcome probability.</p>
 </details>
@@ -400,6 +401,7 @@ window.btcNoteRequest=function(name,ms,ok){
 (()=>{
  const node=document.getElementById('structureWatch');
  const historyNode=document.getElementById('patternLifecycleRows');
+ const performanceNode=document.getElementById('formationFollowThrough');
  const dollars=v=>Number(v).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
  const label=s=>String(s||'').replaceAll('_',' ');
  /* Render official BRTI Doji evidence inside Formation Watch, not a second line.
@@ -442,6 +444,39 @@ window.btcNoteRequest=function(name,ms,ok){
   return ' · LARGE-TRADE WATCH: awaiting reliable exchange coverage';
  }
  const clock=t=>Number.isFinite(Number(t))&&Number(t)>0?new Date(Number(t)*1000).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'—';
+ let lastFollowKey='';
+ function drawFollowThrough(info){
+  const list=Array.isArray(info?.by_pattern)?info.by_pattern:[];
+  const key=JSON.stringify(list.map(x=>[x.pattern,x.completed,x.invalidated,x.resolved,x.objective_rate_pct]));
+  if(key===lastFollowKey)return;
+  lastFollowKey=key;
+  performanceNode.replaceChildren();
+  const intro=document.createElement('strong');
+  intro.textContent='MEASURED FOLLOW-THROUGH · COMPLETED VS INVALIDATED';
+  performanceNode.append(intro);
+  const detail=document.createElement('div');
+  detail.style.cssText='margin-top:4px;font-size:11px;color:#a4bcd2;line-height:1.4';
+  detail.textContent='Forward-only 1m exchange closes · latest 200 resolved formations · pending/expired excluded · NOT win odds';
+  performanceNode.append(detail);
+  if(!list.length){
+   const note=document.createElement('div');
+   note.textContent='Collecting new completed pattern results.';
+   performanceNode.append(note);
+   return;
+  }
+  for(const x of list){
+   if(!['DOUBLE_TOP','DOUBLE_BOTTOM','BULL_FLAG','BEAR_FLAG'].includes(x.pattern))continue;
+   const count=Number(x.resolved)||0;
+   const completed=Number(x.completed)||0;
+   const row=document.createElement('div');
+   row.style.cssText='font-size:12px;padding:5px 0;border-top:1px solid #273a50';
+   const scored=x.sample_sufficient===true&&count>=10&&
+      Number.isFinite(x.objective_rate_pct);
+   row.textContent=label(x.pattern)+' · '+completed+'/'+count+' reached objective'+
+      (scored?' · '+Number(x.objective_rate_pct).toFixed(1)+'%':' · waiting for 10 resolved examples');
+   performanceNode.append(row);
+  }
+ }
  let lastTimelineKey='';
  function drawHistory(rows){
   const key=rows.map(x=>[x.id,x.phase,x.last_bar_epoch,x.result].join(':')).join('|');
@@ -477,6 +512,7 @@ window.btcNoteRequest=function(name,ms,ok){
   const s=window.btcServerStatus||{}, d=s.external||{}, p=d.early_patterns||{};
   const rows=Array.isArray(s.pattern_lifecycle?.recent)?s.pattern_lifecycle.recent:[];
   drawHistory(rows);
+  drawFollowThrough(s.pattern_lifecycle?.follow_through);
   const now=Date.now()/1000;
   const doji=dojiContext(s,now),whale=whaleContext(s,now);
   const age=now-Date.parse(s.updated||'')/1000;

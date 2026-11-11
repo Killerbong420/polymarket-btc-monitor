@@ -121,6 +121,48 @@ class PatternLifecycleTests(unittest.TestCase):
                                           self.sample(self.first,105),now=self.first+2)
         self.assertEqual(wrong_market["status"],"unavailable")
 
+    def test_resolved_only_follow_through_by_pattern_with_small_sample_guard(self):
+        from pattern_lifecycle import _recent
+        # Known forward-recorded labels; this audit must never conflate
+        # invalidated/pending/expired with profitable Polymarket trades.
+        for i in range(22):
+            pattern = "DOUBLE_TOP" if i<14 else "BULL_FLAG"
+            phase = (("COMPLETED" if i<8 else "INVALIDATED" if i<10
+                      else "EXPIRED" if i<12 else "FORMING") if i<14
+                     else ("COMPLETED" if i<17 else "INVALIDATED" if i<18 else "EXPIRED"))
+            self.execute("""INSERT INTO pattern_lifecycle (
+              id,market,source,pattern,anchor_epoch,direction,phase,initial_phase,
+              first_seen_epoch,last_bar_epoch,trigger_usd,invalidation_usd,
+              objective_usd,initial_fit_pct,result)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              (str(i),self.market,self.source,pattern,self.first+i*60,
+               1 if pattern=="BULL_FLAG" else -1,phase,"FORMING",
+               float(self.first+i*60),self.first+i*60,100,110,90,80,
+               "MEASURED_OBJECTIVE_REACHED" if phase=="COMPLETED" else "PENDING"))
+        info=_recent(self.execute,self.market)["follow_through"]
+        stats={x["pattern"]:x for x in info["by_pattern"]}
+        self.assertEqual(info["cohort_limit"],200)
+        top=stats["DOUBLE_TOP"]
+        self.assertEqual((top["completed"],top["invalidated"],top["resolved"]),(8,2,10))
+        self.assertEqual(top["objective_rate_pct"],80.0)
+        self.assertTrue(top["sample_sufficient"])
+        flag=stats["BULL_FLAG"]
+        self.assertEqual((flag["completed"],flag["invalidated"],flag["resolved"]),(3,1,4))
+        self.assertIsNone(flag["objective_rate_pct"])
+        self.assertFalse(flag["sample_sufficient"])
+        self.assertEqual(stats["DOUBLE_BOTTOM"]["resolved"],0)
+        self.assertIsNone(stats["DOUBLE_BOTTOM"]["objective_rate_pct"])
+
+    def test_follow_through_display_is_read_only_and_requires_sample_size(self):
+        html=(Path(__file__).resolve().parent/"terminal.html").read_text(encoding="utf-8")
+        self.assertIn('id="formationFollowThrough"',html)
+        self.assertIn("drawFollowThrough(s.pattern_lifecycle?.follow_through)",html)
+        self.assertIn("x.sample_sufficient===true&&count>=10",html)
+        self.assertIn("NOT win odds",html)
+        block=html.split("function drawFollowThrough(info)",1)[1].split("function renderPatterns()",1)[0]
+        self.assertNotIn("fetch(",block)
+        self.assertNotIn("meterUpPct",block)
+
     def test_integration_keeps_main_forecast_untouched(self):
         root=Path(__file__).resolve().parent
         app=(root/"app.py").read_text()
