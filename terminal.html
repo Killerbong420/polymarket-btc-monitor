@@ -594,120 +594,312 @@ window.btcNoteRequest=function(name,ms,ok){
 })();
 </script>
 <div class="card" id="patternPanel" style="border-left:4px solid #e5a45d;margin-top:10px"><div class="label">PATTERN ANALYSIS · SERVER SIGNALS</div><div class="value wait" id="patternName">ANALYZING</div><div class="small" id="patternDetails">Waiting for server pattern analysis</div><div class="small" id="minuteForecast">NEXT 60 SECONDS · Awaiting forecast</div><div class="small" id="minuteReversal">REVERSAL WATCH · Awaiting BRTI evidence</div><p class="small">Pattern analysis continues on the server; no calibrated probabilities.</p></div></div><style>
-/* Preserve hidden nodes for legacy polling code while simplifying the visible UI. */
+/* Live formation visual guide: light, SVG-only and mobile-friendly.
+   These are teaching diagrams, NOT exchange candle data or settlement odds. */
 #fastPanel,#final15Panel,#strongPanel,#primaryPanel{display:none!important}
 #terminalQuickCards #fastPanel,#terminalQuickCards #final15Panel,
 #terminalQuickCards #strongPanel,#terminalQuickCards #primaryPanel{display:none!important;visibility:hidden!important}
-#terminalQuickCards #directionMeter{display:block!important;grid-column:1/-1;order:0}
-#directionMeter{border-left:4px solid #42c8a0;margin-top:10px}
-#directionMeter .meter-track{display:flex;height:18px;border-radius:99px;overflow:hidden;background:#39404b}
-#directionMeter .meter-down{background:#dc2626;width:0;transition:width .4s}
-#directionMeter .meter-up{background:#16a34a;width:0;transition:width .4s}
-#directionMeter .meter-sides{display:flex;justify-content:space-between;gap:12px}
-#directionMeter .meter-down-label{color:#f87171}
-#directionMeter .meter-up-label{color:#4ade80}
+#formationVisualGuide{grid-column:1/-1;order:0;margin:10px 0!important;padding:15px!important;
+ background:linear-gradient(152deg,#101c2c,#091321 72%);border:1px solid #36516c!important;
+ box-shadow:0 0 0 1px #18334b,0 12px 28px #0005!important;border-radius:18px!important;
+ --formation-tone:#60bfff}
+#formationVisualGuide[data-bias="bear"]{--formation-tone:#ff6b7b}
+#formationVisualGuide[data-bias="bull"]{--formation-tone:#25e390}
+#formationVisualGuide[data-bias="neutral"]{--formation-tone:#f6cf63}
+.formation-visual-head{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+ padding:5px 3px 12px;border-bottom:1px solid #30465d}
+.formation-visual-head h2{font-size:clamp(17px,3.8vw,24px);letter-spacing:.015em;line-height:1.28;margin:0;color:#eef6ff}
+.formation-chip-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.formation-chip{font-size:11px;font-weight:800;border:1px solid #4a6c8f;border-radius:9px;
+ padding:7px 9px;color:#d4e8ff;background:#112740}
+.formation-chip.live{border-color:#25875c;color:#54edaa;background:#082a22}
+.formation-chip.paused{border-color:#a77f45;color:#f4ce7d;background:#332814}
+.formation-current{border:1px solid var(--formation-tone);border-radius:15px;
+ margin-top:13px;padding:12px;background:linear-gradient(150deg,#101f2f,#0c1422);
+ box-shadow:0 0 0 1px #0003,0 0 20px #0002}
+.formation-current-title{display:flex;gap:9px;flex-wrap:wrap;align-items:center;justify-content:space-between;
+ border-bottom:1px solid #35465b;padding-bottom:12px;margin-bottom:12px}
+.formation-current-title strong{font-size:clamp(19px,4.5vw,28px);color:var(--formation-tone);
+ font-weight:900;line-height:1.24;letter-spacing:-.025em}
+.formation-current-title span{font-size:11px;color:#abc5da;font-weight:750}
+.formation-live-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:12px}
+.formation-example-chart{min-width:0;position:relative;border:1px solid #2c4860;
+ border-radius:11px;padding:8px;background:repeating-linear-gradient(0deg,#081827 0,#081827 39px,#172b3d 40px),
+ repeating-linear-gradient(90deg,transparent 0,transparent 45px,#1b3449 46px)}
+.formation-example-chart svg{display:block;width:100%;height:auto;min-height:170px}
+.formation-example-chart .formation-illustrative{position:absolute;left:12px;bottom:7px;
+ color:#88a5b9;font-size:9px;font-weight:850;letter-spacing:.075em}
+.formation-call-meta{display:flex;flex-direction:column;gap:7px;min-width:0}
+.formation-call-row{display:flex;gap:8px;justify-content:space-between;align-items:center;
+ min-width:0;padding:10px;background:#101c2f;border:1px solid #293e54;border-radius:9px;font-size:12px}
+.formation-call-row span{color:#b2c8d9}
+.formation-call-row strong{font-size:clamp(12px,2vw,15px);color:#eef6ff;text-align:right;overflow-wrap:anywhere}
+.formation-call-row.call strong{color:var(--formation-tone)}
+.formation-explanation{background:#112136;border:1px solid #3c566d;border-radius:9px;
+ padding:10px;font-size:12px;color:#cbdcec;line-height:1.55;min-height:64px}
+#formationVisualGuide .formation-guide-notice{margin:10px 0 0;font-size:11px;
+ line-height:1.5;color:#9fb7c9}
+#formationReferenceGuide{border:1px solid #365874;border-radius:15px;
+ margin:13px 0 0;padding:0 11px 11px;background:#0b1b2c}
+#formationReferenceGuide summary{color:#e5f2ff;font-size:clamp(13px,2.8vw,17px);
+ font-weight:850;padding:13px 4px;line-height:1.35}
+.formation-reference-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;
+ padding:0 2px 3px}
+.formation-reference-card{background:#081523;border:1px solid #a24f62;border-radius:13px;
+ padding:10px;min-width:0;box-shadow:0 3px 9px #0003}
+.formation-reference-card.bull{border-color:#218c62}
+.formation-reference-card.neutral{border-color:#b89a4e}
+.formation-reference-card.muted{border-color:#57718a}
+.formation-reference-card h3{font-size:13px;font-weight:900;margin:0 0 5px;color:#f4f7ff}
+.formation-reference-card .ref-bias{font-size:12px;font-weight:850;color:#ff858d}
+.formation-reference-card.bull .ref-bias{color:#41eaa7}
+.formation-reference-card.neutral .ref-bias{color:#f5d477}
+.formation-reference-card.muted .ref-bias{color:#a9bed3}
+.formation-reference-card svg{display:block;width:100%;height:auto;margin:8px auto 6px}
+.formation-reference-card p{font-size:11px;line-height:1.44;margin:3px 0 0;color:#bdd1e2}
+@media(max-width:730px){.formation-live-grid{grid-template-columns:1fr}
+ .formation-reference-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:470px){#formationVisualGuide{padding:10px!important}
+ .formation-current{padding:9px}.formation-reference-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .formation-reference-card{padding:7px}
+ .formation-reference-card h3{font-size:11px}
+ .formation-reference-card p{font-size:10px}
+ .formation-chip{font-size:10px}.formation-current-title strong{font-size:20px}
+ .formation-call-row{padding:9px;font-size:11px}.formation-example-chart svg{min-height:150px}}
+@media(prefers-reduced-motion:reduce){#formationVisualGuide *{transition:none!important}}
 </style>
-<div class="card" id="directionMeter" aria-label="BTC fifteen-minute direction probability meter">
- <div class="label">15-MIN BTC · 10s LIVE PREDICTION / HISTORICAL PROBABILITY</div>
- <div class="meter-sides" style="margin:12px 0">
-  <div class="meter-down-label">▼ DOWN <strong id="meterDownPct">—</strong></div>
-  <div class="meter-up-label">UP ▲ <strong id="meterUpPct">—</strong></div>
+<section class="card" id="formationVisualGuide" data-bias="neutral" aria-label="Live formation call visual reference">
+ <div class="formation-visual-head">
+  <h2>▥ CURRENT FORMATION · VISUAL GUIDE</h2>
+  <div class="formation-chip-row">
+   <span class="formation-chip" id="formationGuideSource">Coinbase BTC-USD</span>
+   <span class="formation-chip paused" id="formationGuideStatus">● SCANNING</span>
+  </div>
  </div>
- <div class="meter-track" role="img" aria-label="Direction probability unavailable until calibrated">
-  <div class="meter-down" id="meterDownFill"></div><div class="meter-up" id="meterUpFill"></div>
+ <div class="formation-current">
+  <div class="formation-current-title">
+   <strong id="formationGuideTitle" aria-live="polite">AWAITING COINBASE FORMATION</strong>
+   <span id="formationGuidePhase">SCANNING · NO ACTIVE CALL</span>
+  </div>
+  <div class="formation-live-grid">
+   <div class="formation-example-chart">
+    <svg id="formationGuideChart" viewBox="0 0 560 300" role="img" aria-label="Illustrative double top reference shape, not live Bitcoin prices"></svg>
+    <span class="formation-illustrative">SCHEMATIC REFERENCE · NOT LIVE PRICE HISTORY</span>
+   </div>
+   <div class="formation-call-meta">
+    <div class="formation-call-row call"><span>Call / bias</span><strong id="formationGuideCall">WATCH ONLY · NO SIGNAL</strong></div>
+    <div class="formation-call-row"><span>Trigger</span><strong id="formationGuideTrigger">—</strong></div>
+    <div class="formation-call-row"><span>Invalidation</span><strong id="formationGuideInvalidation">—</strong></div>
+    <div class="formation-call-row"><span>Objective</span><strong id="formationGuideObjective">—</strong></div>
+    <div class="formation-explanation" id="formationGuideExplanation">Waiting for a fresh completed Coinbase BTC-USD candle and an identifiable formation.</div>
+   </div>
+  </div>
+  <p class="formation-guide-notice" id="formationGuideNote">Example candle shapes only. Levels appear only when observed by Formation Watch; the guide does not predict Polymarket settlement or place trades.</p>
  </div>
- <div class="small" id="meterDirection" style="margin-top:9px">Waiting for verified 15-minute forecast</div>
- <div class="small" id="meterNote">Probability unavailable: the current forecast does not provide calibrated UP/DOWN percentages. No invented odds are shown.</div>
-</div>
-
+ <details id="formationReferenceGuide" open>
+  <summary>▤ FORMATION REFERENCE GUIDE · Common shapes and what they suggest</summary>
+  <div class="formation-reference-grid">
+   <article class="formation-reference-card" data-guide="DOUBLE_TOP"><h3>DOUBLE TOP</h3><div class="ref-bias">▼ Bearish reversal watch</div><svg viewBox="0 0 260 135" role="img" aria-label="Example double top chart with two highs and a drop"></svg><p>Two highs at similar levels; watch a break below the neckline.</p></article>
+   <article class="formation-reference-card bull" data-guide="DOUBLE_BOTTOM"><h3>DOUBLE BOTTOM</h3><div class="ref-bias">▲ Bullish reversal watch</div><svg viewBox="0 0 260 135" role="img" aria-label="Example double bottom chart with two lows and a rise"></svg><p>Two lows at similar levels; watch a break above the neckline.</p></article>
+   <article class="formation-reference-card bull" data-guide="BULL_FLAG"><h3>BULL FLAG</h3><div class="ref-bias">▲ Bullish continuation watch</div><svg viewBox="0 0 260 135" role="img" aria-label="Example bull flag chart with steep rise then pullback"></svg><p>Strong climb followed by a controlled pullback; watch for breakout.</p></article>
+   <article class="formation-reference-card" data-guide="BEAR_FLAG"><h3>BEAR FLAG</h3><div class="ref-bias">▼ Bearish continuation watch</div><svg viewBox="0 0 260 135" role="img" aria-label="Example bear flag chart with drop then rising consolidation"></svg><p>Strong decline followed by a bounce; watch for continuation lower.</p></article>
+   <article class="formation-reference-card neutral" data-guide="DOJI"><h3>DOJI</h3><div class="ref-bias">◇ Watch / indecision</div><svg viewBox="0 0 260 135" role="img" aria-label="Example Doji candlestick with small body and long wicks"></svg><p>Open and close nearly match; direction is not confirmed.</p></article>
+   <article class="formation-reference-card muted" data-guide="INVALIDATED"><h3>INVALIDATED SETUP</h3><div class="ref-bias">⊘ No active call</div><svg viewBox="0 0 260 135" role="img" aria-label="Example invalidated bearish setup breaking upward"></svg><p>Price crosses the invalidation level; that pattern is no longer valid.</p></article>
+  </div>
+ </details>
+</section>
 <script>
-/* The underlying BRTI forecast already runs at ~5s cadence.
-   Present the latest verified direction every 10s without additional model calls. */
-(function(){
- const PREDICTION_DISPLAY_MS=10000;
- let meterInFlight=false;
- const byId=id=>document.getElementById(id);
- const upFill=()=>byId('meterUpFill'),downFill=()=>byId('meterDownFill');
- function liveForecast(snapshot,now){
-  const ref=snapshot&&snapshot.reference_price||{};
-  const forecast=snapshot&&snapshot.guarded_primary||{};
-  const lastUpdate=Date.parse(snapshot&&snapshot.updated||'');
-  const tickAge=now-Number(ref.price_epoch);
-  const updateAge=(now*1000-lastUpdate)/1000;
-  const remaining=Number(ref.window_end)-now;
-  if(!snapshot||snapshot.status!=='running'
-     ||typeof snapshot.market!=='string'||!snapshot.market.includes('btc-updown-15m-')
-     ||ref.status!=='fresh'||ref.source!=='Polymarket US BTC reference / BRTI'
-     ||!Number.isFinite(tickAge)||tickAge< -2||tickAge>15
-     ||!Number.isFinite(updateAge)||updateAge< -2||updateAge>15
-     ||!Number.isFinite(remaining)||remaining<=0||remaining>900
-     ||forecast.status!=='available'||!['UP','DOWN'].includes(forecast.direction)
-     ||!Number.isFinite(Number(forecast.forecast_final_mean_usd))
-     ||!Number.isFinite(Number(forecast.official_target_usd)))return null;
-  return forecast;
- }
- function clearProbabilities(){
-  byId('meterUpPct').textContent='—';
-  byId('meterDownPct').textContent='—';
-  upFill().style.width='0%';
-  downFill().style.width='0%';
-  byId('directionMeter').querySelector('.meter-track').setAttribute('aria-label','Verified percentages unavailable');
- }
- function paintLivePrediction(live){
-  const direction=byId('meterDirection');
-  if(!live){
-   direction.textContent='Waiting for fresh verified 15-minute BRTI forecast';
-   clearProbabilities();
-   byId('meterNote').textContent='Checking every 10s · no prediction shown when official data is stale or insufficient.';
-   return;
+/* Read-only reference graphics. Price labels use existing server Formation Watch
+   facts; drawings are intentionally schematic and NEVER claim to plot a live
+   Coinbase candle series. No network requests, models or trading side effects. */
+(()=>{
+ const card=document.getElementById('formationVisualGuide');
+ if(!card)return;
+ const el=id=>document.getElementById(id);
+ const money=v=>typeof v==='number'&&Number.isFinite(v)&&v>0?
+  v.toLocaleString('en-US',{style:'currency',currency:'USD'}):'—';
+ const names={DOUBLE_TOP:'DOUBLE TOP',DOUBLE_BOTTOM:'DOUBLE BOTTOM',BULL_FLAG:'BULL FLAG',
+              BEAR_FLAG:'BEAR FLAG',DOJI:'DOJI',INVALIDATED:'INVALIDATED SETUP'};
+ const info={
+  DOUBLE_TOP:'Two comparable price peaks. A close below the neckline can support a bearish reversal; a close above the invalidation level cancels this setup.',
+  DOUBLE_BOTTOM:'Two comparable price lows. A close above the neckline can support a bullish reversal; a close below invalidation cancels the setup.',
+  BULL_FLAG:'A strong upward move followed by a small countertrend pullback. Watch the upper flag boundary for a potential bullish continuation.',
+  BEAR_FLAG:'A strong downward move followed by a small bounce. Watch the lower flag boundary for a potential bearish continuation.',
+  DOJI:'Open and close are close together, suggesting indecision. A Doji alone does not establish an UP or DOWN direction.',
+  INVALIDATED:'A completed one-minute candle crossed the frozen invalidation level. The earlier structure is no longer an active setup.'
+ };
+ // Values are a fixed educational illustration, not measured market prices.
+ const shapes={
+  DOUBLE_TOP:[24,30,37,44,51,62,70,83,91,78,66,58,51,56,64,73,86,90,76,66,57,48,44,35,26],
+  DOUBLE_BOTTOM:[78,72,63,55,47,36,25,16,13,29,43,50,57,48,39,25,17,15,29,42,55,63,70,79,88],
+  BULL_FLAG:[16,22,29,37,50,62,78,92,88,85,83,86,81,79,81,75,77,73,76,70,73,81,88,96,98],
+  BEAR_FLAG:[93,87,79,65,51,34,23,12,18,23,20,29,25,32,29,37,33,42,37,45,40,30,21,15,10],
+  DOJI:[34,42,49,58,64,53,59,65,60,62,60,61,61,61,60,58,67,60,62,68,73,68,78,74,79],
+  INVALIDATED:[24,30,37,44,51,62,70,83,91,78,66,58,51,56,64,73,86,90,76,66,57,62,75,88,98]
+ };
+ const ns='http://www.w3.org/2000/svg';
+ function shape(svg,kind,mini){
+  if(!svg)return;
+  const w=mini?260:560,h=mini?135:300;
+  const points=shapes[kind]||shapes.DOUBLE_TOP;
+  const x=i=>mini?12+i*(w-24)/(points.length-1):25+i*(w-50)/(points.length-1);
+  const y=v=>mini?115-v*.95:255-v*1.97;
+  const add=(tag,attrs,text)=>{
+   const node=document.createElementNS(ns,tag);
+   for(const [key,value]of Object.entries(attrs))node.setAttribute(key,String(value));
+   if(text!==undefined)node.textContent=text;
+   svg.append(node);return node;
+  };
+  svg.replaceChildren();
+  for(let g=1;g<=3;g++)add('line',{x1:7,y1:h*g/4,x2:w-7,y2:h*g/4,stroke:'#183449','stroke-width':1});
+  const bearish=kind==='DOUBLE_TOP'||kind==='BEAR_FLAG';
+  const bullish=kind==='DOUBLE_BOTTOM'||kind==='BULL_FLAG';
+  const stroke=bearish?'#ff6b7b':bullish?'#31e9a2':'#f6d169';
+  if(mini){
+   add('polyline',{points:points.map((v,i)=>x(i)+','+y(v)).join(' '),
+      fill:'none',stroke:'#8edbd2','stroke-width':2.8,'stroke-linejoin':'round','stroke-linecap':'round'});
+  }else{
+   for(let i=0;i<points.length;i++){
+    const prev=points[Math.max(0,i-1)],curr=points[i];
+    const isUp=curr>=prev,c=isUp?'#23e5a1':'#ff6270';
+    const center=x(i),open=y(prev),close=y(curr);
+    add('line',{x1:center,y1:Math.min(open,close)-7,x2:center,y2:Math.max(open,close)+8,
+       stroke:c,'stroke-width':2});
+    add('rect',{x:center-5.5,y:Math.min(open,close),width:11,height:Math.max(3,Math.abs(open-close)),
+       rx:1,fill:c});
+   }
   }
-  const sign=live.direction==='UP'?'▲':'▼';
-  direction.textContent=sign+' '+live.direction+' forecast · projected final $'+
-     Number(live.forecast_final_mean_usd).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+
-     ' vs target $'+Number(live.official_target_usd).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+
-     ' · refresh 10s';
+  function guideLine(v){
+   add('line',{x1:8,y1:y(v),x2:w-8,y2:y(v),stroke:'#d4e5f5','stroke-width':mini?1.5:2,
+       'stroke-dasharray':mini?'6 5':'9 8',opacity:.8});
+  }
+  if(kind==='DOUBLE_TOP'||kind==='DOUBLE_BOTTOM'||kind==='INVALIDATED'){
+   guideLine(kind==='DOUBLE_BOTTOM'?55:50);
+   const peaks=kind==='DOUBLE_BOTTOM'?[8,17]:[8,17];
+   for(let i=0;i<peaks.length;i++){
+    const index=peaks[i];
+    add('circle',{cx:x(index),cy:y(points[index]),r:mini?5:7,stroke:'#ff7d88',
+       'stroke-width':mini?2:3,fill:'#17283b'});
+    if(!mini&&kind!=='INVALIDATED')add('text',{x:x(index),y:y(points[index])-16,
+       fill:'#f3f6ff','font-size':14,'text-anchor':'middle','font-weight':800},
+       kind==='DOUBLE_BOTTOM'?'LOW '+(i+1):'TOP '+(i+1));
+   }
+   if(!mini)add('text',{x:19,y:y(kind==='DOUBLE_BOTTOM'?55:50)-10,fill:'#b4d5f7','font-size':12},'NECKLINE');
+  }
+  if(kind==='BULL_FLAG'||kind==='BEAR_FLAG'){
+   const high=kind==='BULL_FLAG';
+   for(const offset of [9,-8]){
+    add('line',{x1:x(10),y1:y(points[10])+offset,x2:x(21),y2:y(points[21])+offset,
+     stroke:'#d6e5f1','stroke-width':mini?1.5:2,opacity:.8});
+   }
+   if(!mini)add('text',{x:x(13),y:y(points[12])-23,fill:'#c6def2','font-size':13},'FLAG');
+  }
+  if(kind==='DOJI'){
+   // Center a prominent cross-shaped Doji over the illustrative price path.
+   const cx=x(12),cy=y(61);
+   add('line',{x1:cx,y1:cy-(mini?22:41),x2:cx,y2:cy+(mini?22:41),
+    stroke:'#f7dc7e','stroke-width':mini?3:5});
+   add('line',{x1:cx-(mini?12:22),y1:cy,x2:cx+(mini?12:22),y2:cy,
+    stroke:'#f7dc7e','stroke-width':mini?3:5});
+   add('circle',{cx,cy,r:mini?29:51,stroke:'#f7df77','stroke-width':2,fill:'none',opacity:.8});
+  }
+  if(kind!=='DOJI'){
+   const x1=x(points.length-3),endX=x(points.length-1),baseY=y(points[points.length-3]);
+   const dir=kind==='INVALIDATED'?-1:bullish?-1:1;
+   const targetY=Math.max(15,Math.min(h-9,baseY+dir*(mini?32:46)));
+   const col=kind==='INVALIDATED'?'#b7cadb':stroke;
+   add('line',{x1,y1:baseY,x2:endX,y2:targetY,stroke:col,'stroke-width':mini?3:5,
+     'stroke-linecap':'round'});
+   const tip=targetY,spread=mini?7:10;
+   const polygon=dir>0?
+    endX+','+(tip+2)+' '+(endX-spread)+','+(tip-spread)+' '+(endX+spread)+','+(tip-spread):
+    endX+','+(tip-2)+' '+(endX-spread)+','+(tip+spread)+' '+(endX+spread)+','+(tip+spread);
+   add('polygon',{points:polygon,fill:col});
+  }
+  svg.setAttribute('aria-label',(names[kind]||'Formation')+
+   ' educational reference shape; not actual prices or a trading forecast');
  }
- async function updateMeter(){
-  if(document.hidden||meterInFlight)return;
-  meterInFlight=true;
-  const snapshot=window.btcServerStatus;
-  const live=liveForecast(snapshot,Date.now()/1000);
-  paintLivePrediction(live);
-  const note=byId('meterNote');
-  let controller=null,timeout=null;
-  try{
-   if(!live)return;
-   controller=new AbortController();
-   timeout=setTimeout(()=>controller.abort(),6500);
-   const response=await fetch('/api/direction-probability',{cache:'no-store',signal:controller.signal});
-   if(!response.ok)throw Error('unavailable');
-   const data=await response.json();
-   if(data.status!=='available'||!Number.isFinite(data.up_probability)
-      ||!Number.isFinite(data.down_probability)
-      ||data.up_probability<0||data.up_probability>1)throw Error(data.reason||'insufficient_history');
-   // These percentages come from historical settled rounds, NOT from the live forecast.
-   const up=Math.round(data.up_probability*100),down=100-up;
-   byId('meterUpPct').textContent=up+'%';
-   byId('meterDownPct').textContent=down+'%';
-   upFill().style.width=up+'%';
-   downFill().style.width=down+'%';
-   note.textContent='Historical calibrated UP/DOWN frequency · '+data.samples+
-     ' verified rounds · '+data.holdout+' holdout · separate from live forecast; not guaranteed';
-   byId('directionMeter').querySelector('.meter-track').setAttribute('aria-label',
-       down+' percent historical DOWN frequency, '+up+' percent historical UP frequency');
-  }catch(error){
-   clearProbabilities();
-   if(live)note.textContent='Live forecast refreshes every 10s · calibrated percentages unavailable; no made-up odds.';
-  }finally{
-   if(timeout!==null)clearTimeout(timeout);
-   meterInFlight=false;
+ for(const ref of document.querySelectorAll('.formation-reference-card')){
+  shape(ref.querySelector('svg'),ref.dataset.guide,true);
+ }
+ let lastKey='';
+ function render(snapshot){
+  const s=snapshot||window.btcServerStatus||{},p=s.external?.early_patterns||{};
+  const now=Date.now()/1000,stamp=Date.parse(s.updated||'')/1000;
+  const live=s.status==='running'&&s.market?.includes('btc-updown-15m-')&&
+   Number.isFinite(stamp)&&now-stamp>=-3&&now-stamp<=18&&
+   p.source==='Coinbase Exchange BTC-USD'&&
+   typeof p.candle_age_seconds==='number'&&p.candle_age_seconds>=0&&p.candle_age_seconds<=75;
+  const eligible=['DOUBLE_TOP','DOUBLE_BOTTOM','BULL_FLAG','BEAR_FLAG'];
+  const rows=Array.isArray(s.pattern_lifecycle?.recent)?s.pattern_lifecycle.recent:[];
+  let kind=null,phase='',pattern=null,tracked=null,doji=null;
+  if(live&&p.status==='watch'&&eligible.includes(p.pattern)){
+   kind=p.pattern;pattern=p;
+   tracked=rows.find(x=>x.market===s.market&&x.source===p.source&&
+     x.pattern===p.pattern&&Number(x.anchor_epoch)===Number(p.anchor_epoch))||null;
+   phase=tracked?.phase||(p.phase==='NECKLINE_BREAK_WATCH'||p.phase==='BREAKOUT_WATCH'?'BREAKOUT':p.phase||'FORMING');
+  }else{
+   const d=s.doji_watch||{},end=Number(d.candle_end_epoch);
+   const fresh=Number.isFinite(stamp)&&now-stamp>=-3&&now-stamp<=15&&
+     d.source==='Polymarket US BTC reference / BRTI';
+   if(fresh&&Number.isFinite(end)&&
+      ((d.status==='forming'&&end>now)||
+       (d.status==='confirmed'&&now>=end&&now-end<=12))){
+    kind='DOJI';phase=d.status.toUpperCase();doji=d;
+   }
+  }
+  const invalid=phase==='INVALIDATED',inactive=invalid||phase==='EXPIRED';
+  const dir=kind==='DOUBLE_TOP'||kind==='BEAR_FLAG'?'bear':
+            kind==='DOUBLE_BOTTOM'||kind==='BULL_FLAG'?'bull':'neutral';
+  card.dataset.bias=inactive?'neutral':dir;
+  let source='Coinbase BTC-USD',status='● SCANNING',title='AWAITING COINBASE FORMATION';
+  let call='WATCH ONLY · NO SIGNAL',note='Waiting for a fresh Coinbase formation. Example chart only.';
+  let explanation='Waiting for a fresh completed Coinbase BTC-USD candle and an identifiable formation.';
+  let trigger='—',invalidation='—',objective='—',phaseText='SCANNING · NO ACTIVE CALL';
+  if(kind==='DOJI'){
+   title=(String(doji.pattern||'DOJI').replaceAll('_',' '))+' · '+phase;
+   call='◇ INDECISION · WATCH ONLY';source='OFFICIAL BRTI · DOJI';
+   phaseText=phase;status='● '+phase;
+   explanation=info.DOJI;note='Doji uses official BRTI evidence, separately from Coinbase Formation Watch.';
+  }else if(kind){
+   title=names[kind]+' · '+phase;
+   phaseText=phase+' · '+(p.formation_feed==='websocket_verified'?'LIVE WEBSOCKET 1m':'COINBASE 1m');
+   status='● '+(p.formation_feed==='websocket_verified'?'LIVE':'OBSERVED');
+   trigger=money(typeof tracked?.trigger_usd==='number'?tracked.trigger_usd:p.trigger_usd);
+   invalidation=money(typeof tracked?.invalidation_usd==='number'?tracked.invalidation_usd:p.invalidation_usd);
+   objective=money(tracked?.objective_usd);
+   explanation=invalid?info.INVALIDATED:info[kind];
+   if(inactive){call='⊘ NO ACTIVE CALL';status='● '+phase;}
+   else if(phase==='COMPLETED'){call='OBJECTIVE REACHED · NOT A TRADE WIN';status='● COMPLETED';}
+   else{call=(dir==='bull'?'▲ BULLISH':'▼ BEARISH')+
+     (phase==='BREAKOUT'?' BREAKOUT WATCH':' FORMATION WATCH');}
+   note='Coinbase formation matched using completed one-minute candles; example chart is schematic. Pattern fit is NOT win probability.';
+  }else if(s.status==='running'&&p.status==='monitoring'){
+   status='● MONITORING';note='Coinbase is being monitored, but no eligible formation is active.';
+  }else if(s.status==='running'){
+   status='● DATA PAUSED';note='Fresh Coinbase formation candles are unavailable. No Kraken substitution or invented pattern.';
+  }
+  el('formationGuideSource').textContent=source;
+  const badge=el('formationGuideStatus');badge.textContent=status;
+  badge.className='formation-chip '+(kind&&!invalid?'live':'paused');
+  el('formationGuideTitle').textContent=title;
+  el('formationGuidePhase').textContent=phaseText;
+  el('formationGuideCall').textContent=call;
+  el('formationGuideTrigger').textContent=trigger;
+  el('formationGuideInvalidation').textContent=invalidation;
+  el('formationGuideObjective').textContent=objective;
+  el('formationGuideExplanation').textContent=explanation;
+  el('formationGuideNote').textContent=note+
+   ' Levels are exchange observations, not official Polymarket settlement prices.';
+  const shapeKind=invalid?'INVALIDATED':kind||'DOUBLE_TOP';
+  if(lastKey!==shapeKind){
+   shape(el('formationGuideChart'),shapeKind,false);
+   lastKey=shapeKind;
   }
  }
- document.addEventListener('DOMContentLoaded',()=>{
-  updateMeter();
-  setInterval(updateMeter,PREDICTION_DISPLAY_MS);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)updateMeter();});
- });
+ window.addEventListener('btc-status-updated',()=>render(window.btcServerStatus));
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)render(window.btcServerStatus);});
+ render(window.btcServerStatus);
 })();
 </script>
 <div id="signalTiles"><div class="card" id="fastPanel" style="border-left:4px solid #f6bb45;margin-top:10px"><div class="row" style="justify-content:space-between"><span class="label">⚡ QUICK PREDICTION · UP / DOWN</span><span class="small" id="fastAge">Waiting for stream</span></div><div class="value wait" id="fastSignal">SCANNING</div><div class="small" id="fastReason">Waiting for live price movement</div>
@@ -1476,7 +1668,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  chart.insertAdjacentElement('afterend',cards);
  // The reference panel has no live updater; do not show a permanent CONNECTING placeholder.
  if(reference)reference.remove();
- for(const id of ['directionMeter','fastPanel','strongPanel','final15Panel']){const panel=document.getElementById(id);if(panel)cards.append(panel)}
+ for(const id of ['formationVisualGuide','fastPanel','strongPanel','final15Panel']){const panel=document.getElementById(id);if(panel)cards.append(panel)}
  const primary=document.getElementById('currentSignal')?.closest('.card');if(primary){primary.id='primaryPanel';cards.append(primary)}
  const forecast=document.getElementById('futureForecastCard'),history=document.getElementById('serverHistory');
  const shock=document.getElementById('marketShockPanel');
