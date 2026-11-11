@@ -1428,7 +1428,13 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
    const res=await fetch('/api/checkpoint-scoreboard',{cache:'no-store',signal:ctrl.signal});
    if(!res.ok)throw Error('Scoreboard HTTP '+res.status);
    const data=await res.json();
-   if(data.status!=='available')throw Error('Scores unavailable');
+   if(data.status==='collecting'){
+    put('checkpointUpdated',data.reason==='database_reconnecting'?
+      'Database reconnecting · verified results will reappear when available':
+      'Loading saved verified settlement history');
+    return;
+   }
+   if(data.status!=='available'&&data.status!=='stale')throw Error('Scores unavailable');
    const rows=el('checkpointRows');rows.replaceChildren();
    const add=(title,item)=>{
     const tr=document.createElement('tr'),td=document.createElement('td'),n=document.createElement('td'),rate=document.createElement('td');
@@ -1438,11 +1444,13 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
     tr.append(td,n,rate);rows.append(tr);
    };
    for(const entry of data.fifteen||[]){if(entry.method==='PRICE_PATH')add('15m '+entry.label+' · Price path',entry);}
-   put('checkpointUpdated','Last 100 settled per checkpoint (or fewer)');
-  }catch(e){put('checkpointUpdated','Verified grading temporarily unavailable');}
+   put('checkpointUpdated',data.status==='stale'?
+     'Last verified results · history database reconnecting (updates delayed)':
+     'Last 100 settled per checkpoint (or fewer)');
+  }catch(e){put('checkpointUpdated','Verified history connection interrupted · retaining last displayed results');}
   finally{clearTimeout(timer);loading=false}
  }
- refreshScoreboard();setInterval(refreshScoreboard,45000);
+ refreshScoreboard();setInterval(()=>{if(!document.hidden)refreshScoreboard()},15000);
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshScoreboard()});
 })();
 </script><section class="card" id="researchDashboard"><div class="row" style="justify-content:space-between"><div class="label">FORWARD COMPARISON LOG · 15-MINUTE MARKETS</div><a href="/api/research.csv">Download CSV + evidence</a></div><p class="small" id="researchAsOf">Collecting new observations…</p><p class="small" id="researchError" aria-live="polite"></p><div class="research-scroll" id="strategyTable"></div><p class="small">AI, selective indicators, forced indicator direction, and the current target side share the same saved data snapshot. AI failures are marked no call. Outcomes require official settlement.</p><p class="small">* Paper P&amp;L assumes 100 contracts, 0.5¢ adverse slippage per contract, the recorded top-of-book quote and standard US taker fee. Only calls with valid quotes are priced. No actual trades, rebates, fill-depth guarantees or profitability claims.</p><details open><summary>AI confidence scorecard</summary><div class="research-scroll" id="confidenceTable"></div><p class="small">Confidence is the model's label, not a calibrated probability. Small samples and dependence between rounds limit conclusions.</p></details><details><summary>Earlier logged halfway AI confidence</summary><div class="research-scroll" id="priorConfidence"></div><p class="small">Earlier genuine AI calls only; these do not have matched baseline snapshots.</p></details><details open><summary>Does AI beat the baselines at the same time?</summary><div class="research-scroll" id="pairedTable"></div></details><details><summary>Recent saved calls and news attribution</summary><div id="researchRecent"></div></details></section><script>

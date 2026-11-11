@@ -1,5 +1,6 @@
 import asyncio, json, os, sqlite3, time, uuid
-from threading import RLock as _HistoryLock
+from threading import RLock as _HistoryLock, BoundedSemaphore
+from queue import LifoQueue, Empty, Full
 from pathlib import Path
 from ai_confirmation import public_state, auth_state, paper_signal_state
 from contextlib import asynccontextmanager, contextmanager
@@ -42,17 +43,57 @@ DB = os.getenv("DATABASE_URL", "")
 _history_write_version=0
 state = {"status":"starting","signal":"WAIT","flip":"WAIT","market":None,"updated":None,"error":None,
          "database_ready":False,"database_setup_error":None}
+# Reuse a very small number of durable Postgres connections. Each checkout
+# exclusively owns its connection; never share an active transaction across
+# threads. This avoids opening several fresh TLS sessions every monitoring tick
+# on the 256 MiB database. SQLite remains one connection per operation.
+_PG_POOL_LIMIT=3
+_pg_slots=BoundedSemaphore(_PG_POOL_LIMIT)
+_pg_idle=LifoQueue(maxsize=_PG_POOL_LIMIT)
+
 @contextmanager
 def connect():
- # Bounded connection attempts; stale Postgres must not trap worker threads.
- c=psycopg.connect(DB,connect_timeout=5) if DB else sqlite3.connect("monitor.db",timeout=10)
+ if not DB:
+  c=sqlite3.connect("monitor.db",timeout=10)
+  try:
+   yield c
+   c.commit()
+  except BaseException:
+   c.rollback()
+   raise
+  finally:c.close()
+  return
+ if not _pg_slots.acquire(timeout=5):
+  raise TimeoutError("database_connection_pool_busy")
+ c=None
  try:
-  yield c
-  c.commit()
- except BaseException:
-  c.rollback()
-  raise
- finally:c.close()
+  try:c=_pg_idle.get_nowait()
+  except Empty:pass
+  if c is None or c.closed:
+   if c is not None:c.close()
+   c=psycopg.connect(DB,connect_timeout=5)
+  reusable=True
+  try:
+   yield c
+   c.commit()
+  except BaseException:
+   try:c.rollback()
+   except Exception:reusable=False
+   raise
+  finally:
+   if reusable and not c.closed and not c.broken:
+    try:_pg_idle.put_nowait(c)
+    except Full:c.close()
+   else:c.close()
+ finally:
+  _pg_slots.release()
+
+def _close_idle_pg_connections():
+ while True:
+  try:c=_pg_idle.get_nowait()
+  except Empty:break
+  try:c.close()
+  except Exception:pass
 def execute(sql, params=(), fetch=False):
  global _history_write_version
  with connect() as c:
@@ -121,6 +162,10 @@ def setup():
   except Exception as exc:
    if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower(): raise
  execute("CREATE INDEX IF NOT EXISTS research_market_idx ON research_calls(market)")
+ # A small partial index keeps verified checkpoint history responsive while
+ # the live 15m monitor performs writes on a low-memory Postgres instance.
+ execute("""CREATE INDEX IF NOT EXISTS research_settled_created_idx
+   ON research_calls(created_at DESC) WHERE winner IN ('UP','DOWN')""")
  execute("""CREATE TABLE IF NOT EXISTS minute_research (
    id TEXT PRIMARY KEY, market TEXT NOT NULL, minute_slot INTEGER NOT NULL,
    observed_epoch REAL NOT NULL, payload_json TEXT NOT NULL)""")
@@ -1224,6 +1269,7 @@ async def lifespan(app):
  # Database history is optional for initial page load. Never block /api/status
  # behind slow SQL while background migrations or archival reads run.
  status_history_task=asyncio.create_task(_status_history_worker())
+ checkpoint_task=asyncio.create_task(_checkpoint_scoreboard_worker())
  context_task=asyncio.create_task(intelligence_loop())
  trade_stream_task=asyncio.create_task(stream_loop())
  chart_task=asyncio.create_task(official_chart_sampler(state))
@@ -1234,15 +1280,17 @@ async def lifespan(app):
  task.cancel()
  database_task.cancel()
  status_history_task.cancel()
+ checkpoint_task.cancel()
  diagnostics_task.cancel()
  context_task.cancel()
  trade_stream_task.cancel()
  chart_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,database_task,status_history_task,context_task,trade_stream_task,chart_task,diagnostics_task,*pending_predictions):
+ for running in (task,database_task,status_history_task,checkpoint_task,context_task,trade_stream_task,chart_task,diagnostics_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
+ _close_idle_pg_connections()
 historical_state={"status":"disabled","reason":"Seven-day bulk market collection disabled to protect live monitoring.","requested":0,"verified":0}
 app=FastAPI(lifespan=lifespan)
 @app.get("/research-dashboard.js")
@@ -1707,23 +1755,48 @@ def quick_accuracy_report():
  except Exception:return JSONResponse({"status":"unavailable",
    "error":"First-five-minute quick prediction database unavailable"},status_code=503)
 
-# Cached read-only checkpoint comparison; never alters frozen predictions.
-_checkpoint_display_cache={"updated":0,"data":None}
+# Checkpoint grades are archival, not part of the market heartbeat.
+# Never query SQL from the HTTP handler; a slow DB should not cause a 7-second
+# iPhone fetch timeout or block live BRTI/Formation Watch rendering.
+_checkpoint_display_cache={"updated":0.0,"data":None,"error":None}
+
+def _refresh_checkpoint_display():
+ now=time.time()
+ rows=iter_query_rows("""SELECT market,checkpoint,calls_json,winner FROM research_calls
+    WHERE winner IN ('UP','DOWN') ORDER BY created_at DESC LIMIT 1500""")
+ data=build_scoreboard(rows)
+ data["updated_epoch"]=now
+ _checkpoint_display_cache.update(data=data,updated=now,error=None)
+ return data
+
+async def _checkpoint_scoreboard_worker():
+ while True:
+  if state.get("database_ready"):
+   try:
+    await asyncio.to_thread(_refresh_checkpoint_display)
+   except asyncio.CancelledError:
+    raise
+   except Exception as exc:
+    _checkpoint_display_cache["error"]=type(exc).__name__
+  else:
+   _checkpoint_display_cache["error"]="database_reconnecting"
+  # Warm the scoreboard quickly after boot; once populated, limit SQL work.
+  await asyncio.sleep(15 if _checkpoint_display_cache["data"] is None else 45)
 
 @app.get("/api/checkpoint-scoreboard")
 def checkpoint_scoreboard_report():
- try:
-  now=time.time()
-  if _checkpoint_display_cache["data"] is not None and now-_checkpoint_display_cache["updated"]<45:
-   return _checkpoint_display_cache["data"]
-  rows=iter_query_rows("""SELECT market,checkpoint,calls_json,winner FROM research_calls
-     WHERE winner IN ('UP','DOWN') ORDER BY created_at DESC LIMIT 1500""")
-  data=build_scoreboard(rows)
-  data["updated_epoch"]=now
-  _checkpoint_display_cache.update(updated=now,data=data)
-  return data
- except Exception:
-  return JSONResponse({"status":"unavailable","reason":"Verified checkpoint history unavailable"},status_code=503)
+ now=time.time()
+ previous=_checkpoint_display_cache["data"]
+ if isinstance(previous,dict):
+  age=max(0,now-_checkpoint_display_cache["updated"])
+  if not state.get("database_ready") or _checkpoint_display_cache["error"] or age>120:
+   return {**previous,"status":"stale",
+           "reason":"database_reconnecting_or_verified_history_delayed",
+           "cache_age_seconds":round(age,1)}
+  return previous
+ return {"status":"collecting",
+         "reason":"database_reconnecting" if not state.get("database_ready") else "verified_history_warming",
+         "updated_epoch":None,"fifteen":[]}
 
 # The historical scoreboard does not change every second; cache SQL reads while
 # keeping state/AI connection information refreshed on each dashboard request.
