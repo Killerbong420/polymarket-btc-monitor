@@ -1390,12 +1390,13 @@ function renderMarketShock(d,online,validCandles){
        details=get('marketShockDetails'),source=get('marketShockSource');
  if(rapidCrash||rapidRally){
   const usd=Number(rapid.change_usd),short=rapid.change_60s_usd==null?NaN:Number(rapid.change_60s_usd);
+  const windowLabel=Number(rapid.lookback_seconds)<120?'1M':'5M';
   panel.dataset.level='shock';
-  status.textContent=rapidCrash?'BRTI 5M DROP':'BRTI 5M RALLY';
+  status.textContent='BRTI '+windowLabel+(rapidCrash?' DROP':' RALLY');
   headline.textContent=(rapidCrash?'⚡ RAPID BRTI SELL-OFF · ':'⚡ RAPID BRTI RALLY · ')+
     (usd<0?'−':'+')+'$'+Math.abs(usd).toLocaleString('en-US',{maximumFractionDigits:0});
   headline.className='value '+(rapidCrash?'down':'up');
-  details.textContent='Observed 5m '+Number(rapid.change_pct).toFixed(3)+'%'+
+  details.textContent='Observed '+windowLabel+' '+Number(rapid.change_pct).toFixed(3)+'%'+
     (Number.isFinite(short)?' · last 60s '+(short<0?'−':'+')+'$'+Math.abs(short).toFixed(0):'')+
     ' · '+String(rapid.phase||'unknown').replaceAll('_',' ');
   source.textContent='Official Polymarket BRTI · '+Math.round(rapid.age_seconds)+
