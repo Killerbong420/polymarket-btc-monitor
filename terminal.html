@@ -393,6 +393,11 @@ window.btcNoteRequest=function(name,ms,ok){
 <canvas id="brtiLineCanvas" role="img" aria-label="Official Polymarket US BRTI index line, official price to beat, and eligible final-average forecast. No candlesticks or contract values."></canvas>
   <div id="brtiLineLegend"><span><i></i>BRTI index</span><span><i class="target"></i>Official target</span><span><i class="forecast"></i>Projected final average (when verified)</span></div>
 </section>
+<section id="coinbaseProjectionPanel" class="card" style="margin:10px 0;border:1px solid #66551c;background:#0b141e;padding:12px">
+<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><strong style="color:#ffe34d">⚑ Coinbase Formation · Predicted Path</strong><span id="coinbaseProjectionLabel" class="small">Waiting for fresh Coinbase formation and price history</span></div>
+<canvas id="coinbaseProjectionCanvas" role="img" aria-label="Coinbase observed BTC/USD prices and an indicative yellow formation objective guide; future prices are not known" style="width:100%;height:270px;display:block;margin-top:9px;background:#09121c;border:1px solid #324454;border-radius:9px"></canvas>
+<div class="small" style="color:#c4cfda;margin-top:6px">Blue = observed Coinbase BTC/USD · Yellow = hypothetical path to the formation objective over 15 minutes, not a calibrated price forecast or win probability. No projection without a fresh eligible formation and observed Coinbase prices.</div>
+</section>
 <div id="structureWatch" role="status" aria-live="polite" style="font-size:12px;line-height:1.45;padding:8px 10px;margin:6px 0 9px;border:1px solid #3b526b;border-radius:9px;color:#b6c9db;background:#0c1b2a">FORMATION WATCH · Waiting for completed Coinbase BTC-USD candles</div>
 <details id="patternLifecyclePanel" style="margin:0 0 10px;border:1px solid #34465b;border-radius:9px;padding:8px 10px;color:#b6c9db;font-size:12px">
 <summary style="cursor:pointer;font-weight:700">Coinbase BTC-USD Formation results & saved timeline</summary>
@@ -1874,4 +1879,77 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  setInterval(()=>{if(!document.hidden)refreshRoundTiles()},60000);
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshRoundTiles()});
 })();
-</script></body></html>
+</script><script>
+/* Read-only formation objective illustration. Does not alter BRTI, settlement or trading. */
+(function(){
+ const canvas=document.getElementById('coinbaseProjectionCanvas');
+ const label=document.getElementById('coinbaseProjectionLabel');
+ if(!canvas||!label)return;
+ let data=null,lastFetch=0,busy=false,requestMarket='';
+ const valid=n=>typeof n==='number'&&Number.isFinite(n);
+ const money=n=>'</html>
++n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+ function draw(){
+  if(document.hidden)return;
+  const status=window.btcServerStatus||{},p=status.external?.early_patterns||{},now=Date.now()/1000;
+  const bounds=canvas.getBoundingClientRect(),w=bounds.width,h=bounds.height;
+  if(w<120||h<120)return;
+  const ratio=Math.min(window.devicePixelRatio||1,2);
+  if(canvas.width!==Math.round(w*ratio))canvas.width=Math.round(w*ratio);
+  if(canvas.height!==Math.round(h*ratio))canvas.height=Math.round(h*ratio);
+  const ctx=canvas.getContext('2d');if(!ctx)return;
+  ctx.setTransform(ratio,0,0,ratio,0,0);
+  ctx.fillStyle='#09121c';ctx.fillRect(0,0,w,h);
+  const rows=status.pattern_lifecycle?.recent||[];
+  const tracked=Array.isArray(rows)?rows.find(x=>x.market===status.market&&x.source===p.source&&x.pattern===p.pattern&&Number(x.anchor_epoch)===Number(p.anchor_epoch)):null;
+  const phase=tracked?.phase||p.phase;
+  const age=now-Date.parse(status.updated||'')/1000;
+  const good=status.status==='running'&&status.market===data?.market&&data?.range==='30m'&&
+   valid(Number(data.sampled_at))&&now-Number(data.sampled_at)<35&&
+   valid(age)&&age>=-3&&age<20&&p.source==='Coinbase Exchange BTC-USD'&&
+   p.status==='watch'&&['UP','DOWN'].includes(p.bias)&&
+   !['INVALIDATED','EXPIRED','COMPLETED'].includes(phase)&&
+   valid(Number(p.candle_age_seconds))&&Number(p.candle_age_seconds)<=75;
+  const venue=(data?.venue_series||[]).find(v=>v.source==='Coinbase'&&v.quote==='USD'&&v.status==='fresh');
+  const points=good&&Array.isArray(venue?.points)?venue.points.filter(x=>Array.isArray(x)&&valid(Number(x[0]))&&valid(Number(x[1]))&&Number(x[1])>0&&now-Number(x[0])>=-5&&now-Number(x[0])<=1800).map(x=>[Number(x[0]),Number(x[1])]).sort((a,b)=>a[0]-b[0]):[];
+  if(points.length<3||now-points[points.length-1][0]>35){
+   label.textContent='Waiting for fresh Coinbase prices and eligible formation';
+   ctx.fillStyle='#b3c4d4';ctx.font='12px system-ui';ctx.fillText('No verified projection available',12,h/2);return;
+  }
+  const last=points[points.length-1],objective=Number(tracked?.objective_usd);
+  const target=valid(objective)&&objective>0&&Math.sign(objective-last[1])===(p.bias==='UP'?1:-1)?objective:null;
+  const padLeft=12,padRight=74,top=29,bottom=28,right=w-padRight,nowX=padLeft+(right-padLeft)*.68;
+  const prices=points.map(x=>x[1]);if(target!==null)prices.push(target);
+  const min=Math.min(...prices),max=Math.max(...prices),spread=Math.max(15,max-min),lo=min-spread*.12,hi=max+spread*.12;
+  const Y=n=>top+(hi-n)/(hi-lo)*(h-top-bottom);
+  const first=points[0][0],X=t=>padLeft+(t-first)/Math.max(1,last[0]-first)*(nowX-padLeft);
+  for(let i=0;i<5;i++){let y=top+i*(h-top-bottom)/4;ctx.strokeStyle='#243748';ctx.beginPath();ctx.moveTo(padLeft,y);ctx.lineTo(right,y);ctx.stroke();ctx.fillStyle='#b5c7d5';ctx.font='10px monospace';ctx.fillText(Math.round(hi-(hi-lo)*i/4).toLocaleString(),right+4,y+3);}
+  ctx.fillStyle='rgba(255,223,40,.065)';ctx.fillRect(nowX,top,right-nowX,h-top-bottom);
+  ctx.strokeStyle='#9aabb9';ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(nowX,top);ctx.lineTo(nowX,h-bottom);ctx.stroke();ctx.setLineDash([]);
+  ctx.save();ctx.beginPath();ctx.rect(padLeft,top,right-padLeft,h-top-bottom);ctx.clip();
+  ctx.beginPath();ctx.lineWidth=2.5;ctx.strokeStyle='#5fcfff';
+  points.forEach((v,i)=>{if(i===0)ctx.moveTo(X(v[0]),Y(v[1]));else ctx.lineTo(X(v[0]),Y(v[1]));});ctx.stroke();
+  if(target!==null){
+   // A straight objective guide avoids fabricating unobserved dips and rallies.
+   ctx.beginPath();ctx.lineWidth=3;ctx.strokeStyle='#ffe400';ctx.shadowColor='#ffe400';ctx.shadowBlur=9;
+   ctx.moveTo(nowX,Y(last[1]));ctx.lineTo(right,Y(target));ctx.stroke();ctx.shadowBlur=0;
+   ctx.fillStyle='#ffe400';ctx.beginPath();ctx.arc(right,Y(target),4,0,Math.PI*2);ctx.fill();
+  }
+  ctx.restore();
+  ctx.fillStyle='#c3d9e8';ctx.font='bold 11px system-ui';ctx.fillText('COINBASE BTC/USD · OBSERVED',padLeft+4,15);
+  ctx.fillStyle='#ffe34d';ctx.fillText('NOW',nowX-13,h-9);ctx.fillText('+15m',right-26,h-9);
+  label.textContent=p.pattern.replaceAll('_',' ')+' · '+p.bias+' · '+(target!==null?'Objective '+money(target):'Objective unavailable')+' · match is NOT probability';
+ }
+ async function refresh(){
+  const s=window.btcServerStatus;
+  if(document.hidden||busy||!s?.market||Date.now()-lastFetch<10000)return;
+  lastFetch=Date.now();busy=true;const market=s.market;
+  try{
+   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),7000);
+   try{const response=await fetch('/api/market-chart/history?range=30m',{cache:'no-store',signal:controller.signal});if(!response.ok)throw Error('history');const d=await response.json();if(d.market===market&&d.range==='30m'){data=d;requestMarket=market;}}finally{clearTimeout(timeout);}
+  }catch(e){data=null;}finally{busy=false;draw();}
+ }
+ setInterval(()=>{refresh();draw();},10000);refresh();draw();
+})();
+</script>
+</body></html>
