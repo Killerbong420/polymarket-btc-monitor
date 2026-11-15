@@ -62,3 +62,97 @@ def measure_market_shock(candles, source="exchange BTC/USD", now_epoch=None):
         }
     except (IndexError, KeyError, ValueError, TypeError, OverflowError, ZeroDivisionError):
         return {**missing, "reason": "Invalid exchange candle data"}
+
+
+BRTI_SOURCE = "Polymarket US BTC reference / BRTI"
+
+
+def observe_flash_move(reference, now_epoch=None):
+    """Read-only rapid-move alert from genuinely observed one-second BRTI ticks.
+
+    Detect a $500 / 0.7% peak-to-trough move over the last five minutes,
+    including before the five-minute window finishes. A $250 / 0.4%
+    one-minute change is an early warning. This never decides settlement,
+    changes the authoritative target, or places orders.
+    """
+    missing = {
+        "status": "unavailable", "level": "unavailable", "direction": None,
+        "source": BRTI_SOURCE, "reason": "Fresh dense official BRTI ticks required",
+    }
+    if not isinstance(reference, dict) or reference.get("status") != "fresh" or reference.get("source") != BRTI_SOURCE:
+        return missing
+    now = time.time() if now_epoch is None else float(now_epoch)
+    if not math.isfinite(now):
+        return missing
+    observed = {}
+    for tick in reference.get("points") or ():
+        if not isinstance(tick, (list, tuple)) or len(tick) != 2:
+            continue
+        try:
+            stamp, price = float(tick[0]), float(tick[1])
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if (math.isfinite(stamp) and math.isfinite(price) and price > 0
+                and stamp.is_integer() and stamp <= now + 2):
+            observed[int(stamp)] = price
+    if not observed:
+        return missing
+    latest = max(observed)
+    age = now - latest
+    if not -2 <= age <= 15:
+        return {**missing, "reason": "Official BRTI observation is stale or future-dated"}
+    window = sorted((t, p) for t, p in observed.items() if latest - 300 <= t <= latest)
+    if len(window) < 55 or window[-1][0] - window[0][0] < 59:
+        return {**missing, "reason": "Not enough actual observation history"}
+    span = window[-1][0] - window[0][0]
+    if len(window) / (span + 1) < .90 or any(b[0] - a[0] > 10 for a, b in zip(window, window[1:])):
+        return {**missing, "reason": "Observed BRTI tick gaps; no synthetic coverage"}
+
+    peak = trough = window[0][1]
+    peak_at = trough_at = window[0][0]
+    max_fall = max_rise = 0.0
+    fall_peak = rise_trough = window[0][1]
+    fall_at = rise_at = window[0][0]
+    for t, price in window[1:]:
+        if price > peak:
+            peak, peak_at = price, t
+        if price < trough:
+            trough, trough_at = price, t
+        if peak - price > max_fall:
+            max_fall, fall_peak, fall_at = peak - price, peak, t
+        if price - trough > max_rise:
+            max_rise, rise_trough, rise_at = price - trough, trough, t
+
+    anchor = latest - 60
+    anchors = [(abs(t - anchor), t, p) for t, p in window if abs(t - anchor) <= 4]
+    change_60 = None
+    if anchors:
+        _, _, old_price = min(anchors)
+        change_60 = window[-1][1] - old_price
+
+    big_fall = max_fall >= 500 or max_fall / fall_peak >= .007
+    big_rise = max_rise >= 500 or max_rise / rise_trough >= .007
+    down_60 = change_60 is not None and (change_60 <= -250 or change_60 / window[-1][1] <= -.004)
+    up_60 = change_60 is not None and (change_60 >= 250 or change_60 / window[-1][1] >= .004)
+    if big_fall or big_rise:
+        # If a crash is followed by a genuine rally, show the newer extreme.
+        down = big_fall and (not big_rise or fall_at >= rise_at)
+        level = "flash_selloff" if down else "flash_rally"
+    elif down_60 or up_60:
+        down = down_60 and (not up_60)
+        level = "rapid_selloff" if down else "rapid_rally"
+    else:
+        down, level = False, "normal"
+    return {
+        "status": "available", "level": level,
+        "direction": ("DOWN" if down else "UP") if level != "normal" else None,
+        "source": BRTI_SOURCE, "latest_tick_epoch": latest,
+        "sample_age_seconds": round(max(0, age), 1),
+        "window_seconds": span, "observed_ticks": len(window),
+        "coverage_pct": round(100 * len(window) / (span + 1), 1),
+        "five_minute_drawdown_usd": round(max_fall, 2),
+        "five_minute_rally_usd": round(max_rise, 2),
+        "last_60s_change_usd": round(change_60, 2) if change_60 is not None else None,
+        "latest_reference_usd": round(window[-1][1], 2),
+        "note": "Observed BRTI movement only; a past selloff can rebound. Not trade pressure, a settlement prediction, or a calibrated win probability.",
+    }
