@@ -1005,7 +1005,8 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  # Fixed conservative research shadow: records a bounded blend of the
  # independent BRTI path and AI estimate without modifying the AI call.
  shadow=anchored_shadow_forecast(a_price,path,frozen.get("reference_price"),target)
- guarded=guarded_decision(path,frozen.get("reference_price"),target,left,a_price,frozen.get("reversal_evidence"))
+ guarded=guarded_decision(path,frozen.get("reference_price"),target,left,a_price,frozen.get("reversal_evidence"),
+                          target_validation=frozen.get("target_validation"))
  calls["GUARDED_PRIMARY"]={**guarded,"source":guarded.get("version"),
   "confidence":guarded.get("quality","UNRATED"),
   "entry_review":manual_entry_review(guarded,quote,slug)}
@@ -1804,14 +1805,23 @@ async def candle_proxy():
 
 @app.get("/api/live")
 def lightweight_live():
- """Read-only in-memory live feed independent of historical SQL."""
+ """Read-only current BRTI stream; no new network or history SQL requests."""
+ now=time.time()
+ ref=state.get("reference_price") or {}
+ verified=(state.get("status")=="running" and ref.get("source")=="Polymarket US BTC reference / BRTI")
+ recent=recent_brti_points(seconds=330,now=now) if verified else []
+ live_rapid=measure_brti_rapid_move({
+  "source":"Polymarket US BTC reference / BRTI",
+  "status":"fresh" if verified else "unavailable",
+  "points":recent},now_epoch=now)
+ live_rapid={**live_rapid,"market":state.get("market")}
  return {"status":state.get("status"),"updated":state.get("updated"),
          "market":state.get("market"),"signal":state.get("signal"),
          "doji_watch":state.get("doji_watch"),"pattern_lifecycle":state.get("pattern_lifecycle"),
          "error":state.get("error"),"external":state.get("external") or {},
          "brti_chart":state.get("brti_chart"),"reference_price":state.get("reference_price"),
          "target_behavior":state.get("target_behavior"),"settlement_forecast":state.get("settlement_forecast"),"quick_forecast":state.get("quick_forecast"),
-         "brti_rapid_move":state.get("brti_rapid_move"),
+         "brti_rapid_move":live_rapid,
          "guarded_primary":state.get("guarded_primary"),"last_guarded_primary":state.get("last_guarded_primary"),
          "manual_entry_review":state.get("manual_entry_review"),"reversal_evidence":state.get("reversal_evidence"),
          "final_15m":state.get("final_15m"),"last_halfway_ai":state.get("last_halfway_ai"),
