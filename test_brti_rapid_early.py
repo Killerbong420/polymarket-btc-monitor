@@ -30,7 +30,7 @@ class EarlyBRTIAlertTests(unittest.TestCase):
         self.assertLess(result["lookback_seconds"], 120)
 
     def test_one_minute_warning_when_full_five_minute_net_move_is_small(self):
-        prices = [64000]*260 + [64000 - 5*i for i in range(61)]
+        prices = [64000]*260 + [64000 - 4.3*i for i in range(61)]
         result = measure_brti_rapid_move(ref(prices), now_epoch=EPOCH+320)
         self.assertEqual(result["status"], "available")
         self.assertEqual(result["kind"], "rapid_selloff")
