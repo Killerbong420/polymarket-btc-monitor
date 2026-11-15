@@ -94,7 +94,10 @@ def measure_brti_rapid_move(reference, now_epoch=None):
         for pair in ref.get("points") or []:
             if not isinstance(pair, (list, tuple)) or len(pair) != 2:
                 continue
-            t, p = float(pair[0]), float(pair[1])
+            try:
+                t, p = float(pair[0]), float(pair[1])
+            except (TypeError, ValueError, OverflowError):
+                continue
             if (math.isfinite(t) and math.isfinite(p) and p > 0
                     and abs(t-round(t)) < .001 and now-325 <= t <= now):
                 ticks[int(round(t))] = p
