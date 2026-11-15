@@ -396,6 +396,7 @@ window.btcNoteRequest=function(name,ms,ok){
   <span id="coinbasePatternChip">Formation: —</span>
   <span id="coinbaseBiasChip">Direction: —</span>
   <span id="coinbaseTargetChip">Target: —</span>
+  <span id="coinbaseLivePriceChip">Live Coinbase: waiting</span>
   <span>Coinbase · real 1m candles</span>
  </div>
  <canvas id="coinbaseProjectionCanvas" role="img" aria-label="Real completed Coinbase BTC/USD green and red candlesticks with marked observed formation and an illustrative yellow 15-minute objective scenario"></canvas>
@@ -1913,8 +1914,10 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  const patternChip=document.getElementById('coinbasePatternChip');
  const biasChip=document.getElementById('coinbaseBiasChip');
  const targetChip=document.getElementById('coinbaseTargetChip');
+ const liveChip=document.getElementById('coinbaseLivePriceChip');
  if(!canvas||!label)return;
  let sample=null,busy=false,lastPoll=0;
+ let liveQuote=null,quoteBusy=false,lastQuotePoll=0;
  const finite=v=>typeof v==='number'&&Number.isFinite(v);
  const num=v=>v===null||v===undefined||v===''?NaN:Number(v);
  const money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -1949,6 +1952,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
    if(patternChip)patternChip.textContent='Formation: —';
    if(biasChip)biasChip.textContent='Direction: —';
    if(targetChip)targetChip.textContent='Target: —';
+   if(liveChip){liveChip.textContent='Live Coinbase: waiting for candles';liveChip.style.color='#a8bdd0';}
    ctx.font='13px system-ui';ctx.fillStyle='#b6cbdc';
    ctx.fillText('Waiting for verified Coinbase candles',14,height/2);
    return;
@@ -1960,12 +1964,19 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
   const eligible=p.source==='Coinbase Exchange BTC-USD'&&p.status==='watch'&&
     (p.bias==='UP'||p.bias==='DOWN')&&finite(num(p.candle_age_seconds))&&
     num(p.candle_age_seconds)<=75&&!['INVALIDATED','EXPIRED','COMPLETED'].includes(phase);
-  const latest=bars[bars.length-1][4],objective=num(tracked?.objective_usd);
+  const quotePrice=num(liveQuote?.price),tradeEpoch=num(liveQuote?.trade_epoch),sampledEpoch=num(liveQuote?.sampled_at);
+  const liveValid=liveQuote?.status==='fresh'&&liveQuote.source==='Coinbase Exchange BTC-USD'&&
+    finite(quotePrice)&&quotePrice>0&&finite(tradeEpoch)&&
+    now-tradeEpoch>=-3&&now-tradeEpoch<=8&&finite(sampledEpoch)&&
+    now-sampledEpoch>=-3&&now-sampledEpoch<=4;
+  const livePrice=liveValid?quotePrice:null;
+  const latest=livePrice!==null?livePrice:bars[bars.length-1][4],objective=num(tracked?.objective_usd);
   const target=eligible&&finite(objective)&&objective>0&&
     Math.sign(objective-latest)===(p.bias==='UP'?1:-1)?objective:null;
   const padLeft=13,right=width-66,top=37,bottom=height-45;
   const nowX=padLeft+(right-padLeft)*.60;
   const recentPrices=bars.flatMap(b=>[b[2],b[3]]);
+  if(livePrice!==null)recentPrices.push(livePrice);
   if(target!==null)recentPrices.push(target);
   const min=Math.min(...recentPrices),max=Math.max(...recentPrices);
   const range=Math.max(15,max-min);
@@ -1998,6 +2009,13 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
    ctx.fillStyle=color;ctx.fillRect(x-candleWidth/2,Math.min(Y(opening),Y(closing)),
      candleWidth,Math.max(1.8,Math.abs(Y(opening)-Y(closing))));
   });
+  // A live trade is a separate observed tick, never an invented completed candle.
+  if(livePrice!==null){
+   const tickY=Y(livePrice);
+   ctx.strokeStyle='#74d6ff';ctx.lineWidth=1.5;ctx.setLineDash([3,3]);
+   ctx.beginPath();ctx.moveTo(nowX-14,tickY);ctx.lineTo(nowX+11,tickY);ctx.stroke();ctx.setLineDash([]);
+   ctx.fillStyle='#74d6ff';ctx.beginPath();ctx.arc(nowX,tickY,4,0,Math.PI*2);ctx.fill();
+  }
   if(eligible){
    const pattern=String(p.pattern||'');
    if(pattern.includes('FLAG')){
@@ -2065,6 +2083,8 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
   if(biasChip){biasChip.textContent='Direction: '+(eligible?p.bias:'—');
    biasChip.style.color=eligible?(p.bias==='UP'?'#15e998':'#ff7777'):'#a8bdd0';}
   if(targetChip)targetChip.textContent='Target: '+(target!==null?money(target):'unavailable');
+  if(liveChip){liveChip.textContent=livePrice!==null?'Live Coinbase: '+money(livePrice):'Live Coinbase: stale';
+   liveChip.style.color=livePrice!==null?'#74d6ff':'#a8bdd0';}
   label.textContent=eligible?pretty(p.pattern)+' · '+pretty(phase)+
    ' · observed Coinbase 1m candles · '+(target!==null?'yellow = illustrative route to '+money(target):
    'no verified objective for projection')+
@@ -2084,8 +2104,26 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  }
  window.addEventListener('btc-status-updated',draw);
  window.addEventListener('resize',draw);
- document.addEventListener('visibilitychange',()=>{if(!document.hidden){refresh();draw();}});
- setInterval(()=>{refresh();draw();},10000);
- refresh();draw();
+ async function refreshLivePrice(){
+  // One small local read from the existing Coinbase WebSocket, not a new socket.
+  if(document.hidden||quoteBusy||Date.now()-lastQuotePoll<950)return;
+  lastQuotePoll=Date.now();quoteBusy=true;
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),900);
+  try{
+   const response=await fetch('/api/coinbase-formation/live-price',{cache:'no-store',signal:controller.signal});
+   if(!response.ok)throw Error('live_trade_unavailable');
+   const payload=await response.json();
+   liveQuote=payload?.status==='fresh'?payload:null;
+  }catch(_){liveQuote=null;}
+  finally{clearTimeout(timeout);quoteBusy=false;draw();}
+ }
+ document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden){refresh();refreshLivePrice();draw();}
+ });
+ // Candles are verified 1m observations; redraw and obtain a fresh *trade tick*
+ // each second, updating the marker only when Coinbase sends a real trade.
+ setInterval(()=>{refreshLivePrice();draw();},1000);
+ setInterval(refresh,10000);
+ refresh();refreshLivePrice();draw();
 })();
 </script></body></html>

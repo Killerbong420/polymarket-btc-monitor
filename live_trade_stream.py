@@ -63,6 +63,8 @@ class TradeBuffer:
         self.ids = set()
         self.connected_since = None
         self.latest_trade_epoch = None
+        self.latest_price = None
+        self.latest_price_epoch = None
         self.overflow_epoch = None
         self.last_error = None
 
@@ -71,6 +73,8 @@ class TradeBuffer:
         self.ids.clear()
         self.connected_since = now
         self.latest_trade_epoch = None
+        self.latest_price = None
+        self.latest_price_epoch = None
         self.overflow_epoch = None
         self.last_error = None
 
@@ -80,6 +84,8 @@ class TradeBuffer:
         self.ids.clear()
         self.connected_since = None
         self.latest_trade_epoch = None
+        self.latest_price = None
+        self.latest_price_epoch = None
         self.overflow_epoch = None
         self.last_error = reason
 
@@ -113,8 +119,22 @@ class TradeBuffer:
             self.overflow_epoch = now
         self.rows.append((ts, price, size, side, ident))
         self.ids.add(ident)
+        if self.latest_trade_epoch is None or ts >= self.latest_trade_epoch:
+            self.latest_price = price
+            self.latest_price_epoch = ts
         self.latest_trade_epoch = max(ts, self.latest_trade_epoch or ts)
         return True
+
+    def latest_price_snapshot(self, now=None):
+        """O(1) freshest observed trade; no full buffer copy or external request."""
+        now = time.time() if now is None else float(now)
+        ts, price = self.latest_price_epoch, self.latest_price
+        if (self.connected_since is None or ts is None or price is None
+                or not math.isfinite(ts) or not math.isfinite(price)
+                or now-ts < -2 or now-ts > 8 or price <= 0):
+            return None
+        return {"source": "Coinbase Exchange BTC-USD", "price": price,
+                "trade_epoch": ts, "sampled_at": now}
 
     def snapshot(self, now=None):
         now = time.time() if now is None else now
@@ -136,6 +156,10 @@ BUFFERS = {source: TradeBuffer() for source in ENDPOINTS}
 # WebSocket. No second WebSocket, and no extra external REST calls.
 COINBASE_MINUTES = CoinbaseMinuteBuilder()
 
+
+def coinbase_latest_price(now=None):
+    """Read-only Coinbase trade tick from the existing WS, O(1) per request."""
+    return BUFFERS["Coinbase"].latest_price_snapshot(now)
 
 def coinbase_candle_snapshot(now=None):
     return COINBASE_MINUTES.snapshot(now)
