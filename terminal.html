@@ -396,7 +396,7 @@ window.btcNoteRequest=function(name,ms,ok){
 <section id="coinbaseProjectionPanel" class="card" style="margin:10px 0;border:1px solid #66551c;background:#0b141e;padding:12px">
 <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><strong style="color:#ffe34d">⚑ Coinbase Formation · Predicted Path</strong><span id="coinbaseProjectionLabel" class="small">Waiting for fresh Coinbase formation and price history</span></div>
 <canvas id="coinbaseProjectionCanvas" role="img" aria-label="Coinbase observed BTC/USD prices and an indicative yellow formation objective guide; future prices are not known" style="width:100%;height:270px;display:block;margin-top:9px;background:#09121c;border:1px solid #324454;border-radius:9px"></canvas>
-<div class="small" style="color:#c4cfda;margin-top:6px">Blue = observed Coinbase BTC/USD · Yellow = hypothetical path to the formation objective over 15 minutes, not a calibrated price forecast or win probability. No projection without a fresh eligible formation and observed Coinbase prices.</div>
+<div class="small" style="color:#c4cfda;margin-top:6px">Blue = observed Coinbase BTC/USD · Yellow = illustrative 15-minute formation scenario with possible pullbacks. The turns are NOT forecast; only the tracked formation objective anchors the endpoint. Not a calibrated price forecast or win probability. No projection without a fresh eligible formation and observed Coinbase prices.</div>
 </section>
 <div id="structureWatch" role="status" aria-live="polite" style="font-size:12px;line-height:1.45;padding:8px 10px;margin:6px 0 9px;border:1px solid #3b526b;border-radius:9px;color:#b6c9db;background:#0c1b2a">FORMATION WATCH · Waiting for completed Coinbase BTC-USD candles</div>
 <details id="patternLifecyclePanel" style="margin:0 0 10px;border:1px solid #34465b;border-radius:9px;padding:8px 10px;color:#b6c9db;font-size:12px">
@@ -1929,10 +1929,27 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
   ctx.beginPath();ctx.lineWidth=2.5;ctx.strokeStyle='#5fcfff';
   points.forEach((v,i)=>{if(i===0)ctx.moveTo(X(v[0]),Y(v[1]));else ctx.lineTo(X(v[0]),Y(v[1]));});ctx.stroke();
   if(target!==null){
-   // A straight objective guide avoids fabricating unobserved dips and rallies.
+   // Illustrative zigzag anchored to the tracked formation objective. Intermediate
+   // turns are visual scenarios, NOT inferred or calibrated future price forecasts.
+   const move=target-last[1],direction=Math.sign(move);
+   const typical=Math.max(3,Math.min(spread*.12,Math.abs(move)*.24));
+   const path=[
+    [0,last[1]],
+    [.19,last[1]+move*.27],
+    [.33,last[1]+move*.27-direction*typical],
+    [.55,last[1]+move*.67],
+    [.70,last[1]+move*.67-direction*typical*.7],
+    [.85,last[1]+move*.88],
+    [1,target]
+   ];
    ctx.beginPath();ctx.lineWidth=3;ctx.strokeStyle='#ffe400';ctx.shadowColor='#ffe400';ctx.shadowBlur=9;
-   ctx.moveTo(nowX,Y(last[1]));ctx.lineTo(right,Y(target));ctx.stroke();ctx.shadowBlur=0;
+   path.forEach(([fraction,price],i)=>{const x=nowX+(right-nowX)*fraction,y=Y(price);
+    if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+   });
+   ctx.stroke();ctx.shadowBlur=0;
    ctx.fillStyle='#ffe400';ctx.beginPath();ctx.arc(right,Y(target),4,0,Math.PI*2);ctx.fill();
+   ctx.font='10px system-ui';ctx.fillStyle='#ffe34d';
+   ctx.fillText('Illustrative scenario · turns not forecast',Math.max(padLeft,nowX-105),top+12);
   }
   ctx.restore();
   ctx.fillStyle='#c3d9e8';ctx.font='bold 11px system-ui';ctx.fillText('COINBASE BTC/USD · OBSERVED',padLeft+4,15);
