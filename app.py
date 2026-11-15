@@ -21,7 +21,7 @@ from brti_volatility_shadow import brti_volatility_shadow, evaluate_shadow
 from minute_research import minute_observation, book_freshness, evaluate_minutes
 from forecast_audit import summarize_forecast_audit
 from forecast_guard import anchored_shadow_forecast, validate_official_target
-from market_shock import measure_market_shock
+from market_shock import measure_market_shock, observe_flash_move
 from decision_engine import reversal_evidence, guarded_decision, manual_entry_review
 from forward_eval import evaluate_guarded
 from round_tiles import report as recent_round_tiles
@@ -1005,7 +1005,8 @@ async def capture_checkpoint(client,slug,checkpoint,left,d,primary,flip,score,ma
  # Fixed conservative research shadow: records a bounded blend of the
  # independent BRTI path and AI estimate without modifying the AI call.
  shadow=anchored_shadow_forecast(a_price,path,frozen.get("reference_price"),target)
- guarded=guarded_decision(path,frozen.get("reference_price"),target,left,a_price,frozen.get("reversal_evidence"))
+ guarded=guarded_decision(path,frozen.get("reference_price"),target,left,a_price,frozen.get("reversal_evidence"),
+                          target_validation=frozen.get("target_validation"))
  calls["GUARDED_PRIMARY"]={**guarded,"source":guarded.get("version"),
   "confidence":guarded.get("quality","UNRATED"),
   "entry_review":manual_entry_review(guarded,quote,slug)}
@@ -1171,6 +1172,11 @@ async def loop():
      regime_shadow=regime_shadow_forecast(reference,d,target,left15,now=forecast_now)
      reversal=reversal_evidence(reference,left15)
      target_validation=validate_official_target(number(target),reference)
+     # Observed tick-only alert stays available even when the settlement
+     # forecast is withheld for an opening-target discrepancy.
+     flash_move=observe_flash_move(reference,now_epoch=forecast_now)
+     d["flash_move"]=flash_move
+     state["flash_move"]=flash_move
      guarded_live=guarded_decision(price_path,ref_public,target,left15,reversal=reversal,target_validation=target_validation)
      entry_review=manual_entry_review(guarded_live,quote,slug)
      d.update(reference_price=ref_public,target_behavior=behavior,market_quote=quote,settlement_forecast=price_path,time_regime_shadow=regime_shadow,quick_forecast=quick,reversal_evidence=reversal,guarded_primary=guarded_live,manual_entry_review=entry_review)
@@ -1803,6 +1809,7 @@ def lightweight_live():
          "brti_chart":state.get("brti_chart"),"reference_price":state.get("reference_price"),
          "target_behavior":state.get("target_behavior"),"settlement_forecast":state.get("settlement_forecast"),"quick_forecast":state.get("quick_forecast"),
          "guarded_primary":state.get("guarded_primary"),"last_guarded_primary":state.get("last_guarded_primary"),
+         "flash_move":state.get("flash_move"),
          "manual_entry_review":state.get("manual_entry_review"),"reversal_evidence":state.get("reversal_evidence"),
          "final_15m":state.get("final_15m"),"last_halfway_ai":state.get("last_halfway_ai"),
          "last_checkpoint":state.get("last_checkpoint"),
