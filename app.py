@@ -1801,15 +1801,28 @@ async def candle_proxy():
 
 @app.get("/api/live")
 def lightweight_live():
- """Read-only in-memory live feed independent of historical SQL."""
+ """Read-only in-memory live feed independent of historical SQL.
+
+ The official index sampler records genuine one-second ticks in RAM. Reading
+ its last five minutes does not request upstream data or query PostgreSQL.
+ """
+ now=time.time()
+ chart=chart_history_snapshot("5m",now=now)
+ verified=(state.get("status")=="running" and
+           (state.get("reference_price") or {}).get("source")=="Polymarket US BTC reference / BRTI")
+ flash_move=observe_flash_move({
+   "status":chart.get("status") if verified else "unavailable",
+   "source":"Polymarket US BTC reference / BRTI",
+   "points":chart.get("brti_points") or []},now_epoch=now)
+ external={**(state.get("external") or {}),"flash_move":flash_move}
  return {"status":state.get("status"),"updated":state.get("updated"),
          "market":state.get("market"),"signal":state.get("signal"),
          "doji_watch":state.get("doji_watch"),"pattern_lifecycle":state.get("pattern_lifecycle"),
-         "error":state.get("error"),"external":state.get("external") or {},
+         "error":state.get("error"),"external":external,
          "brti_chart":state.get("brti_chart"),"reference_price":state.get("reference_price"),
          "target_behavior":state.get("target_behavior"),"settlement_forecast":state.get("settlement_forecast"),"quick_forecast":state.get("quick_forecast"),
          "guarded_primary":state.get("guarded_primary"),"last_guarded_primary":state.get("last_guarded_primary"),
-         "flash_move":state.get("flash_move"),
+         "flash_move":flash_move,
          "manual_entry_review":state.get("manual_entry_review"),"reversal_evidence":state.get("reversal_evidence"),
          "final_15m":state.get("final_15m"),"last_halfway_ai":state.get("last_halfway_ai"),
          "last_checkpoint":state.get("last_checkpoint"),
