@@ -30,6 +30,37 @@ def validate_official_target(official, reference):
         "basis": "60 observed one-second BRTI opening ticks vs official metadata",
         "official_target_authoritative": True,
     }
+    # Audit only observed pre-boundary candle closes; never official ticks.
+    start = finite_positive(ref.get("window_start"))
+    points = ref.get("points")
+    if start is not None and isinstance(points, (list, tuple)):
+        observed = {}
+        for point in points:
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                continue
+            try:
+                epoch = float(point[0])
+            except (TypeError, ValueError, OverflowError):
+                continue
+            price = finite_positive(point[1])
+            if (math.isfinite(epoch) and epoch.is_integer()
+                    and start - 60 <= epoch < start and price is not None):
+                observed[int(epoch)] = price
+        epochs = sorted(observed)
+        if epochs:
+            out["opening_sample_audit"] = {
+                "first_epoch": epochs[0],
+                "last_epoch": epochs[-1],
+                "observed_seconds": len(epochs),
+                "missing_seconds": [t for t in range(int(start)-60, int(start))
+                                    if t not in observed],
+                "first_close_usd": observed[epochs[0]],
+                "last_close_usd": observed[epochs[-1]],
+                "minimum_close_usd": min(observed.values()),
+                "maximum_close_usd": max(observed.values()),
+                "mean_close_usd": round(sum(observed.values()) / len(observed), 4),
+                "basis": "Observed 1s candle closes, not official benchmark ticks",
+            }
     if value is None or opening is None or samples != 60:
         return out
     gap = round(opening - value, 4)
