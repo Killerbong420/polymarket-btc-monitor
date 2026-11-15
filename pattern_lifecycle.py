@@ -10,6 +10,7 @@ a trading result, a calibrated probability, or an executable signal. No backfill
 import hashlib
 import math
 import time
+from formation_precursor import setup_precursor_tables, record_precursor_bar, precursor_stats
 
 VERSION = "pattern-lifecycle-v1"
 OPEN = ("FORMING", "CONFIRMED", "BREAKOUT")
@@ -32,6 +33,7 @@ def setup_tables(execute):
       result TEXT NOT NULL DEFAULT 'PENDING')""")
     execute("CREATE INDEX IF NOT EXISTS pattern_lifecycle_recent ON pattern_lifecycle (first_seen_epoch DESC)")
     execute("CREATE INDEX IF NOT EXISTS pattern_lifecycle_open ON pattern_lifecycle (source,phase,last_bar_epoch)")
+    setup_precursor_tables(execute)
 
 
 def _valid_num(value):
@@ -183,7 +185,8 @@ def _recent(execute, market):
                               else "collecting","cohort_limit":200,
                               "by_pattern":[results[name] for name in _ALLOWED],
                               "definition":"Completed / (completed + invalidated) among the most recent 200 resolved formations. Pending and expired excluded; not prediction win rate or Polymarket settlement."},
-            "note":"Forward-only, completed exchange candles. COMPLETED means price closed at the preset pattern objective after a prior breakout, not a verified Polymarket trade."}
+            "note":"Forward-only, completed exchange candles. COMPLETED means price closed at the preset pattern objective after a prior breakout, not a verified Polymarket trade.",
+            "precursor_horizons":precursor_stats(execute)}
 
 
 def record_completed_bar(execute, market, signal, candle, now=None, *, recovery=False, summarize=True):
@@ -239,6 +242,7 @@ def record_completed_bar(execute, market, signal, candle, now=None, *, recovery=
               trigger_usd,invalidation_usd,objective_usd,initial_fit_pct,result)
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(id) DO NOTHING""", candidate)
+        record_precursor_bar(execute,market,signal,candle,bar_epoch,recovery=recovery)
         return _recent(execute,market) if summarize else {"status":"processed","source":COINBASE_SOURCE}
     except (ValueError,TypeError,OverflowError):
         return {"status":"unavailable","reason":"invalid_candle"}
