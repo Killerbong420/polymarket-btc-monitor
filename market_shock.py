@@ -72,6 +72,31 @@ def measure_market_shock(candles, source="exchange BTC/USD", now_epoch=None):
         return {**missing, "reason": "Invalid exchange candle data"}
 
 
+def _observed_one_minute_impulse(ticks, latest, age, base):
+    """Early warning only: at least 45 authentic ticks around the prior minute."""
+    anchors = [t for t in ticks if abs(t-(latest-60)) <= 8]
+    if not anchors:
+        return None
+    anchor = min(anchors, key=lambda t: abs(t-(latest-60)))
+    times = sorted(t for t in ticks if anchor <= t <= latest)
+    if (len(times) < 45 or len(times)/(latest-anchor+1) < .72 or
+            any(b-a > 12 for a,b in zip(times,times[1:]))):
+        return None
+    change = ticks[latest] - ticks[anchor]
+    pct = 100*change/ticks[anchor]
+    if abs(change) < 250 and abs(pct) < .4:
+        return None
+    return {**base, "status": "available",
+            "kind": "rapid_selloff" if change < 0 else "rapid_rally",
+            "change_usd": round(change,2), "change_pct": round(pct,4),
+            "change_60s_usd": round(change,2),
+            "phase": "early_selloff" if change < 0 else "early_rally",
+            "age_seconds": round(age,1), "lookback_seconds": latest-anchor,
+            "latest_tick_epoch": latest,
+            "basis": "Observed one-minute official index movement",
+            "note": "Early observed price-move warning; not 15-minute settlement prediction, executed sell volume, or trading instruction."}
+
+
 def measure_brti_rapid_move(reference, now_epoch=None):
     """Observe a five-minute BRTI move without waiting for minute candle closes.
 
@@ -107,18 +132,23 @@ def measure_brti_rapid_move(reference, now_epoch=None):
         age = now-latest
         if age < 0 or age > 12:
             return {**base, "reason": "BRTI ticks stale"}
+        early = _observed_one_minute_impulse(ticks, latest, age, base)
         start = latest-300
         anchors = [t for t in ticks if abs(t-start) <= 8]
         if not anchors:
-            return {**base, "reason": "No observed five-minute anchor"}
+            return early if early is not None else {**base, "reason": "No observed five-minute anchor"}
         anchor = min(anchors, key=lambda t: abs(t-start))
         window = sorted(t for t in ticks if anchor <= t <= latest)
         if len(window) < 200 or any(b-a > 12 for a,b in zip(window,window[1:])):
-            return {**base, "reason": "Incomplete five-minute BRTI coverage"}
+            return early if early is not None else {**base, "reason": "Incomplete five-minute BRTI coverage"}
         change = ticks[latest]-ticks[anchor]
         pct = 100*change/ticks[anchor]
         rapid = abs(change) >= 500 or abs(pct) >= .45
         kind = ("rapid_selloff" if change < 0 else "rapid_rally") if rapid else "normal"
+        # A fresh one-minute plunge deserves an early warning even while the
+        # net five-minute change remains below the larger move threshold.
+        if not rapid and early is not None:
+            return early
         short_anchors = [t for t in ticks if abs(t-(latest-60)) <= 8]
         short_change = (ticks[latest]-ticks[min(short_anchors,key=lambda t:abs(t-(latest-60)))]) if short_anchors else None
         phase = "unknown"
@@ -134,6 +164,7 @@ def measure_brti_rapid_move(reference, now_epoch=None):
                 "change_60s_usd": round(short_change, 2) if short_change is not None else None,
                 "phase": phase, "age_seconds": round(age, 1),
                 "lookback_seconds": latest-anchor, "latest_tick_epoch": latest,
+                "basis": "Observed five-minute official index movement",
                 "note": "Observed official BRTI movement only; no inferred future direction, trade, or calibrated probability."}
     except (TypeError, ValueError, OverflowError, ZeroDivisionError):
         return {**base, "reason": "Invalid BRTI observations"}
