@@ -9,7 +9,7 @@ import httpx
 from market_intelligence import intelligence_loop, public_intelligence, public_trade_flow
 from live_trade_stream import stream_loop, coinbase_candle_snapshot
 from coinbase_live_candles import compose_coinbase_candles
-from market_chart_history import record_brti, snapshot as chart_history_snapshot, latest_tip, official_chart_sampler, eligible_tick_market
+from market_chart_history import record_brti, snapshot as chart_history_snapshot, latest_tip, official_chart_sampler, eligible_tick_market, recent_brti_points
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from price_action import analyze_price_action, shadow_price_action
 from doji_watch import anticipate_doji
@@ -1143,7 +1143,9 @@ async def loop():
        "points":[],"status":"unavailable","reason":reference.get("reason","No verified BRTI observations")}
      # A causal, read-only 5m sell-off/rebound watch from fresh official ticks.
      # Independent of the forward 15m settlement forecast and any trade action.
-     rapid_brti=measure_brti_rapid_move(reference,now_epoch=time.time())
+     rapid_now=time.time()
+     rapid_reference={**reference,"points":recent_brti_points(now=rapid_now)}
+     rapid_brti=measure_brti_rapid_move(rapid_reference,now_epoch=rapid_now)
      rapid_brti={**rapid_brti,"market":slug}
      state["brti_rapid_move"]=rapid_brti
      d["brti_rapid_move"]=rapid_brti
