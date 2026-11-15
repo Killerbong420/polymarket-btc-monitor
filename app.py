@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 import httpx
 from market_intelligence import intelligence_loop, public_intelligence, public_trade_flow
-from live_trade_stream import stream_loop, coinbase_candle_snapshot
+from live_trade_stream import stream_loop, coinbase_candle_snapshot, coinbase_latest_price
 from coinbase_live_candles import compose_coinbase_candles
 from market_chart_history import record_brti, snapshot as chart_history_snapshot, latest_tip, official_chart_sampler, eligible_tick_market, recent_brti_points
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
@@ -1709,6 +1709,20 @@ def market_chart_tip():
   return {"status":"unavailable","market":state.get("market"),"points":[],
           "reason":"Verified BRTI round heartbeat unavailable","server_epoch":now}
  return {"market":state.get("market"),**latest_tip(now)}
+
+@app.get("/api/coinbase-formation/live-price")
+def coinbase_formation_live_price():
+ """Lightweight observed Coinbase WebSocket trade for one-second chart polling.
+
+ No external provider calls, no BRTI reference substitution, and no candles
+ are synthesized from sparse trades.
+ """
+ now=time.time()
+ observed=coinbase_latest_price(now)
+ if not observed:
+  return {"status":"stale","source":"Coinbase Exchange BTC-USD",
+          "price":None,"trade_epoch":None,"sampled_at":now}
+ return {"status":"fresh", **observed}
 
 @app.get("/api/coinbase-formation/candles")
 def coinbase_formation_candles():
