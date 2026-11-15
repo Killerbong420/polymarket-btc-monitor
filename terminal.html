@@ -451,9 +451,9 @@ window.btcNoteRequest=function(name,ms,ok){
  }
  const clock=t=>Number.isFinite(Number(t))&&Number(t)>0?new Date(Number(t)*1000).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'—';
  let lastEarlyKey='';
- function drawEarlyWarnings(info){
+ function drawEarlyWarnings(info,forward){
   const list=Array.isArray(info?.by_pattern)?info.by_pattern:[];
-  const key=JSON.stringify(list.map(x=>[x.pattern,x.early_warnings,x.breakouts,x.invalidated_before_breakout,x.avg_lead_seconds]));
+  const key=JSON.stringify([list.map(x=>[x.pattern,x.early_warnings,x.breakouts,x.invalidated_before_breakout,x.avg_lead_seconds]),forward?.horizons]);
   if(key===lastEarlyKey)return;
   lastEarlyKey=key;
   earlyNode.replaceChildren();
@@ -464,6 +464,23 @@ window.btcNoteRequest=function(name,ms,ok){
   note.style.cssText='font-size:11px;margin:4px 0 8px;color:#a4bcd2';
   note.textContent='Coinbase BTC-USD only · first observed before breakout · missing candles/unfinished excluded from rate · not trading wins';
   earlyNode.append(note);
+  const horizons=Array.isArray(forward?.horizons)?forward.horizons:[];
+  const precursorHeading=document.createElement('strong');
+  precursorHeading.textContent='EARLIEST IMPULSE WATCH · FORWARD TEST';
+  precursorHeading.style.cssText='display:block;margin-top:12px';
+  earlyNode.append(precursorHeading);
+  const precursorNote=document.createElement('div');
+  precursorNote.style.cssText='font-size:11px;color:#a4bcd2;margin:4px 0';
+  precursorNote.textContent='Unconfirmed Coinbase impulse, observed before a flag exists. Fixed 5/10/15-minute outcomes, including failures; not breakout or settlement probability.';
+  earlyNode.append(precursorNote);
+  for(const x of horizons){
+   const item=document.createElement('div');
+   item.style.cssText='font-size:12px;padding:4px 0;border-top:1px solid #273a50';
+   item.textContent=x.minutes+'m forward · '+(Number(x.samples)||0)+' measured · '+
+      (x.sample_sufficient===true&&Number.isFinite(x.direction_accuracy_pct)?
+       Number(x.direction_accuracy_pct).toFixed(1)+'% directional agreement':'accuracy withheld until 20 observations');
+   earlyNode.append(item);
+  }
   for(const x of list){
    if(!['DOUBLE_TOP','DOUBLE_BOTTOM','BULL_FLAG','BEAR_FLAG'].includes(x.pattern))continue;
    const div=document.createElement('div');
@@ -548,7 +565,7 @@ window.btcNoteRequest=function(name,ms,ok){
   const rows=Array.isArray(s.pattern_lifecycle?.recent)?s.pattern_lifecycle.recent:[];
   drawHistory(rows);
   drawFollowThrough(s.pattern_lifecycle?.follow_through);
-  drawEarlyWarnings(s.pattern_lifecycle?.early_warning_stats);
+  drawEarlyWarnings(s.pattern_lifecycle?.early_warning_stats,s.pattern_lifecycle?.precursor_horizons);
   const now=Date.now()/1000;
   const doji=dojiContext(s,now),whale=whaleContext(s,now);
   const transport=p.formation_feed==='websocket_verified'?' · LIVE COINBASE WEBSOCKET 1m':
@@ -583,7 +600,16 @@ window.btcNoteRequest=function(name,ms,ok){
     ' · '+(p.source||'Coinbase BTC-USD 1m')+transport+' · rule-based fit score, NOT outcome odds'+doji+whale;
    node.style.borderColor=phase==='BREAKOUT'?'#3b987f':'#d1a65a';
   }else if(live&&p.status==='monitoring'){
-   node.textContent='FORMATION WATCH · Coinbase BTC-USD · scanning flags, double turns, breakouts and retests'+transport+doji+whale;
+   const early=p.precursor;
+   if(early?.status==='precursor'&&['UP','DOWN'].includes(early.bias)){
+    node.textContent='EARLIEST FORMATION WATCH · '+(early.bias==='DOWN'?'▼ DOWN':'▲ UP')+
+      ' · UNCONFIRMED '+(early.phase==='FIRST_PULLBACK'?'first pullback':'strong impulse')+
+      ' · '+Number(early.impulse_minutes)+'m observed impulse · potential trigger '+dollars(early.trigger_usd)+
+      ' · testing 5/10/15m forward outcomes · NOT an established flag'+transport+doji+whale;
+    node.style.borderColor='#d1a65a';
+   }else{
+    node.textContent='FORMATION WATCH · Coinbase BTC-USD · scanning flags, double turns, breakouts and retests'+transport+doji+whale;
+   }
   }else if(s.status==='running'&&p.reason==='coinbase_feed_unavailable'){
    node.textContent='FORMATION WATCH · Coinbase candles temporarily unavailable · watch paused, no Kraken substitution'+doji+whale;
    node.style.borderColor='#b16b73';
@@ -837,12 +863,14 @@ window.btcNoteRequest=function(name,ms,ok){
   const eligible=['DOUBLE_TOP','DOUBLE_BOTTOM','BULL_FLAG','BEAR_FLAG'];
   const rows=Array.isArray(s.pattern_lifecycle?.recent)?s.pattern_lifecycle.recent:[];
   let kind=null,phase='',pattern=null,tracked=null,doji=null;
+  const precursor=live&&p.status==='monitoring'&&p.precursor?.status==='precursor'&&
+    ['UP','DOWN'].includes(p.precursor.bias)?p.precursor:null;
   if(live&&p.status==='watch'&&eligible.includes(p.pattern)){
    kind=p.pattern;pattern=p;
    tracked=rows.find(x=>x.market===s.market&&x.source===p.source&&
      x.pattern===p.pattern&&Number(x.anchor_epoch)===Number(p.anchor_epoch))||null;
    phase=tracked?.phase||(p.phase==='NECKLINE_BREAK_WATCH'||p.phase==='BREAKOUT_WATCH'?'BREAKOUT':p.phase||'FORMING');
-  }else{
+  }else if(!precursor){
    const d=s.doji_watch||{},end=Number(d.candle_end_epoch);
    const fresh=Number.isFinite(stamp)&&now-stamp>=-3&&now-stamp<=15&&
      d.source==='Polymarket US BTC reference / BRTI';
@@ -853,14 +881,25 @@ window.btcNoteRequest=function(name,ms,ok){
    }
   }
   const invalid=phase==='INVALIDATED',inactive=invalid||phase==='EXPIRED';
-  const dir=kind==='DOUBLE_TOP'||kind==='BEAR_FLAG'?'bear':
-            kind==='DOUBLE_BOTTOM'||kind==='BULL_FLAG'?'bull':'neutral';
+  const dir=kind==='DOUBLE_TOP'||kind==='BEAR_FLAG'||precursor?.bias==='DOWN'?'bear':
+            kind==='DOUBLE_BOTTOM'||kind==='BULL_FLAG'||precursor?.bias==='UP'?'bull':'neutral';
   card.dataset.bias=inactive?'neutral':dir;
   let source='Coinbase BTC-USD',status='● SCANNING',title='AWAITING COINBASE FORMATION';
   let call='WATCH ONLY · NO SIGNAL',note='Waiting for a fresh Coinbase formation. Example chart only.';
   let explanation='Waiting for a fresh completed Coinbase BTC-USD candle and an identifiable formation.';
   let trigger='—',invalidation='—',objective='—',phaseText='SCANNING · NO ACTIVE CALL';
-  if(kind==='DOJI'){
+  if(precursor){
+   title=(precursor.bias==='UP'?'EARLY BULLISH':'EARLY BEARISH')+' SETUP · UNCONFIRMED';
+   phaseText=(precursor.phase==='FIRST_PULLBACK'?'FIRST PULLBACK':'STRONG IMPULSE')+' · COINBASE 1m';
+   status='● EARLY OBSERVATION';
+   call=(precursor.bias==='UP'?'▲ UPSIDE':'▼ DOWNSIDE')+' POSSIBILITY · NO BREAKOUT';
+   trigger=money(precursor.trigger_usd);
+   invalidation=money(precursor.invalidation_usd);
+   explanation='A strong '+Number(precursor.impulse_minutes)+'-minute Coinbase impulse has been observed'+
+     (precursor.phase==='FIRST_PULLBACK'?' with an initial countertrend close.':' before a qualifying flag pullback.')+
+     ' This is a preliminary watch, not a confirmed chart formation. Future 5/10/15-minute moves are measured separately.';
+   note='Example of a possible continuation shape, not the current live chart or a confirmed flag. No calibrated prediction probability.';
+  }else if(kind==='DOJI'){
    title=(String(doji.pattern||'DOJI').replaceAll('_',' '))+' · '+phase;
    call='◇ INDECISION · WATCH ONLY';source='OFFICIAL BRTI · DOJI';
    phaseText=phase;status='● '+phase;
@@ -885,7 +924,7 @@ window.btcNoteRequest=function(name,ms,ok){
   }
   el('formationGuideSource').textContent=source;
   const badge=el('formationGuideStatus');badge.textContent=status;
-  badge.className='formation-chip '+(kind&&!invalid?'live':'paused');
+  badge.className='formation-chip '+((kind||precursor)&&!invalid?'live':'paused');
   el('formationGuideTitle').textContent=title;
   el('formationGuidePhase').textContent=phaseText;
   el('formationGuideCall').textContent=call;
@@ -895,7 +934,7 @@ window.btcNoteRequest=function(name,ms,ok){
   el('formationGuideExplanation').textContent=explanation;
   el('formationGuideNote').textContent=note+
    ' Levels are exchange observations, not official Polymarket settlement prices.';
-  const shapeKind=invalid?'INVALIDATED':kind||'DOUBLE_TOP';
+  const shapeKind=invalid?'INVALIDATED':kind||precursor?.hint||'DOUBLE_TOP';
   if(lastKey!==shapeKind){
    shape(el('formationGuideChart'),shapeKind,false);
    lastKey=shapeKind;
