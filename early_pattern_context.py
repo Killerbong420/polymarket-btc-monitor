@@ -14,22 +14,24 @@ def _mean(values):
     return sum(values) / len(values)
 
 
-def _flag_candidate(bars, offset, atr):
-    """Five-candle directional pole followed by four smaller counter-move candles.
+def _flag_candidate(bars, offset, atr, pole_bars=5, consolidation_bars=4):
+    """Completed 3–6-candle pole and 2–4-candle counter-move flag.
 
     offset=0: developing flag includes latest completed candle.
     offset=1: the latest bar can test an *already formed* flag boundary.
     offset=2: two latest bars can show a breakout then a retest.
     """
-    end = len(bars) - 5 - offset
-    start = end - 5
+    end = len(bars) - 1 - consolidation_bars - offset
+    start = end - pole_bars
+    if start < 0:
+        return None
     pole = bars[end][4] - bars[start][4]
     size = abs(pole)
     if size < max(2.0 * atr, bars[-1][4] * .00045):
         return None
     direction = 1 if pole > 0 else -1
-    tail = bars[end + 1:end + 5]
-    if len(tail) != 4:
+    tail = bars[end + 1:end + 1 + consolidation_bars]
+    if len(tail) != consolidation_bars:
         return None
     end_price = bars[end][4]
     tail_high = max(b[2] for b in tail)
@@ -63,6 +65,8 @@ def _flag_candidate(bars, offset, atr):
             "invalidation": invalidation, "pole_usd": round(size, 2),
             "retracement_pct": round(100*retreat, 1),
             "pattern_match_score_pct": min(95, max(0, score)),
+            "pole_candles": pole_bars,
+            "consolidation_candles": consolidation_bars,
             "score_basis": "heuristic_geometry_v1"}
 
 
@@ -156,47 +160,51 @@ def analyze_early_patterns(candles, source="exchange BTC/USD"):
             return {**base,"reason":"invalid_volatility"}
         close = bars[-1][4]
         # Retest > breakout > forming. All three use exclusively completed bars.
-        for offset in (2,1,0):
-            pattern = _flag_candidate(bars,offset,atr)
-            if not pattern:
-                continue
-            sign = pattern.pop("direction_sign")
-            trigger = pattern.pop("trigger")
-            invalidation = pattern.pop("invalidation")
-            result = {**base, "status":"watch", **pattern,
-                      "trigger_usd":round(trigger,2),
-                      "invalidation_usd":round(invalidation,2),
-                      "last_completed_epoch":bars[-1][0]+60,
-                      "candle_age_seconds":None}
-            if offset == 2:
-                breakout = bars[-2]
-                last = bars[-1]
-                if sign*(breakout[4]-trigger) > 0:
-                    if sign*(last[4]-invalidation) <= 0:
+        # Keep the established five/four-candle rule highest priority, but
+        # fast crash flags may consolidate for only two or three completed
+        # minutes. All candidates remain strictly causal and Coinbase-only.
+        for pole_bars, consolidation_bars in ((5,4),(5,3),(4,3),(4,2),(3,3),(3,2),(6,4),(6,3)):
+            for offset in (2,1,0):
+                pattern = _flag_candidate(bars,offset,atr,pole_bars,consolidation_bars)
+                if not pattern:
+                    continue
+                sign = pattern.pop("direction_sign")
+                trigger = pattern.pop("trigger")
+                invalidation = pattern.pop("invalidation")
+                result = {**base, "status":"watch", **pattern,
+                          "trigger_usd":round(trigger,2),
+                          "invalidation_usd":round(invalidation,2),
+                          "last_completed_epoch":bars[-1][0]+60,
+                          "candle_age_seconds":None}
+                if offset == 2:
+                    breakout = bars[-2]
+                    last = bars[-1]
+                    if sign*(breakout[4]-trigger) > 0:
+                        if sign*(last[4]-invalidation) <= 0:
+                            result["phase"] = "INVALIDATED"
+                            result["pattern_match_score_pct"] = None
+                        elif ((last[1] if sign>0 else last[2])*sign <= sign*(trigger+.25*sign*atr)
+                              and sign*(last[4]-trigger) >= 0):
+                            result["phase"] = "RETEST_HELD"
+                            result["pattern_match_score_pct"] = min(95, result["pattern_match_score_pct"] + 4)
+                        else:
+                            continue
+                        return result
+                if offset == 1:
+                    if sign*(close-invalidation) <= 0:
                         result["phase"] = "INVALIDATED"
                         result["pattern_match_score_pct"] = None
-                    elif ((last[1] if sign>0 else last[2])*sign <= sign*(trigger+.25*sign*atr)
-                          and sign*(last[4]-trigger) >= 0):
-                        result["phase"] = "RETEST_HELD"
-                        result["pattern_match_score_pct"] = min(95, result["pattern_match_score_pct"] + 4)
-                    else:
-                        continue
+                        return result
+                    if sign*(close-trigger) > 0:
+                        baseline = _mean([b[5] for b in bars[-16:-1]])
+                        result["phase"] = "BREAKOUT_WATCH"
+                        result["volume_confirmed"] = bool(baseline > 0 and bars[-1][5] >= baseline)
+                        result["pattern_match_score_pct"] = min(95, max(0,
+                            result["pattern_match_score_pct"] + (5 if result["volume_confirmed"] else -8)))
+                        return result
+                if offset == 0:
+                    result["phase"] = "FORMING"
                     return result
-            if offset == 1:
-                if sign*(close-invalidation) <= 0:
-                    result["phase"] = "INVALIDATED"
-                    result["pattern_match_score_pct"] = None
-                    return result
-                if sign*(close-trigger) > 0:
-                    baseline = _mean([b[5] for b in bars[-16:-1]])
-                    result["phase"] = "BREAKOUT_WATCH"
-                    result["volume_confirmed"] = bool(baseline > 0 and bars[-1][5] >= baseline)
-                    result["pattern_match_score_pct"] = min(95, max(0,
-                        result["pattern_match_score_pct"] + (5 if result["volume_confirmed"] else -8)))
-                    return result
-            if offset == 0:
-                result["phase"] = "FORMING"
-                return result
         double = _double_turn(bars,atr)
         if double:
             return {**base, **double, "last_completed_epoch":bars[-1][0]+60}
