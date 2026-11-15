@@ -1887,8 +1887,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  if(!canvas||!label)return;
  let data=null,lastFetch=0,busy=false,requestMarket='';
  const valid=n=>typeof n==='number'&&Number.isFinite(n);
- const money=n=>'</html>
-+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+ const money=n=>String.fromCharCode(36)+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
  function draw(){
   if(document.hidden)return;
   const status=window.btcServerStatus||{},p=status.external?.early_patterns||{},now=Date.now()/1000;
