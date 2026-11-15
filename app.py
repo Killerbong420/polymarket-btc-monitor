@@ -1709,6 +1709,42 @@ def market_chart_tip():
           "reason":"Verified BRTI round heartbeat unavailable","server_epoch":now}
  return {"market":state.get("market"),**latest_tip(now)}
 
+@app.get("/api/coinbase-formation/candles")
+def coinbase_formation_candles():
+ """Return verified, completed Coinbase BTC-USD 1m OHLCV from existing cache.
+
+ This endpoint never polls Coinbase, synthesizes candles, or alters BRTI.
+ """
+ now=time.time()
+ combined=compose_coinbase_candles(
+     _coinbase_formation_cache.get("candles"),coinbase_candle_snapshot(now),now)
+ if combined.get("status")!="available":
+  return {"status":"unavailable","source":"Coinbase Exchange BTC-USD",
+          "reason":combined.get("reason","verified_candles_unavailable"),
+          "sampled_at":now,"candles":[]}
+ candles=[]
+ for raw in combined.get("candles",[])[-50:]:
+  try:
+   t,low,high,opening,close,volume=(float(x) for x in raw[:6])
+   if (not all(math.isfinite(x) for x in (t,low,high,opening,close,volume))
+       or t!=int(t) or int(t)%60 or t+60>now
+       or low<=0 or low>min(opening,close) or high<max(opening,close)
+       or volume<=0):
+    return {"status":"unavailable","reason":"invalid_verified_coinbase_candle",
+            "sampled_at":now,"candles":[]}
+   candles.append([int(t),opening,high,low,close,volume])
+  except (TypeError,ValueError,IndexError,OverflowError):
+   return {"status":"unavailable","reason":"bad_verified_coinbase_candle",
+           "sampled_at":now,"candles":[]}
+ if len(candles)<12 or any(b[0]-a[0]!=60 for a,b in zip(candles,candles[1:])):
+  return {"status":"unavailable","reason":"insufficient_contiguous_coinbase_candles",
+          "sampled_at":now,"candles":[]}
+ return {"status":"available","source":"Coinbase Exchange BTC-USD",
+         "timeframe":"1m_completed","sampled_at":now,
+         "last_completed_epoch":combined.get("last_completed_epoch"),
+         "candle_age_seconds":combined.get("candle_age_seconds"),
+         "candles":candles}
+
 @app.get("/api/market-chart/history")
 def market_chart_history(range: str = Query(default="round")):
  """Bounded read-only BRTI ticks and historical exchange observations, no extra provider polls."""
