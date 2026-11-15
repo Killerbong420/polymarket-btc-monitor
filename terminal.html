@@ -1952,6 +1952,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
    if(patternChip)patternChip.textContent='Formation: —';
    if(biasChip)biasChip.textContent='Direction: —';
    if(targetChip)targetChip.textContent='Target: —';
+   if(liveChip){liveChip.textContent='Live Coinbase: waiting for candles';liveChip.style.color='#a8bdd0';}
    ctx.font='13px system-ui';ctx.fillStyle='#b6cbdc';
    ctx.fillText('Waiting for verified Coinbase candles',14,height/2);
    return;
