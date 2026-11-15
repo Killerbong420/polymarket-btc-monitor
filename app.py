@@ -9,7 +9,7 @@ import httpx
 from market_intelligence import intelligence_loop, public_intelligence, public_trade_flow
 from live_trade_stream import stream_loop, coinbase_candle_snapshot
 from coinbase_live_candles import compose_coinbase_candles
-from market_chart_history import record_brti, snapshot as chart_history_snapshot, latest_tip, official_chart_sampler, eligible_tick_market
+from market_chart_history import record_brti, snapshot as chart_history_snapshot, latest_tip, official_chart_sampler, eligible_tick_market, recent_brti_points
 from research import VERSION, CHECKPOINTS, checkpoint_plan, reference_prices, target_behavior, market_quote, entry_cost, summarize, number, market_start, confluence_forecast
 from price_action import analyze_price_action, shadow_price_action
 from doji_watch import anticipate_doji
@@ -21,7 +21,7 @@ from brti_volatility_shadow import brti_volatility_shadow, evaluate_shadow
 from minute_research import minute_observation, book_freshness, evaluate_minutes
 from forecast_audit import summarize_forecast_audit
 from forecast_guard import anchored_shadow_forecast, validate_official_target
-from market_shock import measure_market_shock
+from market_shock import measure_market_shock, measure_brti_rapid_move
 from decision_engine import reversal_evidence, guarded_decision, manual_entry_review
 from forward_eval import evaluate_guarded
 from round_tiles import report as recent_round_tiles
@@ -1141,6 +1141,14 @@ async def loop():
        "observed_epoch":time.time()}
      else:state["brti_chart"]={"market":slug,"source":"Polymarket US reference API",
        "points":[],"status":"unavailable","reason":reference.get("reason","No verified BRTI observations")}
+     # A causal, read-only 5m sell-off/rebound watch from fresh official ticks.
+     # Independent of the forward 15m settlement forecast and any trade action.
+     rapid_now=time.time()
+     rapid_reference={**reference,"points":recent_brti_points(now=rapid_now)}
+     rapid_brti=measure_brti_rapid_move(rapid_reference,now_epoch=rapid_now)
+     rapid_brti={**rapid_brti,"market":slug}
+     state["brti_rapid_move"]=rapid_brti
+     d["brti_rapid_move"]=rapid_brti
      ref_public={k:v for k,v in reference.items() if k!="points"}
      # Read-only, preclose Doji watch; neither a settlement forecast nor a probability.
      d["doji_watch"]=anticipate_doji(reference,now=time.time())
@@ -1222,6 +1230,7 @@ async def loop():
      state.update(status="market unavailable",signal="WAIT",flip=flip,market=None,external=d,updated=now,error="No verified Polymarket US 15-minute market: "+str(reason15))
      state["final_15m"]={"market":None,"lookup":reason15,"trigger_seconds":450}
      state["doji_watch"]={"status":"unavailable","reason":"market_unavailable"}
+     state["brti_rapid_move"]={"status":"unavailable","kind":"unavailable","reason":"market_unavailable"}
      state.update(reference_price={"status":"unavailable"},target_behavior={"status":"unavailable"},market_quote={"status":"unavailable"},settlement_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},quick_forecast={"status":"unavailable","reason":"No verified 15-minute contract"},guarded_primary={"status":"unavailable","direction":"WAIT"},manual_entry_review={"status":"unavailable"},reversal_evidence={"status":"unavailable"},missed_checkpoints=[],market_quote_guard={"status":"unavailable","reason":"market_unavailable"},minute_research_latest={"status":"unavailable","reason":"market_unavailable"})
      state["ai_disabled"]=True
     state["feed_health"]={"status":"FRESH" if d.get("price") is not None else "UNAVAILABLE","source":d.get("source"),"age_seconds":d.get("candle_age_seconds"),"error":d.get("feed_error"),"coinbase_formation":d.get("coinbase_feed_health") or {"status":"fresh" if d.get("source")=="Coinbase Exchange BTC-USD" else "unavailable"}}
@@ -1802,6 +1811,7 @@ def lightweight_live():
          "error":state.get("error"),"external":state.get("external") or {},
          "brti_chart":state.get("brti_chart"),"reference_price":state.get("reference_price"),
          "target_behavior":state.get("target_behavior"),"settlement_forecast":state.get("settlement_forecast"),"quick_forecast":state.get("quick_forecast"),
+         "brti_rapid_move":state.get("brti_rapid_move"),
          "guarded_primary":state.get("guarded_primary"),"last_guarded_primary":state.get("last_guarded_primary"),
          "manual_entry_review":state.get("manual_entry_review"),"reversal_evidence":state.get("reversal_evidence"),
          "final_15m":state.get("final_15m"),"last_halfway_ai":state.get("last_halfway_ai"),

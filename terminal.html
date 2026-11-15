@@ -1375,6 +1375,12 @@ function renderMarketShock(d,online,validCandles){
  const get=id=>document.getElementById(id),panel=get('marketShockPanel');
  if(!panel)return;
  const shock=d.external?.market_shock||{};
+ const rapid=d.brti_rapid_move||{};
+ const rapidValid=online&&rapid.market===d.market&&rapid.status==='available'&&
+   Number.isFinite(rapid.change_usd)&&Number.isFinite(rapid.change_pct)&&
+   Number.isFinite(rapid.age_seconds)&&rapid.age_seconds<=12;
+ const rapidCrash=rapidValid&&rapid.kind==='rapid_selloff';
+ const rapidRally=rapidValid&&rapid.kind==='rapid_rally';
  const valid=online&&validCandles&&shock.status==='available'&&
   ['normal','elevated','shock'].includes(shock.level)&&
   Number.isFinite(shock.volume_multiple)&&Number.isFinite(shock.movement_multiple)&&
@@ -1382,6 +1388,20 @@ function renderMarketShock(d,online,validCandles){
  panel.dataset.level=valid?shock.level:'unavailable';
  const status=get('marketShockStatus'),headline=get('marketShockHeadline'),
        details=get('marketShockDetails'),source=get('marketShockSource');
+ if(rapidCrash||rapidRally){
+  const usd=Number(rapid.change_usd),short=rapid.change_60s_usd==null?NaN:Number(rapid.change_60s_usd);
+  panel.dataset.level='shock';
+  status.textContent=rapidCrash?'BRTI 5M DROP':'BRTI 5M RALLY';
+  headline.textContent=(rapidCrash?'⚡ RAPID BRTI SELL-OFF · ':'⚡ RAPID BRTI RALLY · ')+
+    (usd<0?'−':'+')+'$'+Math.abs(usd).toLocaleString('en-US',{maximumFractionDigits:0});
+  headline.className='value '+(rapidCrash?'down':'up');
+  details.textContent='Observed 5m '+Number(rapid.change_pct).toFixed(3)+'%'+
+    (Number.isFinite(short)?' · last 60s '+(short<0?'−':'+')+'$'+Math.abs(short).toFixed(0):'')+
+    ' · '+String(rapid.phase||'unknown').replaceAll('_',' ');
+  source.textContent='Official Polymarket BRTI · '+Math.round(rapid.age_seconds)+
+    's old · Observed movement, not a future 15m prediction or trading instruction.';
+  return;
+ }
  if(!valid){
   status.textContent=online?'DATA UNAVAILABLE':'SERVER STALE';
   headline.textContent='MARKET SHOCK · UNAVAILABLE';
@@ -1393,11 +1413,14 @@ function renderMarketShock(d,online,validCandles){
  const volume=shock.volume_multiple.toFixed(2),movement=shock.movement_multiple.toFixed(2),
        change=Number(shock.net_5m_change_pct);
  status.textContent=shock.level.toUpperCase();
- headline.textContent=shock.level==='shock'?'⚡ MARKET SHOCK DETECTED':
+ headline.textContent=shock.rapid_move&&shock.direction==='DOWN'?'⚡ BTC 5M SELL-OFF':
+  shock.rapid_move&&shock.direction==='UP'?'⚡ BTC 5M RALLY':
+  shock.level==='shock'?'⚡ MARKET SHOCK DETECTED':
   shock.level==='elevated'?'⚠ ELEVATED ACTIVITY':'✓ NORMAL MARKET ACTIVITY';
  headline.className='value '+(shock.level==='normal'?'up':'wait');
  details.textContent='Volume '+volume+'× typical · BTC movement '+movement+'× typical'+
-  (Number.isFinite(change)?' · 5m change '+(change>=0?'+':'')+change.toFixed(3)+'%':'');
+  (Number.isFinite(shock.net_5m_change_usd)?' · 5m '+(shock.net_5m_change_usd<0?'−':'+')+'$'+Math.abs(shock.net_5m_change_usd).toFixed(0):'')+
+  (Number.isFinite(change)?' ('+(change>=0?'+':'')+change.toFixed(3)+'%)':'');
  source.textContent=(shock.source||'Exchange BTC/USD')+' · latest 5 completed minutes vs preceding 20'+
   ' · sample '+Math.round(shock.sample_age_seconds)+'s old · Non-predictive warning; no changes to trading or forecasts.';
 }
