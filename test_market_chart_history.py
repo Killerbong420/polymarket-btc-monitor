@@ -29,6 +29,17 @@ class ChartHistoryTest(unittest.TestCase):
   stale=chart.snapshot("round",round_start=11100,now=12035)
   self.assertEqual(stale["status"],"stale")
 
+ def test_recent_unthinned_ticks_cross_round_boundaries(self):
+  now=12000
+  ticks=[[t,100000-(t-11700)] for t in range(11700,12001)]
+  chart.record_brti(ticks[:201],"Polymarket US BTC reference / BRTI",now=11900)
+  chart.record_brti(ticks[201:],"Polymarket US BTC reference / BRTI",now=now)
+  recent=chart.recent_brti_points(now=now)
+  self.assertEqual(len(recent),301)
+  self.assertEqual(recent[0][0],11700)
+  self.assertEqual(recent[-1][0],12000)
+  self.assertEqual(chart.recent_brti_points(seconds=60,now=now)[0][0],11940)
+
  def test_exchange_prices_are_usd_only_and_outliers_excluded(self):
   now=12000.0
   good={"status":"available","exchanges":[
