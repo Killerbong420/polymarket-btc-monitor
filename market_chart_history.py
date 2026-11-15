@@ -116,6 +116,18 @@ def today_observed_extrema(now=None):
           'first_epoch':row['first_epoch'],'last_epoch':row['last_epoch'],
           'coverage':'since_server_observation'}
 
+def recent_brti_points(seconds=330, now=None):
+ """Exact observed index ticks across round boundaries, without thinning.
+
+ A restart yields partial coverage until enough real observations accumulate.
+ The returned copy is bounded and contains no inferred or gap-filled prices.
+ """
+ now=time.time() if now is None else float(now)
+ seconds=max(1,min(3600,int(seconds)))
+ with _lock:
+  return sorted((t,p) for t,p in _brti.items() if now-seconds<=t<=now)
+
+
 def latest_tip(now=None):
  """Return a tiny snapshot of observed index ticks; no invented intervening prices."""
  now=time.time() if now is None else now
