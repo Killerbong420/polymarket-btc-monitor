@@ -210,10 +210,10 @@ class PatternLifecycleTests(unittest.TestCase):
     def test_early_warning_panel_is_read_only(self):
         html=(Path(__file__).resolve().parent/"terminal.html").read_text(encoding="utf-8")
         self.assertIn('id="formationEarlyWarning"',html)
-        self.assertIn("drawEarlyWarnings(s.pattern_lifecycle?.early_warning_stats)",html)
+        self.assertIn("drawEarlyWarnings(s.pattern_lifecycle?.early_warning_stats,s.pattern_lifecycle?.precursor_horizons)",html)
         self.assertIn("n+fail>=10",html)
         self.assertIn("avg_lead_seconds",html)
-        part=html.split("function drawEarlyWarnings(info)",1)[1].split("function drawFollowThrough(info)",1)[0]
+        part=html.split("function drawEarlyWarnings(info,forward)",1)[1].split("function drawFollowThrough(info)",1)[0]
         self.assertNotIn("fetch(",part)
         self.assertNotIn("meterDownPct",part)
 

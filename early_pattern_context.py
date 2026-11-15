@@ -6,6 +6,7 @@ already-observed candles; no future bars, settlement probabilities or order call
 No Sonar feed or Sonar proprietary logic is involved.
 """
 import math
+from formation_precursor import detect_precursor
 
 VERSION = "independent-pattern-map-v3"
 
@@ -208,7 +209,9 @@ def analyze_early_patterns(candles, source="exchange BTC/USD"):
         double = _double_turn(bars,atr)
         if double:
             return {**base, **double, "last_completed_epoch":bars[-1][0]+60}
+        precursor=detect_precursor(bars,atr)
         return {**base, "status":"monitoring", "reason":"no_eligible_setup",
-                "last_completed_epoch":bars[-1][0]+60}
+                "last_completed_epoch":bars[-1][0]+60,
+                **({"precursor":precursor} if precursor else {})}
     except (TypeError, ValueError, IndexError, OverflowError):
         return {**base,"reason":"invalid_candles"}
