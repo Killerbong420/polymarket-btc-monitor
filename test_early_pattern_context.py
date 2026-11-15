@@ -110,6 +110,67 @@ class EarlyPatternContextTests(unittest.TestCase):
         self.assertEqual(result["pattern"], "DOUBLE_BOTTOM")
         self.assertEqual(result["phase"], "FORMING")
 
+
+    def test_fast_bear_flag_detected_after_short_consolidation(self):
+        """An abrupt dump followed by 2-3 observed rising bars is not a no-setup."""
+        for pole_length, flag_length in ((4,3),(3,2),(5,3)):
+            with self.subTest(pole_length=pole_length, flag_length=flag_length):
+                closes = [64000 + math.sin(i/2)*2 for i in range(35)]
+                start = closes[-1]
+                closes += [start - (360.0/pole_length)*i
+                           for i in range(1,pole_length+1)]
+                floor = closes[-1]
+                closes += [floor + 28*i for i in range(1,flag_length+1)]
+                bars=[]
+                for i,p in enumerate(closes):
+                    previous = closes[i-1] if i else p
+                    bars.append([1800000000+i*60, min(previous,p)-1,
+                                 max(previous,p)+1,previous,p,10])
+                original = [row.copy() for row in bars]
+                forming = analyze_early_patterns(bars)
+                self.assertEqual(forming["status"], "watch", forming)
+                self.assertEqual(forming["pattern"], "BEAR_FLAG", forming)
+                self.assertEqual(forming["phase"], "FORMING", forming)
+                self.assertLessEqual(forming["consolidation_candles"], 3)
+                self.assertEqual(original,bars)
+
+                breakdown = floor - 35
+                bars.append([bars[-1][0]+60,breakdown-2,
+                             bars[-1][4]+1,bars[-1][4],breakdown,25])
+                confirmed = analyze_early_patterns(bars)
+                self.assertEqual(confirmed["status"], "watch", confirmed)
+                self.assertEqual(confirmed["pattern"], "BEAR_FLAG", confirmed)
+                self.assertEqual(confirmed["phase"], "BREAKOUT_WATCH", confirmed)
+                self.assertEqual(confirmed["bias"], "DOWN")
+                self.assertTrue(confirmed["volume_confirmed"])
+
+    def test_fast_bull_flag_mirror_and_one_directional_slide(self):
+        closes = [64000 + math.sin(i/2)*2 for i in range(35)]
+        start=closes[-1]
+        closes += [start + 90*i for i in range(1,5)]
+        ceiling=closes[-1]
+        closes += [ceiling-28*i for i in range(1,4)]
+        bars=[]
+        for i,p in enumerate(closes):
+            previous = closes[i-1] if i else p
+            bars.append([1800000000+i*60,min(previous,p)-1,
+                         max(previous,p)+1,previous,p,10])
+        bull=analyze_early_patterns(bars)
+        self.assertEqual(bull["pattern"],"BULL_FLAG")
+        self.assertEqual(bull["phase"],"FORMING")
+
+        # A continuous dump is not itself a bear flag without countertrend
+        # consolidation; this guards against relabelling every crash.
+        continuous=[64000+math.sin(i/2)*2 for i in range(35)]
+        continuous += [continuous[-1]-60*i for i in range(1,10)]
+        bars=[]
+        for i,p in enumerate(continuous):
+            previous=continuous[i-1] if i else p
+            bars.append([1800000000+i*60,min(previous,p)-1,
+                         max(previous,p)+1,previous,p,10])
+        ongoing=analyze_early_patterns(bars)
+        self.assertNotEqual(ongoing.get("pattern"),"BEAR_FLAG",ongoing)
+
     def test_missing_stale_and_malformed_candles_are_unavailable(self):
         bars=make_bars()
         self.assertEqual(analyze_early_patterns(bars[:20])["status"],"unavailable")
