@@ -1,7 +1,7 @@
 """Regression checks for the observed, non-predictive market-shock card."""
 import unittest
 
-from market_shock import measure_market_shock
+from market_shock import measure_market_shock, observe_flash_move
 
 
 START = 1_700_000_040  # exact minute boundary
@@ -67,6 +67,73 @@ class MarketShockTests(unittest.TestCase):
     def test_no_volume_baseline_unavailable(self):
         got = measure_market_shock(bars(volumes=[0.0]*36), now_epoch=NOW)
         self.assertEqual(got["level"], "unavailable")
+
+
+class FlashMoveTests(unittest.TestCase):
+    SOURCE = "Polymarket US BTC reference / BRTI"
+
+    @staticmethod
+    def reference(prices, start=1_700_000_000, remove=()):
+        return {
+            "status": "fresh", "source": FlashMoveTests.SOURCE,
+            "points": [(start + i, price) for i, price in enumerate(prices) if i not in remove],
+        }
+
+    def test_detects_500_selloff_without_waiting_for_completed_candles(self):
+        prices = [65000 - 2*i for i in range(330)]
+        r = self.reference(prices)
+        alert = observe_flash_move(r, 1_700_000_329)
+        self.assertEqual(alert["status"], "available")
+        self.assertEqual(alert["level"], "flash_selloff")
+        self.assertEqual(alert["direction"], "DOWN")
+        self.assertGreaterEqual(alert["five_minute_drawdown_usd"], 500)
+        self.assertEqual(alert["source"], self.SOURCE)
+
+    def test_warns_on_one_minute_drop_before_five_minute_threshold(self):
+        prices = [64000]*260 + [64000 - 5*i for i in range(61)]
+        alert = observe_flash_move(self.reference(prices), 1_700_000_320)
+        self.assertEqual(alert["level"], "rapid_selloff")
+        self.assertEqual(alert["last_60s_change_usd"], -300.0)
+        self.assertLess(alert["five_minute_drawdown_usd"], 500)
+
+    def test_detects_rally_without_mislabelling_as_selling(self):
+        prices = [64000 + 2*i for i in range(330)]
+        alert = observe_flash_move(self.reference(prices), 1_700_000_329)
+        self.assertEqual(alert["level"], "flash_rally")
+        self.assertEqual(alert["direction"], "UP")
+
+    def test_old_selloff_then_newer_rebound_does_not_claim_current_downtrend(self):
+        prices = [65000 - 5*i for i in range(120)] + [64405 + 6*i for i in range(110)]
+        alert = observe_flash_move(self.reference(prices), 1_700_000_229)
+        self.assertEqual(alert["level"], "flash_rally")
+
+    def test_normal_small_changes(self):
+        prices = [64000 + .1*i for i in range(320)]
+        alert = observe_flash_move(self.reference(prices), 1_700_000_319)
+        self.assertEqual(alert["level"], "normal")
+        self.assertIsNone(alert["direction"])
+
+    def test_stale_or_wrong_source_is_unavailable(self):
+        r = self.reference([64000 - 5*i for i in range(120)])
+        self.assertEqual(observe_flash_move(r, 1_700_000_200)["level"], "unavailable")
+        r["source"] = "Coinbase BTC-USD"
+        self.assertEqual(observe_flash_move(r, 1_700_000_119)["level"], "unavailable")
+
+    def test_missing_ticks_does_not_fabricate_big_move(self):
+        prices = [65000 - 5*i for i in range(320)]
+        r = self.reference(prices, remove=set(range(95, 180)))
+        alert = observe_flash_move(r, 1_700_000_319)
+        self.assertEqual(alert["status"], "unavailable")
+
+    def test_too_few_ticks_is_unavailable(self):
+        prices = [64000 - 10*i for i in range(20)]
+        self.assertEqual(observe_flash_move(self.reference(prices), 1_700_000_019)["status"], "unavailable")
+
+    def test_does_not_depend_on_official_target_validation(self):
+        r = self.reference([65000 - 2*i for i in range(330)])
+        r["opening_average"] = 64500
+        r["opening_average_samples"] = 60
+        self.assertEqual(observe_flash_move(r, 1_700_000_329)["level"], "flash_selloff")
 
 
 if __name__ == "__main__":
