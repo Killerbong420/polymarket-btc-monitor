@@ -1352,7 +1352,7 @@ async def database_setup_worker(retry_seconds=15):
 def _ws_diagnostic_market():
  """Recent verified market only; never invent a slug or bypass official validation."""
  active=state.get("market")
- if isinstance(active,str) and active.startswith("btc-updown-"):
+ if isinstance(active,str) and active.startswith(("btc-updown-", "cpc-btc-updown-")):
   return active
  cached=state.get("ws_diagnostic_last_market") or {}
  now=time.time()
