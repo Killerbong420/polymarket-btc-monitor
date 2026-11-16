@@ -1348,6 +1348,15 @@ async def database_setup_worker(retry_seconds=15):
   await asyncio.sleep(retry_seconds)
 
 
+async def _polymarket_ws_diagnostic_retry():
+ """Wait for the active market without blocking startup; stop after first real test."""
+ while True:
+  await polymarket_ws_diagnostic_once(lambda: state.get("market"), wait_seconds=60)
+  if polymarket_ws_diagnostic_snapshot().get("reason") != "market_unavailable":
+   return
+  await asyncio.sleep(15)
+
+
 @asynccontextmanager
 async def lifespan(app):
  database_task=asyncio.create_task(database_setup_worker())
@@ -1362,7 +1371,7 @@ async def lifespan(app):
  # Seven-day 672-market historical backfill disabled on live service.
  # Live BRTI, official 15m settlement grading, and pattern history are separate.
  diagnostics_task=asyncio.create_task(read_only_diagnostics_loop())
- polymarket_ws_test_task=asyncio.create_task(polymarket_ws_diagnostic_once(lambda: state.get('market')))
+ polymarket_ws_test_task=asyncio.create_task(_polymarket_ws_diagnostic_retry())
  yield
  task.cancel()
  database_task.cancel()
