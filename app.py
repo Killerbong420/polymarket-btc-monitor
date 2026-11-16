@@ -31,6 +31,7 @@ from checkpoint_scoreboard import build_scoreboard
 from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade as grade_quick_call, summarize as summarize_quick_calls
 from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history, diagnostic_extras
+from polymarket_ws_diagnostic import run_once as polymarket_ws_diagnostic_once, snapshot as polymarket_ws_diagnostic_snapshot
 from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 import paper_trader as paper
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
@@ -1361,23 +1362,30 @@ async def lifespan(app):
  # Seven-day 672-market historical backfill disabled on live service.
  # Live BRTI, official 15m settlement grading, and pattern history are separate.
  diagnostics_task=asyncio.create_task(read_only_diagnostics_loop())
+ polymarket_ws_test_task=asyncio.create_task(polymarket_ws_diagnostic_once(lambda: state.get('market')))
  yield
  task.cancel()
  database_task.cancel()
  status_history_task.cancel()
  checkpoint_task.cancel()
  diagnostics_task.cancel()
+ polymarket_ws_test_task.cancel()
  context_task.cancel()
  trade_stream_task.cancel()
  chart_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,database_task,status_history_task,checkpoint_task,context_task,trade_stream_task,chart_task,diagnostics_task,*pending_predictions):
+ for running in (task,database_task,status_history_task,checkpoint_task,context_task,trade_stream_task,chart_task,diagnostics_task,polymarket_ws_test_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
  _close_idle_pg_connections()
 historical_state={"status":"disabled","reason":"Seven-day bulk market collection disabled to protect live monitoring.","requested":0,"verified":0}
 app=FastAPI(lifespan=lifespan)
+
+@app.get("/api/polymarket-ws-diagnostic")
+def polymarket_ws_diagnostic_status():
+ """Read-only one-shot connection test; never exposes credentials or raw frames."""
+ return polymarket_ws_diagnostic_snapshot()
 @app.get("/research-dashboard.js")
 def dashboard_script():
  return FileResponse(str(Path(__file__).with_name("research_dashboard.js")),media_type="application/javascript")
