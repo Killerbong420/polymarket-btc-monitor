@@ -16,7 +16,7 @@ MAX_AGE_SECONDS = 10
 
 
 def subscription(slugs, request_id="btc-monitor"):
-    valid = list(dict.fromkeys(s for s in slugs if isinstance(s, str) and s.startswith("btc-updown-") and len(s) < 110))
+    valid = list(dict.fromkeys(s for s in slugs if isinstance(s, str) and s.startswith(("btc-updown-", "cpc-btc-updown-")) and len(s) < 110))
     if not valid or len(valid) > 100:
         raise ValueError("No valid BTC market subscriptions")
     return {"subscribe": {"requestId": request_id, "subscriptionType": "SUBSCRIPTION_TYPE_MARKET_DATA_LITE", "marketSlugs": valid}}
