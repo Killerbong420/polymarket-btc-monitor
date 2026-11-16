@@ -1102,6 +1102,7 @@ async def loop():
      left15=fifteen["end"]-time.time()
      phase="EARLY" if left15>450 else "LATE" if left15<=180 else "MID"
      state.update(status="running",signal=direction,flip=flip,score=score,phase=phase,seconds_left=round(left15),market=slug,external=d,updated=now,error=None)
+     state["ws_diagnostic_last_market"]={"slug":slug,"seen_epoch":time.time(),"end_epoch":fifteen["end"]}
      state["final_15m"]={"market":slug,"seconds_left":round(left15),"trigger_seconds":450,"lookup":"verified_contract"}
      # Forward-only formation tracker uses Coinbase BTC-USD ONLY. The same
      # existing OHLC response provides verified consecutive completed candles;
@@ -1348,10 +1349,24 @@ async def database_setup_worker(retry_seconds=15):
   await asyncio.sleep(retry_seconds)
 
 
+def _ws_diagnostic_market():
+ """Recent verified market only; never invent a slug or bypass official validation."""
+ active=state.get("market")
+ if isinstance(active,str) and active.startswith("btc-updown-"):
+  return active
+ cached=state.get("ws_diagnostic_last_market") or {}
+ now=time.time()
+ if (isinstance(cached.get("slug"),str) and
+     0 <= now-float(cached.get("seen_epoch") or 0) < 60 and
+     now < float(cached.get("end_epoch") or 0)):
+  return cached["slug"]
+ return None
+
+
 async def _polymarket_ws_diagnostic_retry():
  """Wait for the active market without blocking startup; stop after first real test."""
  while True:
-  await polymarket_ws_diagnostic_once(lambda: state.get("market"), wait_seconds=60)
+  await polymarket_ws_diagnostic_once(_ws_diagnostic_market, wait_seconds=60)
   if polymarket_ws_diagnostic_snapshot().get("reason") != "market_unavailable":
    return
   await asyncio.sleep(15)
