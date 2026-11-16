@@ -27,7 +27,7 @@ async def run_once(market_provider, wait_seconds=90, listen_seconds=12):
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
         candidate = market_provider()
-        if isinstance(candidate, str) and candidate.startswith("btc-updown-"):
+        if isinstance(candidate, str) and candidate.startswith(("btc-updown-", "cpc-btc-updown-")):
             market = candidate
             break
         await asyncio.sleep(2)
