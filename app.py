@@ -33,6 +33,7 @@ from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history, diagnostic_extras
 from polymarket_ws_diagnostic import run_once as polymarket_ws_diagnostic_once, snapshot as polymarket_ws_diagnostic_snapshot
 from polymarket_us_stream import QuoteCache, stream_quotes
+from ws_rest_comparison import compare_quotes
 from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 import paper_trader as paper
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
@@ -1130,6 +1131,7 @@ async def loop():
      target=number(ptb)  # Accept official target whether API supplies a scalar or {"value": ...}.
      reference,quote=await asyncio.gather(reference_prices(client,fifteen),market_quote(client,slug))
      ws_quote=_polymarket_live_quotes.get(slug)
+     state["polymarket_ws_rest_comparison"]=compare_quotes(ws_quote,quote,slug)
      state["polymarket_ws_live_quote"]={"status":"fresh","market":slug,"bid":ws_quote["bid"],"ask":ws_quote["ask"],"age_seconds":round(max(0,time.time()-ws_quote["received_at"]),2),"source":ws_quote["source"]} if ws_quote else {"status":"unavailable","market":slug}
      # Shadow-only until live REST-vs-WS consistency and settlement guards are tested.
      left15=fifteen["end"]-time.time()
@@ -1422,6 +1424,11 @@ app=FastAPI(lifespan=lifespan)
 def polymarket_ws_diagnostic_status():
  """Read-only one-shot connection test; never exposes credentials or raw frames."""
  return polymarket_ws_diagnostic_snapshot()
+
+@app.get("/api/polymarket-ws-rest-comparison")
+def polymarket_ws_rest_comparison_status():
+ """Shadow-only observed quote agreement, never a settlement or trading signal."""
+ return state.get("polymarket_ws_rest_comparison") or {"status":"unavailable","reason":"no_comparison_yet"}
 
 @app.get("/api/polymarket-ws-live-quote")
 def polymarket_ws_live_quote_status():
