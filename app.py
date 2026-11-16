@@ -32,6 +32,7 @@ from quick_accuracy import make_entry as make_quick_entry, actual_tick_at, grade
 from forward_training import training_readiness as score_training_readiness
 from monitor_health import checks as health_checks, persist_alerts, alert_history, diagnostic_extras
 from polymarket_ws_diagnostic import run_once as polymarket_ws_diagnostic_once, snapshot as polymarket_ws_diagnostic_snapshot
+from polymarket_us_stream import QuoteCache, stream_quotes
 from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 import paper_trader as paper
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
@@ -1128,6 +1129,9 @@ async def loop():
      ptb=terms.get("priceToBeat") or {}
      target=number(ptb)  # Accept official target whether API supplies a scalar or {"value": ...}.
      reference,quote=await asyncio.gather(reference_prices(client,fifteen),market_quote(client,slug))
+     ws_quote=_polymarket_live_quotes.get(slug)
+     state["polymarket_ws_live_quote"]={"status":"fresh","market":slug,"bid":ws_quote["bid"],"ask":ws_quote["ask"],"age_seconds":round(max(0,time.time()-ws_quote["received_at"]),2),"source":ws_quote["source"]} if ws_quote else {"status":"unavailable","market":slug}
+     # Shadow-only until live REST-vs-WS consistency and settlement guards are tested.
      left15=fifteen["end"]-time.time()
      if left15<=0:
       raise ValueError("Round expired during reference lookup")
@@ -1363,6 +1367,12 @@ def _ws_diagnostic_market():
  return None
 
 
+_polymarket_live_quotes = QuoteCache()
+
+async def _polymarket_quote_stream_worker():
+ """Read-only quote feed; do not replace verified REST quote or BRTI."""
+ await stream_quotes(lambda: [_ws_diagnostic_market()] if _ws_diagnostic_market() else [], _polymarket_live_quotes)
+
 async def _polymarket_ws_diagnostic_retry():
  """Wait for the active market without blocking startup; stop after first real test."""
  while True:
@@ -1387,6 +1397,7 @@ async def lifespan(app):
  # Live BRTI, official 15m settlement grading, and pattern history are separate.
  diagnostics_task=asyncio.create_task(read_only_diagnostics_loop())
  polymarket_ws_test_task=asyncio.create_task(_polymarket_ws_diagnostic_retry())
+ polymarket_ws_quote_task=asyncio.create_task(_polymarket_quote_stream_worker())
  yield
  task.cancel()
  database_task.cancel()
@@ -1394,12 +1405,13 @@ async def lifespan(app):
  checkpoint_task.cancel()
  diagnostics_task.cancel()
  polymarket_ws_test_task.cancel()
+ polymarket_ws_quote_task.cancel()
  context_task.cancel()
  trade_stream_task.cancel()
  chart_task.cancel()
  pending_predictions=list(_prediction_tasks)
  for pending in pending_predictions:pending.cancel()
- for running in (task,database_task,status_history_task,checkpoint_task,context_task,trade_stream_task,chart_task,diagnostics_task,polymarket_ws_test_task,*pending_predictions):
+ for running in (task,database_task,status_history_task,checkpoint_task,context_task,trade_stream_task,chart_task,diagnostics_task,polymarket_ws_test_task,polymarket_ws_quote_task,*pending_predictions):
   try: await running
   except asyncio.CancelledError: pass
  _close_idle_pg_connections()
@@ -1410,6 +1422,14 @@ app=FastAPI(lifespan=lifespan)
 def polymarket_ws_diagnostic_status():
  """Read-only one-shot connection test; never exposes credentials or raw frames."""
  return polymarket_ws_diagnostic_snapshot()
+
+@app.get("/api/polymarket-ws-live-quote")
+def polymarket_ws_live_quote_status():
+ """Sanitized, freshness-gated read-only stream quote; never an order signal."""
+ slug=_ws_diagnostic_market()
+ quote=_polymarket_live_quotes.get(slug) if slug else None
+ return {"status":"fresh","market":slug,"bid":quote["bid"],"ask":quote["ask"],"age_seconds":round(max(0,time.time()-quote["received_at"]),2)} if quote else {"status":"unavailable","market":slug}
+
 @app.get("/research-dashboard.js")
 def dashboard_script():
  return FileResponse(str(Path(__file__).with_name("research_dashboard.js")),media_type="application/javascript")
