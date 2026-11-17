@@ -27,7 +27,7 @@ def validate_official_target(official, reference):
         "official_target_usd": value,
         "reconstructed_opening_usd": opening,
         "opening_average_samples": samples if isinstance(samples, int) else None,
-        "basis": "60 observed one-second BRTI opening ticks vs official metadata",
+        "basis": "60 observed one-second candle closes vs official metadata (non-authoritative reconstruction)",
         "official_target_authoritative": True,
     }
     # Audit only observed pre-boundary candle closes; never official ticks.
