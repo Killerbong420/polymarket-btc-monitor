@@ -47,13 +47,13 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("primary.id='primaryPanel';cards.append(primary)", self.html)
         self.assertIn("cards.id='terminalQuickCards'", self.html)
 
-    def test_ai_win_loss_panel_always_visible(self):
+    def test_current_model_win_loss_panel_always_visible(self):
         # A previous CSS selector hid this panel until the advanced toggle was opened.
         self.assertNotIn("body:not(.show-advanced) #serverHistory", self.html)
         self.assertIn('id="serverHistory"', self.html)
         self.assertIn('id="winLossRatio"', self.html)
         self.assertIn('id="winRate"', self.html)
-        self.assertIn("d.ai_performance", self.html)
+        self.assertIn("d.model_performance", self.html)
         self.assertIn("setInterval(()=>{if(!document.hidden)updateServer()},4000)", self.html)
 
     def test_lightweight_brtI_line_without_candles(self):
@@ -141,13 +141,13 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn("document.body.classList.contains('show-advanced')",self.html)
         self.assertIn("const legacyActive=()=>!document.hidden",self.html)
 
-    def test_ai_scoreboard_explains_100_settled_calls(self):
-        self.assertIn("LAST 100 SETTLED PREDICTIONS", self.html)
+    def test_current_model_scoreboard_explains_100_settled_calls(self):
+        self.assertIn("RULE-BASED 15M ACCURACY · LAST 100 SETTLED CALLS", self.html)
         self.assertIn("WINS · LAST 100", self.html)
         self.assertIn("LOSSES · LAST 100", self.html)
         self.assertIn("PENDING · ALL", self.html)
         self.assertIn("performance.window_size||100", self.html)
-        self.assertIn("most recent settled", self.html.lower())
+        self.assertIn("most recent 100 officially settled", self.html.lower())
 
     def test_quick_prediction_shows_plain_up_down_and_first5_accuracy(self):
         self.assertIn("⚡ QUICK PREDICTION · UP / DOWN", self.html)
@@ -179,7 +179,7 @@ class TerminalUITest(unittest.TestCase):
         self.assertIn('data-range="5m"', self.html)
 
     def test_last_36_verified_round_tiles_15m_only(self):
-        self.assertIn("LAST 36 VERIFIED 15-MINUTE ROUNDS",self.html)
+        self.assertIn("LAST 36 VERIFIED RULE-BASED 15-MIN ROUNDS",self.html)
         self.assertNotIn("LAST 36 VERIFIED 5-MINUTE ROUNDS",self.html)
         self.assertIn("fetch('/api/round-tiles'",self.html)
         self.assertIn("correct call",self.html)
