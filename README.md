@@ -1,5 +1,25 @@
 # Polymarket BTC Monitor
 
+## November 2026 live-monitor safety and scoreboard update
+
+- The 15-minute headline scoreboard and recent-round tiles use only officially
+  graded `signals` with `decision_source='RULE_BASED'`. Pending calls are
+  counted separately, and legacy AI predictions remain archived rather than
+  being silently presented as current model accuracy. Percentages describe
+  observed accuracy, not calibrated win probabilities.
+- `POST /api/paper/control` is disabled by default. To authorize an operator
+  request, set a random, private `PAPER_CONTROL_TOKEN` of at least 32 characters
+  in the Render server environment. Supply it in `X-Paper-Control-Token`
+  alongside the existing same-origin and `X-Paper-Control: 1` headers. Keep
+  it out of GitHub, webpage JavaScript, browser storage and logs. With no
+  configured secret, the endpoint always returns 403. It never places real orders.
+- The main Coinbase formation chart consumes observed server-cached trade ticks
+  over `/ws/coinbase-price`, at most once per second, with an HTTP fallback
+  limited to every five seconds if the socket stops. A hidden Safari page
+  closes the socket and pauses chart redraws. The separate official BRTI target,
+  settlement computation, and candle verification are unchanged.
+
+
 ## Official-BRTI per-minute prediction research (read-only)
 
 The monitor now freezes **at most one observed input snapshot per current

@@ -186,11 +186,20 @@ class LedgerTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(status,'CLOSED');self.assertGreater(pnl,0);self.assertLess(pnl/cost,.10)
  async def test_control_requires_same_origin_and_no_real_action(self):
   c=TestClient(app.app)
-  self.assertEqual(c.post('/api/paper/control',json={'action':'pause'}).status_code,403)
+  token='a_valid_paper_control_token_at_least_32_bytes'
   headers={'Origin':'http://testserver','X-Paper-Control':'1'}
-  self.assertEqual(c.post('/api/paper/control',json={'action':'enable_real_trading'},headers=headers).status_code,400)
-  self.assertEqual(c.post('/api/paper/control',json={'action':'pause'},headers=headers).status_code,200)
-  self.assertEqual(c.get('/api/paper').json()['status'],'paused')
+  self.assertEqual(c.post('/api/paper/control',json={'action':'pause'}).status_code,403)
+  self.assertEqual(c.post('/api/paper/control',json={'action':'pause'},headers=headers).status_code,403)
+  with patch.dict(os.environ,{'PAPER_CONTROL_TOKEN':token}):
+   self.assertEqual(c.post('/api/paper/control',json={'action':'pause'},headers=headers).status_code,403)
+   bad={**headers,'X-Paper-Control-Token':'wrong_token'}
+   self.assertEqual(c.post('/api/paper/control',json={'action':'pause'},headers=bad).status_code,403)
+   authorized={**headers,'X-Paper-Control-Token':token}
+   self.assertEqual(c.post('/api/paper/control',json={'action':'enable_real_trading'},headers=authorized).status_code,400)
+   self.assertEqual(c.post('/api/paper/control',json={'action':'pause'},headers=authorized).status_code,200)
+   self.assertEqual(c.get('/api/paper').json()['status'],'paused')
+  with patch.dict(os.environ,{'PAPER_CONTROL_TOKEN':'short'}):
+   self.assertEqual(c.post('/api/paper/control',json={'action':'resume'},headers={**headers,'X-Paper-Control-Token':'short'}).status_code,403)
 
 if __name__=='__main__':unittest.main()
 

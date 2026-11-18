@@ -47,12 +47,15 @@ class OneSecondCoinbaseChartTests(unittest.TestCase):
 
     def test_chart_updates_each_second_but_complete_candles_stay_verified(self):
         html=Path(__file__).with_name("terminal.html").read_text(encoding="utf-8")
-        self.assertIn("setInterval(()=>{refreshLivePrice();draw();},1000)",html)
+        self.assertIn("setInterval(()=>{if(!document.hidden){refreshLivePrice();draw();}},1000)",html)
+        self.assertIn("/ws/coinbase-price",html)
+        self.assertIn("Date.now()-lastQuotePoll<5000",html)
+        self.assertIn("lastSocketFrame=Date.now()",html)
         self.assertIn("setInterval(refresh,10000)",html)
         self.assertIn("/api/coinbase-formation/live-price",html)
         self.assertIn("now-tradeEpoch<=8",html)
         self.assertIn("now-sampledEpoch<=4",html)
-        self.assertIn("if(document.hidden||quoteBusy",html)
+        self.assertIn("if(document.hidden||(liveSocket&&liveSocket.readyState===1",html)
         self.assertIn("let liveQuote=null,quoteBusy=false",html)
         self.assertIn("Live Coinbase: stale",html)
         self.assertIn("A live trade is a separate observed tick",html)

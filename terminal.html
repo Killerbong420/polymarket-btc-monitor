@@ -1438,7 +1438,7 @@ document.addEventListener('visibilitychange',()=>{if(legacyActive())startLegacy(
  <table><thead><tr><th>Forecast / checkpoint</th><th>Wins / calls</th><th>Accuracy</th></tr></thead><tbody id="checkpointRows"><tr><td>Awaiting official settlement history</td><td>—</td><td>—</td></tr></tbody></table>
  <div class="xnote">Timing matters: later predictions have more information and are not directly comparable to early ones. Only frozen calls with verified settlements are scored; no calibration or profitable trading is implied.</div>
 </section>
-<section class="card" id="serverHistory"><div class="label">AI ACCURACY · LAST 100 SETTLED PREDICTIONS (15M)</div><div class="row"><span class="status" id="serverState">Connecting…</span><span class="small" id="serverCounts"></span></div><div class="result-grid" aria-label="Server prediction results"><div class="result-tile"><div class="result-number up" id="winCount">0</div><div class="result-label">WINS · LAST 100</div></div><div class="result-tile"><div class="result-number down" id="lossCount">0</div><div class="result-label">LOSSES · LAST 100</div></div><div class="result-tile"><div class="result-number wait" id="pendingCount">0</div><div class="result-label">PENDING · ALL</div></div><div class="result-tile"><div class="result-number" id="winRate">—</div><div class="result-label">LAST 100 ACCURACY</div></div></div><div class="small" id="winLossRatio" aria-live="polite">AI WIN/LOSS RATIO · —</div><div class="small" id="serverLatest" aria-live="polite">Checking saved predictions…</div><div class="result-foot" id="settlementInfo">Settlement verification: checking…</div><p class="small">Win/loss and accuracy use the 100 most recent settled 15-minute AI_REVIEW predictions (or fewer if not yet available). Pending predictions are counted separately and excluded from accuracy. Fallbacks are excluded. Older records remain stored for historical analysis; verified Polymarket settlement is required to score a prediction.</p></section><section class="card" id="peerBotsPanel"><div class="row" style="justify-content:space-between"><div class="label">BOT STRATEGY STUDIES · 15-MIN MARKET</div><span class="status">RESEARCH ONLY</span></div><div id="peerBotsLive" class="small">Waiting for fresh BTC exchange candles…</div><p class="small">MACD trend, Bollinger reversals, ATR breakouts and range/liquidity price action. These are independent public-indicator studies, not another trader's live signals. Compare their settled win rates and prediction coverage under Detailed logs.</p></section><script>(()=>{const $=id=>document.getElementById(id);function safeText(v){return String(v??'—')}
+<section class="card" id="serverHistory"><div class="label">RULE-BASED 15M ACCURACY · LAST 100 SETTLED CALLS</div><div class="row"><span class="status" id="serverState">Connecting…</span><span class="small" id="serverCounts"></span></div><div class="result-grid" aria-label="Server prediction results"><div class="result-tile"><div class="result-number up" id="winCount">0</div><div class="result-label">WINS · LAST 100</div></div><div class="result-tile"><div class="result-number down" id="lossCount">0</div><div class="result-label">LOSSES · LAST 100</div></div><div class="result-tile"><div class="result-number wait" id="pendingCount">0</div><div class="result-label">PENDING · ALL</div></div><div class="result-tile"><div class="result-number" id="winRate">—</div><div class="result-label">LAST 100 ACCURACY</div></div></div><div class="small" id="winLossRatio" aria-live="polite">RULE-BASED WIN/LOSS RATIO · —</div><div class="small" id="serverLatest" aria-live="polite">Checking saved predictions…</div><div class="result-foot" id="settlementInfo">Settlement verification: checking…</div><p class="small">Win/loss and accuracy use the most recent 100 officially settled RULE_BASED 15-minute calls (or fewer). Pending calls are counted separately. Historical AI decisions are excluded. Verified Polymarket settlement is required to score a call. Older records remain stored for historical analysis.</p></section><section class="card" id="peerBotsPanel"><div class="row" style="justify-content:space-between"><div class="label">BOT STRATEGY STUDIES · 15-MIN MARKET</div><span class="status">RESEARCH ONLY</span></div><div id="peerBotsLive" class="small">Waiting for fresh BTC exchange candles…</div><p class="small">MACD trend, Bollinger reversals, ATR breakouts and range/liquidity price action. These are independent public-indicator studies, not another trader's live signals. Compare their settled win rates and prediction coverage under Detailed logs.</p></section><script>(()=>{const $=id=>document.getElementById(id);function safeText(v){return String(v??'—')}
 let statusInFlight=false;
 function renderMarketShock(d,online,validCandles){
  const get=id=>document.getElementById(id),panel=get('marketShockPanel');
@@ -1632,6 +1632,7 @@ async function refreshHistoryStatus(){
    ai_decision_counts:full.ai_decision_counts||{},
    ai_verified_counts:full.ai_verified_counts||{},
    ai_performance:full.ai_performance||{},
+   model_performance:full.model_performance||{},model_counts:full.model_counts||{},
    ai_decision_history:full.ai_decision_history||[],
    settlement_diagnostic:full.settlement_diagnostic||null,
    accuracy_by_quality:full.accuracy_by_quality||{}
@@ -1650,8 +1651,8 @@ async function updateServer(){if(statusInFlight)return;statusInFlight=true;
  if(!r.ok)throw Error('Live HTTP '+r.status);
  const live=await r.json();
  window.btcNoteRequest?.('live',Date.now()-started,true);
- const d={...cachedHistoryStatus,...live},performance=d.ai_performance||{},
- counts=d.ai_verified_counts||d.ai_decision_counts||{},allCounts=d.counts||{};if(d.database_error)throw Error('Prediction database: '+d.database_error);window.btcServerStatus=d;window.dispatchEvent(new Event('btc-status-updated'));renderFutureSettlement(d);const fifteen=d.final_15m||{},fifteenRow=(d.history||[]).find(x=>x.phase==='FINAL_15M'&&x.market===fifteen.market);const fifteenEl=$('final15Signal');if(fifteenRow){fifteenEl.textContent='FINAL 15M '+fifteenRow.direction;fifteenEl.className='value '+(fifteenRow.direction==='UP'?'up':fifteenRow.direction==='DOWN'?'down':'wait');$('final15Time').textContent='Locked '+new Date(fifteenRow.created_at).toLocaleTimeString();$('final15Reason').textContent='Official result: '+fifteenRow.result+' · Score '+fifteenRow.score+' · Locked for this 15-minute round.';}else{fifteenEl.textContent=fifteen.market?'SCHEDULED · 7:30 LEFT':'15M MARKET UNAVAILABLE';fifteenEl.className='value wait';$('final15Time').textContent=fifteen.seconds_left!=null?Math.max(0,Math.ceil(fifteen.seconds_left-450))+'s to trigger':'Awaiting verified contract';$('final15Reason').textContent=fifteen.market?'Server will save one independent 15-minute final call at the first poll reaching 7:30 remaining.':'Polymarket US 15m lookup: '+(fifteen.lookup||'pending');}const strong=$('strongSignal'),strongReason=$('strongReason'),strongAge=$('strongAge'),quality=d.external?.signal_quality||{};const confirmed=d.status==='running'&&quality.status==='CONFIRMED_TREND'&&(d.signal==='UP'||d.signal==='DOWN');strong.textContent=confirmed?'CONFIRMED '+d.signal:'WAIT · NO STRONG CONFIRMATION';strong.className='value '+(confirmed?(d.signal==='UP'?'up':'down'):'wait');strongAge.textContent=d.updated?'Checked '+new Date(d.updated).toLocaleTimeString():'Awaiting server';strongReason.textContent='3m '+(quality.fast_3m_pct??'—')+'% · 15m '+(quality.slow_15m_pct??'—')+'% · volume '+(quality.volume_ratio??'—')+'× · '+(quality.status||d.status||'CHECKING')+' · not a calibrated win probability';const wins=Number.isFinite(Number(performance.wins))?Number(performance.wins):(Number(counts.WIN)||0),losses=Number.isFinite(Number(performance.losses))?Number(performance.losses):(Number(counts.LOSS)||0),pending=Number.isFinite(Number(performance.pending))?Number(performance.pending):(Number(counts.PENDING)||0); $('serverState').textContent=d.status||'UNKNOWN';$('serverCounts').textContent='LAST '+(performance.window_size||100)+' SETTLED · '+(wins+losses)+' available · refreshed '+new Date().toLocaleTimeString();$('winCount').textContent=wins;$('lossCount').textContent=losses;$('pendingCount').textContent=pending;$('winRate').textContent=wins+losses?(100*wins/(wins+losses)).toFixed(1)+'%':'—';$('winLossRatio').textContent='LAST '+(performance.window_size||100)+' WIN/LOSS RATIO · '+wins+':'+losses+(losses?' ('+(wins/losses).toFixed(2)+' wins per loss)':' (no recorded losses)')+' · '+pending+' pending settlement';const info=d.settlement_diagnostic;$('settlementInfo').textContent=info?'Settlement: '+(info.verified||0)+' verified this check · '+(info.unresolved||0)+' unresolved · '+(info.checked||0)+' checked'+((info.errors||[]).length?' · '+info.errors.length+' errors':''):'Settlement: awaiting diagnostics from latest server version';renderPersistentSignals(d);renderPeerBots(d);const box=$('serverLatest');box.replaceChildren();const history=(d.history||[]).filter(x=>x.decision_source==='AI_REVIEW').slice(0,8);if(!history.length){box.textContent='No genuine AI predictions saved in the recent history yet.';return}for(const h of history){const item=document.createElement('div');item.className='history-item';const left=document.createElement('div'),title=document.createElement('div'),meta=document.createElement('div'),status=document.createElement('span');title.className='history-title';title.textContent=safeText(h.phase)+' · '+safeText(h.direction);meta.className='history-meta';meta.textContent=safeText(h.market)+' · '+(h.created_at?new Date(h.created_at).toLocaleString():'');left.append(title,meta);status.textContent=safeText(h.result);status.className=h.result==='WIN'?'up':h.result==='LOSS'?'down':'wait';item.append(left,status);box.append(item)}}catch(e){
+ const d={...cachedHistoryStatus,...live},performance=d.model_performance||{},
+ counts=d.model_counts||{},allCounts=d.counts||{};if(d.database_error)throw Error('Prediction database: '+d.database_error);window.btcServerStatus=d;window.dispatchEvent(new Event('btc-status-updated'));renderFutureSettlement(d);const fifteen=d.final_15m||{},fifteenRow=(d.history||[]).find(x=>x.phase==='FINAL_15M'&&x.market===fifteen.market);const fifteenEl=$('final15Signal');if(fifteenRow){fifteenEl.textContent='FINAL 15M '+fifteenRow.direction;fifteenEl.className='value '+(fifteenRow.direction==='UP'?'up':fifteenRow.direction==='DOWN'?'down':'wait');$('final15Time').textContent='Locked '+new Date(fifteenRow.created_at).toLocaleTimeString();$('final15Reason').textContent='Official result: '+fifteenRow.result+' · Score '+fifteenRow.score+' · Locked for this 15-minute round.';}else{fifteenEl.textContent=fifteen.market?'SCHEDULED · 7:30 LEFT':'15M MARKET UNAVAILABLE';fifteenEl.className='value wait';$('final15Time').textContent=fifteen.seconds_left!=null?Math.max(0,Math.ceil(fifteen.seconds_left-450))+'s to trigger':'Awaiting verified contract';$('final15Reason').textContent=fifteen.market?'Server will save one independent 15-minute final call at the first poll reaching 7:30 remaining.':'Polymarket US 15m lookup: '+(fifteen.lookup||'pending');}const strong=$('strongSignal'),strongReason=$('strongReason'),strongAge=$('strongAge'),quality=d.external?.signal_quality||{};const confirmed=d.status==='running'&&quality.status==='CONFIRMED_TREND'&&(d.signal==='UP'||d.signal==='DOWN');strong.textContent=confirmed?'CONFIRMED '+d.signal:'WAIT · NO STRONG CONFIRMATION';strong.className='value '+(confirmed?(d.signal==='UP'?'up':'down'):'wait');strongAge.textContent=d.updated?'Checked '+new Date(d.updated).toLocaleTimeString():'Awaiting server';strongReason.textContent='3m '+(quality.fast_3m_pct??'—')+'% · 15m '+(quality.slow_15m_pct??'—')+'% · volume '+(quality.volume_ratio??'—')+'× · '+(quality.status||d.status||'CHECKING')+' · not a calibrated win probability';const wins=Number.isFinite(Number(performance.wins))?Number(performance.wins):(Number(counts.WIN)||0),losses=Number.isFinite(Number(performance.losses))?Number(performance.losses):(Number(counts.LOSS)||0),pending=Number.isFinite(Number(performance.pending))?Number(performance.pending):(Number(counts.PENDING)||0); $('serverState').textContent=d.status||'UNKNOWN';$('serverCounts').textContent='LAST '+(performance.window_size||100)+' SETTLED · '+(wins+losses)+' available · refreshed '+new Date().toLocaleTimeString();$('winCount').textContent=wins;$('lossCount').textContent=losses;$('pendingCount').textContent=pending;$('winRate').textContent=wins+losses?(100*wins/(wins+losses)).toFixed(1)+'%':'—';$('winLossRatio').textContent='LAST '+(performance.window_size||100)+' WIN/LOSS RATIO · '+wins+':'+losses+(losses?' ('+(wins/losses).toFixed(2)+' wins per loss)':' (no recorded losses)')+' · '+pending+' pending settlement';const info=d.settlement_diagnostic;$('settlementInfo').textContent=info?'Settlement: '+(info.verified||0)+' verified this check · '+(info.unresolved||0)+' unresolved · '+(info.checked||0)+' checked'+((info.errors||[]).length?' · '+info.errors.length+' errors':''):'Settlement: awaiting diagnostics from latest server version';renderPersistentSignals(d);renderPeerBots(d);const box=$('serverLatest');box.replaceChildren();const history=(d.history||[]).filter(x=>x.decision_source==='RULE_BASED').slice(0,8);if(!history.length){box.textContent='No rule-based 15-minute predictions in recent history yet.';return}for(const h of history){const item=document.createElement('div');item.className='history-item';const left=document.createElement('div'),title=document.createElement('div'),meta=document.createElement('div'),status=document.createElement('span');title.className='history-title';title.textContent=safeText(h.phase)+' · '+safeText(h.direction);meta.className='history-meta';meta.textContent=safeText(h.market)+' · '+(h.created_at?new Date(h.created_at).toLocaleString():'');left.append(title,meta);status.textContent=safeText(h.result);status.className=h.result==='WIN'?'up':h.result==='LOSS'?'down':'wait';item.append(left,status);box.append(item)}}catch(e){
  window.btcNoteRequest?.('live',Date.now()-started,false);
  const last=window.btcServerStatus,age=Date.now()-Date.parse(last?.updated||'');
  if(last&&Number.isFinite(age)&&age>=0&&age<45000){
@@ -1864,14 +1865,14 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
   const heading=document.createElement('summary');heading.className='round-title';heading.textContent=title+' · tap to expand';
   const meta=document.createElement('div');meta.className='round-meta';meta.id=id+'Meta';meta.textContent='Collecting verified results…';
   shell.append(heading,meta);
-  const label=document.createElement('div');label.className='round-sub';label.textContent='FINAL AI FORECAST';
+  const label=document.createElement('div');label.className='round-sub';label.textContent='RULE-BASED FINAL FORECAST';
   const grid=document.createElement('div');grid.className='round-grid';grid.id=id;grid.setAttribute('aria-label','Recent verified 15-minute outcomes');
   shell.append(label,grid);
   const legend=document.createElement('div');legend.className='round-legend';
   legend.textContent='▲ Official UP · ▼ Official DOWN · white outline = correct call · faded = incorrect. Oldest → newest.';
   shell.append(legend);parent.append(shell);
  }
- create(el('serverHistory'),'LAST 36 VERIFIED 15-MINUTE ROUNDS','fifteenTiles');
+ create(el('serverHistory'),'LAST 36 VERIFIED RULE-BASED 15-MIN ROUNDS','fifteenTiles');
  function draw(id,rounds){
   const grid=el(id);if(!grid)return;grid.replaceChildren();
   for(const r of rounds.slice(-36)){
@@ -1917,7 +1918,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  const liveChip=document.getElementById('coinbaseLivePriceChip');
  if(!canvas||!label)return;
  let sample=null,busy=false,lastPoll=0;
- let liveQuote=null,quoteBusy=false,lastQuotePoll=0;
+ let liveQuote=null,quoteBusy=false,lastQuotePoll=0,liveSocket=null,liveReconnect=null,lastSocketFrame=0;
  const finite=v=>typeof v==='number'&&Number.isFinite(v);
  const num=v=>v===null||v===undefined||v===''?NaN:Number(v);
  const money=v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -2106,7 +2107,7 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
  window.addEventListener('resize',draw);
  async function refreshLivePrice(){
   // One small local read from the existing Coinbase WebSocket, not a new socket.
-  if(document.hidden||quoteBusy||Date.now()-lastQuotePoll<950)return;
+  if(document.hidden||(liveSocket&&liveSocket.readyState===1&&Date.now()-lastSocketFrame<3500)||quoteBusy||Date.now()-lastQuotePoll<5000)return;
   lastQuotePoll=Date.now();quoteBusy=true;
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),900);
   try{
@@ -2117,13 +2118,38 @@ const counts=d.ai_decision_counts||{};document.getElementById('aiLogStats').text
   }catch(_){liveQuote=null;}
   finally{clearTimeout(timeout);quoteBusy=false;draw();}
  }
+ function connectLivePrice(){
+  if(document.hidden||liveSocket||typeof WebSocket!=='function')return;
+  try{
+   const uri=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws/coinbase-price';
+   const ws=new WebSocket(uri);liveSocket=ws;
+   ws.onmessage=event=>{
+    try{
+     const quote=JSON.parse(event.data);
+     if(quote?.source!=='Coinbase Exchange BTC-USD')return;
+     lastSocketFrame=Date.now();
+     liveQuote=quote.status==='fresh'?quote:null;
+     if(!document.hidden)draw();
+    }catch(_){}
+   };
+   ws.onerror=()=>ws.close();
+   ws.onclose=()=>{
+    if(liveSocket!==ws)return;
+    liveSocket=null;
+    if(liveReconnect===null&&!document.hidden)
+     liveReconnect=setTimeout(()=>{liveReconnect=null;connectLivePrice();},5000);
+   };
+  }catch(_){liveSocket=null;}
+ }
  document.addEventListener('visibilitychange',()=>{
-  if(!document.hidden){refresh();refreshLivePrice();draw();}
+  if(document.hidden){
+   if(liveReconnect!==null){clearTimeout(liveReconnect);liveReconnect=null;}
+   if(liveSocket){const ws=liveSocket;liveSocket=null;ws.close();}
+  }else{connectLivePrice();refresh();refreshLivePrice();draw();}
  });
- // Candles are verified 1m observations; redraw and obtain a fresh *trade tick*
- // each second, updating the marker only when Coinbase sends a real trade.
- setInterval(()=>{refreshLivePrice();draw();},1000);
+ // One-second observed tick marker; HTTP is a 5s fallback when stream fails.
+ setInterval(()=>{if(!document.hidden){refreshLivePrice();draw();}},1000);
  setInterval(refresh,10000);
- refresh();refreshLivePrice();draw();
+ connectLivePrice();refresh();refreshLivePrice();draw();
 })();
 </script></body></html>

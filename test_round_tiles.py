@@ -8,9 +8,9 @@ from round_tiles import TILE_LIMIT, report, fifteen_rounds
 class TileHistoryTests(unittest.TestCase):
     def setUp(self):
         self.db=sqlite3.connect(":memory:")
-        self.db.execute("""CREATE TABLE ai_decisions (
+        self.db.execute("""CREATE TABLE signals (
             id TEXT PRIMARY KEY,market TEXT,phase TEXT,direction TEXT,
-            confidence TEXT,source TEXT,reason TEXT,created_at TEXT,result TEXT)""")
+            decision_source TEXT,created_at TEXT,result TEXT)""")
 
     def tearDown(self):
         self.db.close()
@@ -19,17 +19,17 @@ class TileHistoryTests(unittest.TestCase):
         cur=self.db.execute(sql,params)
         return cur.fetchall() if fetch else None
 
-    def ai(self, i, side="UP", result="WIN", source="AI_REVIEW", phase="FINAL_15M", market=None):
+    def ai(self, i, side="UP", result="WIN", source="RULE_BASED", phase="FINAL_15M", market=None):
         market=market or f"cpc-btc-updown-15m-2026-10-28-{i:04d}z"
-        self.execute("INSERT INTO ai_decisions VALUES (?,?,?,?,?,?,?,?,?)",
-                     (f"a{i}",market,phase,side,"HIGH",source,"",f"2026-10-28T{i//60:02d}:{i%60:02d}:00Z",result))
+        self.execute("INSERT INTO signals VALUES (?,?,?,?,?,?,?)",
+                     (f"a{i}",market,phase,side,source,f"2026-10-28T{i//60:02d}:{i%60:02d}:00Z",result))
 
-    def test_15m_outcomes_reflect_verified_ai_result_not_current_side(self):
+    def test_15m_outcomes_reflect_verified_rule_based_result_not_current_side(self):
         self.ai(1,"UP","LOSS")
         self.ai(2,"DOWN","WIN")
         self.ai(3,"UP","PENDING")
-        self.ai(4,"DOWN","WIN","INDICATORS")
-        self.ai(5,"UP","WIN","AI_REVIEW","EARLY")
+        self.ai(4,"DOWN","WIN","AI_REVIEW")
+        self.ai(5,"UP","WIN","RULE_BASED","EARLY")
         r=fifteen_rounds(self.execute)
         self.assertEqual(r["summary"],{"rounds":2,"up":0,"down":2,"scored":2,
                                          "correct":1,"incorrect":1,"accuracy_pct":50})
@@ -37,10 +37,10 @@ class TileHistoryTests(unittest.TestCase):
         self.assertEqual([x["correct"] for x in r["rounds"]],[False,True])
         self.assertEqual([x["prediction"] for x in r["rounds"]],["UP","DOWN"])
 
-    def test_ai_rounds_deduplicate_same_market_and_limit_to_36(self):
+    def test_rule_based_rounds_deduplicate_same_market_and_limit_to_36(self):
         for i in range(1,45):
             self.ai(i,"UP","WIN")
-        # A duplicate later AI row must not become an extra round.
+        # A duplicate later rule-based row must not become an extra round.
         self.ai(46,"DOWN","LOSS",market="cpc-btc-updown-15m-2026-10-28-0044z")
         r=fifteen_rounds(self.execute)
         self.assertEqual(len(r["rounds"]),TILE_LIMIT)

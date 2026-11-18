@@ -1452,6 +1452,13 @@ async def paper_control(request:Request):
  origin=urlparse(request.headers.get("origin",""))
  if origin.scheme not in ("http","https") or origin.netloc!=request.headers.get("host") or request.headers.get("x-paper-control")!="1":
   return JSONResponse({"error":"Same-origin paper controls required"},status_code=403)
+ # Same-origin custom headers are forgeable; require a server-side secret too.
+ # Missing or short PAPER_CONTROL_TOKEN fails closed; never log this token.
+ import secrets
+ expected=os.getenv("PAPER_CONTROL_TOKEN","")
+ supplied=request.headers.get("x-paper-control-token","")
+ if len(expected)<32 or not supplied or not secrets.compare_digest(supplied,expected):
+  return JSONResponse({"error":"Authenticated paper controls unavailable"},status_code=403)
  try:
   body=await request.json()
   action=body.get("action") if isinstance(body,dict) else None
@@ -1769,6 +1776,33 @@ def market_chart_tip():
           "reason":"Verified BRTI round heartbeat unavailable","server_epoch":now}
  return {"market":state.get("market"),**latest_tip(now)}
 
+# One-second same-origin stream reuses the EXISTING Coinbase trade cache.
+# No extra exchange connections and no fabricated candles or index ticks.
+_coinbase_price_ws_clients=0
+@app.websocket("/ws/coinbase-price")
+async def coinbase_price_ws(websocket: WebSocket):
+ global _coinbase_price_ws_clients
+ if _coinbase_price_ws_clients>=8:
+  await websocket.close(code=1013)
+  return
+ await websocket.accept()
+ _coinbase_price_ws_clients+=1
+ try:
+  while True:
+   now=time.time()
+   observed=coinbase_latest_price(now)
+   payload={"status":"fresh",**observed} if observed else {
+    "status":"stale","source":"Coinbase Exchange BTC-USD",
+    "price":None,"trade_epoch":None,"sampled_at":now}
+   await websocket.send_json(payload)
+   await asyncio.sleep(1)
+ except (WebSocketDisconnect,RuntimeError,OSError):
+  pass
+ except asyncio.CancelledError:
+  raise
+ finally:
+  _coinbase_price_ws_clients-=1
+
 @app.get("/api/coinbase-formation/live-price")
 def coinbase_formation_live_price():
  """Lightweight observed Coinbase WebSocket trade for one-second chart polling.
@@ -2027,6 +2061,24 @@ def _read_status_history():
   pending=execute("""SELECT COUNT(*) FROM ai_decisions
     WHERE phase='FINAL_15M' AND source='AI_REVIEW' AND result='PENDING'""",fetch=True)[0][0]
   verified_counts={"WIN":wins,"LOSS":losses,"PENDING":pending}
+  # Score the CURRENT rule-based engine, not historical disabled AI.
+  model_settled=execute("""SELECT result FROM signals
+    WHERE phase='FINAL_15M' AND decision_source='RULE_BASED'
+      AND direction IN ('UP','DOWN') AND result IN ('WIN','LOSS')
+    ORDER BY created_at DESC,id DESC LIMIT 100""",fetch=True)
+  model_wins=sum(result=='WIN' for (result,) in model_settled)
+  model_losses=sum(result=='LOSS' for (result,) in model_settled)
+  model_pending=execute("""SELECT COUNT(*) FROM signals
+    WHERE phase='FINAL_15M' AND decision_source='RULE_BASED'
+      AND direction IN ('UP','DOWN') AND result='PENDING'""",fetch=True)[0][0]
+  model_graded=model_wins+model_losses
+  model_counts={"WIN":model_wins,"LOSS":model_losses,"PENDING":model_pending}
+  model_performance={"wins":model_wins,"losses":model_losses,"pending":model_pending,
+     "graded":model_graded,"window_size":100,
+     "accuracy_pct":round(100*model_wins/model_graded,1) if model_graded else None,
+     "ratio_label":str(model_wins)+":"+str(model_losses),
+     "source":"RULE_BASED",
+     "basis":"Last 100 officially graded RULE_BASED FINAL_15M signals, excluding AI and pending calls"}
   ai_performance={"wins":wins,"losses":losses,"pending":pending,
                   "graded":graded,"window_size":100,
                   "accuracy_pct":round(100*wins/graded,1) if graded else None,
@@ -2034,7 +2086,7 @@ def _read_status_history():
                   "ratio_label":str(wins)+":"+str(losses),
                   "basis":"Most recent 100 settled genuine AI_REVIEW FINAL_15M predictions; pending calls excluded",
                   "unverified":pending}
-  data={"counts":dict(rows),"ai_decision_counts":verified_counts,"ai_verified_counts":verified_counts,"ai_performance":ai_performance,"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
+  data={"counts":dict(rows),"ai_decision_counts":verified_counts,"ai_verified_counts":verified_counts,"ai_performance":ai_performance,"model_counts":model_counts,"model_performance":model_performance,"ai_decision_history":[dict(zip(("market","phase","direction","confidence","source","reason","created_at","result"),r)) for r in ai_rows],"accuracy_by_quality":accuracy_report(),"history":[dict(zip(("market","phase","direction","flip","score","created_at","result","quality","quality_reason","decision_source","decision_reason","ai_confidence"),r)) for r in recent]}
   _status_cache.update(data=data,at=time.monotonic(),execute_id=id(execute),write_version=_history_write_version)
   return data
 
@@ -2112,7 +2164,8 @@ def status():
  history=_status_cache.get("data")
  data=history if isinstance(history,dict) else {
   "history":[],"ai_decision_history":[],"accuracy_by_quality":[],
-  "counts":{},"ai_verified_counts":{},"ai_decision_counts":{}
+  "counts":{},"ai_verified_counts":{},"ai_decision_counts":{},
+  "model_counts":{},"model_performance":{}
  }
  return {**state,"ai_confirmation":public_state(),"ai_connection":auth_state(),**data,
          "status_history_ready":bool(history),
