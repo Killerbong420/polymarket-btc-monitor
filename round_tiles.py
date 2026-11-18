@@ -1,10 +1,10 @@
 """Compact history of independently verified 15m settlement outcomes.
 
-Official winners are derived from the archived WIN/LOSS for genuine
-FINAL_15M AI_REVIEW calls. No backfills or simulated trade claims.
+Official winners are derived from archived WIN/LOSS for RULE_BASED
+FINAL_15M signals. Historical AI calls remain archived separately.
 """
 TILE_LIMIT = 36
-MAX_AI_ROWS = 144
+MAX_ROWS = 144
 
 
 def _side(value):
@@ -22,9 +22,9 @@ def _summary(rows, correct_key):
 
 
 def fifteen_rounds(execute):
-    """Last 36 unique, settled, genuine 15m AI rounds (not indicator fallbacks)."""
-    rows = execute("""SELECT market,direction,result,created_at FROM ai_decisions
-        WHERE phase='FINAL_15M' AND source='AI_REVIEW'
+    """Last 36 unique, officially settled rule-based 15-minute rounds."""
+    rows = execute("""SELECT market,direction,result,created_at FROM signals
+        WHERE phase='FINAL_15M' AND decision_source='RULE_BASED'
           AND result IN ('WIN','LOSS') AND direction IN ('UP','DOWN')
         ORDER BY created_at DESC,id DESC LIMIT 144""", fetch=True)
     recent = []
@@ -40,7 +40,7 @@ def fifteen_rounds(execute):
         if len(recent) == TILE_LIMIT:
             break
     recent.reverse()  # Oldest on the left, newest on the right.
-    return {"basis": "Officially graded 15m FINAL_15M AI_REVIEW calls; winner inferred from archived WIN/LOSS",
+    return {"basis": "Officially graded RULE_BASED FINAL_15M signals; winner inferred from archived WIN/LOSS",
             "summary": _summary(recent, "correct"), "rounds": recent}
 
 
