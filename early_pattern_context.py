@@ -57,7 +57,9 @@ def _flag_candidate(bars, offset, atr, pole_bars=5, consolidation_bars=4):
     score = round(100 * (.30 * pole_strength + .28 * retracement_fit +
                          .25 * compression_fit + .17 * countertrend_fit))
     buffer = max(.12*atr, bars[-1][4]*.000012)
-    trigger = tail_high + buffer if direction > 0 else tail_low
+    # Apply the same noise margin to bearish support breaks as bullish
+    # resistance breaks; touching the flag boundary alone is not a breakout.
+    trigger = tail_high + buffer if direction > 0 else tail_low - buffer
     invalidation = end_price - direction*.75*size
     return {"pattern": "BULL_FLAG" if direction > 0 else "BEAR_FLAG",
             "bias": "UP" if direction > 0 else "DOWN",
