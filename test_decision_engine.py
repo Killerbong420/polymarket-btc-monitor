@@ -157,6 +157,25 @@ class ForwardEvaluationTests(unittest.TestCase):
         self.assertEqual(g["by_quality"]["MIXED"]["wins"],1)
         self.assertEqual(g["by_quality"]["MIXED"]["accuracy_pct"],100)
 
+    def test_new_decision_version_does_not_mix_with_v1_accuracy(self):
+        def row(market, version):
+            calls = {"GUARDED_PRIMARY": {
+                "source": version, "status": "available",
+                "direction": "UP", "confidence": "MIXED",
+                "forecast_final_mean_usd": 101}}
+            return (market, "HALFWAY", "timestamp", "{}",
+                    json.dumps(calls), "UP", 101)
+        result = evaluate_guarded([
+            row("m1", "guarded-path-primary-v1"),
+            row("m2", "guarded-path-primary-v2"),
+        ])
+        self.assertEqual(len(result["results"]), 2)
+        counts = {g["version"]: g["settled"] for g in result["results"]}
+        self.assertEqual(counts, {
+            "guarded-path-primary-v1": 1,
+            "guarded-path-primary-v2": 1,
+        })
+
 
 if __name__ == "__main__":
     unittest.main()
