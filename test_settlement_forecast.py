@@ -63,6 +63,30 @@ class FutureSettlementTests(unittest.TestCase):
         self.assertEqual(f["modeled_final_minute_seconds"],29)
         self.assertAlmostEqual(f["forecast_final_mean_usd"],100.0,places=2)
 
+    def test_trailing_unpublished_final_minute_ticks_limit_forecast_quality(self):
+        from decision_engine import guarded_decision
+
+        ref, ext, target, left, now = context(
+            movement=.002, seconds_left=30, target=101.0)
+        # The final ten elapsed seconds have no published BRTI observations,
+        # even though the reference feed is within its 15-second freshness SLA.
+        ref["points"] = [(t, p) for t, p in ref["points"] if t <= now - 10]
+        projected = forecast_settlement(ref, ext, target, left, now=now)
+
+        self.assertEqual(projected["status"], "available")
+        self.assertEqual(projected["observed_final_minute_seconds"], 21)
+        self.assertEqual(projected["modeled_final_minute_seconds"], 39)
+        self.assertGreaterEqual(projected["missing_past_final_minute_seconds"], 8)
+        self.assertEqual(projected["quality"], "LIMITED")
+
+        # A recent-but-gapped feed may be displayed as a scenario, but must
+        # never pass the observed-quality gate for the guarded decision.
+        verified_ref = {**ref, "source": "Polymarket US BTC reference / BRTI",
+                        "age_seconds": 10}
+        decision = guarded_decision(projected, verified_ref, target, left)
+        self.assertEqual(decision["direction"], "WAIT")
+        self.assertEqual(decision["status"], "unavailable")
+
     def test_price_itself_decides_AI_direction(self):
         ref,ext,target,left,now=context(movement=.003,target=101.37)
         ext["settlement_forecast"]=forecast_settlement(ref,ext,target,left,now=now)
