@@ -3,7 +3,7 @@ import math
 import unittest
 from pathlib import Path
 
-from early_pattern_context import analyze_early_patterns, _double_turn
+from early_pattern_context import analyze_early_patterns, _double_turn, _flag_candidate
 
 
 def make_bars(pole=1, extend=None):
@@ -43,6 +43,25 @@ class EarlyPatternContextTests(unittest.TestCase):
                 self.assertNotIn("win_probability",result)
                 self.assertNotIn("predicted_outcome",result)
                 self.assertEqual(bars,original)
+
+    def test_bull_and_bear_flag_triggers_have_mirrored_noise_buffers(self):
+        for sign, pattern in ((1, "BULL_FLAG"), (-1, "BEAR_FLAG")):
+            with self.subTest(pattern=pattern):
+                sample = make_bars(sign)
+                atr = 12.0
+                candidate = _flag_candidate(sample, offset=0, atr=atr)
+                self.assertIsNotNone(candidate)
+                self.assertEqual(candidate["pattern"], pattern)
+                # The consolidation occupies the last four completed bars.
+                tail = sample[-4:]
+                margin = max(.12 * atr, sample[-1][4] * .000012)
+                expected = (max(bar[2] for bar in tail) + margin if sign > 0
+                            else min(bar[1] for bar in tail) - margin)
+                self.assertAlmostEqual(candidate["trigger"], expected)
+                if sign < 0:
+                    self.assertLess(candidate["trigger"], min(bar[1] for bar in tail))
+                else:
+                    self.assertGreater(candidate["trigger"], max(bar[2] for bar in tail))
 
     def test_breakout_then_retest_are_distinguished(self):
         for sign in (1,-1):
