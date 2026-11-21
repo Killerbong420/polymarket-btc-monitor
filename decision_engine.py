@@ -5,7 +5,7 @@ and the displayed historical AI scoreboard remain independent and immutable.
 """
 import math
 
-VERSION = "guarded-path-primary-v1"
+VERSION = "guarded-path-primary-v2"
 INDEX_SOURCE = "Polymarket US BTC reference / BRTI"
 
 
@@ -102,6 +102,26 @@ def guarded_decision(path, reference, official_target, seconds_left,
             or forecast <= 0 or current <= 0 or vol <= 0
             or path_target is None or abs(path_target-target) > .02):
         return {**base, "reason": "Invalid or target-mismatched path numbers"}
+
+    # Never combine a forecast with another market's reference or a delayed
+    # observation. Both must describe the same contemporaneous BRTI snapshot.
+    # These fields are emitted by forecast_settlement and the official feed,
+    # not invented from Coinbase spot or a local wall-clock market boundary.
+    if (path.get("quantity") != "future_final_60_second_BRTI_average"
+            or path.get("source") != "Polymarket US public BRTI reference"):
+        return {**base, "reason": "Unverified BRTI settlement path provenance"}
+    ref_price = finite(reference.get("price"))
+    ref_age = finite(reference.get("age_seconds"))
+    path_age = finite(path.get("age_seconds"))
+    path_left = finite(path.get("seconds_to_settlement"))
+    if (ref_price is None or ref_price <= 0 or ref_age is None
+            or path_age is None or path_left is None
+            or not 0 <= ref_age <= 15 or not 0 <= path_age <= 15):
+        return {**base, "reason": "Missing or stale BRTI snapshot metadata"}
+    if (abs(ref_price - current) > .05
+            or abs(ref_age - path_age) > 8
+            or abs(path_left - left) > 2):
+        return {**base, "reason": "Mismatched BRTI snapshot or settlement horizon"}
 
     # Hard-coded prospective policy, not a fit on the outcome being predicted.
     regime = "EARLY" if left > 600 else "HALFWAY" if left > 300 else "LATE"

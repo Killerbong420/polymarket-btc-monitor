@@ -28,7 +28,10 @@ def evaluate_guarded(rows):
         if not isinstance(snap,dict) or not isinstance(calls,dict):
             continue
         guarded=calls.get("GUARDED_PRIMARY") or {}
-        if not isinstance(guarded,dict) or guarded.get("source")!="guarded-path-primary-v1":
+        # Keep historical v1 scores separate from the stronger v2 input
+        # validation. Different decision versions are never pooled together.
+        if (not isinstance(guarded,dict) or guarded.get("source") not in
+                ("guarded-path-primary-v1", "guarded-path-primary-v2")):
             continue
         version=guarded["source"]
         key=(market,checkpoint,version)

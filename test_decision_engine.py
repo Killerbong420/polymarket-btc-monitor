@@ -9,12 +9,15 @@ from forecast_guard import validate_official_target
 
 def reference():
     return {"status": "fresh", "source": "Polymarket US BTC reference / BRTI",
-            "age_seconds": 2,
+            "price": 100, "age_seconds": 2,
             "points": [(t, 100 + .01*t) for t in range(180)]}
 
 
-def path():
+def path(seconds_left=450):
     return {"status": "available", "quality": "OBSERVED",
+            "quantity": "future_final_60_second_BRTI_average",
+            "source": "Polymarket US public BRTI reference",
+            "age_seconds": 2, "seconds_to_settlement": seconds_left,
             "target_usd": 100, "current_reference_usd": 100,
             "forecast_final_mean_usd": 101,
             "volatility_reference_usd_per_min": .4,
@@ -31,9 +34,9 @@ class GuardedDecisionTests(unittest.TestCase):
         self.assertEqual(reversal_evidence(missing, 450)["status"], "unavailable")
 
     def test_far_horizon_shrinks_not_copies_current(self):
-        early=guarded_decision(path(), reference(), 100, 720)
+        early=guarded_decision(path(720), reference(), 100, 720)
         halfway=guarded_decision(path(), reference(), 100, 450)
-        late=guarded_decision(path(), reference(), 100, 180)
+        late=guarded_decision(path(180), reference(), 100, 180)
         self.assertEqual(early["status"], "available")
         self.assertEqual(early["forecast_final_mean_usd"], 100.35)
         self.assertEqual(halfway["forecast_final_mean_usd"], 100.75)
@@ -46,6 +49,28 @@ class GuardedDecisionTests(unittest.TestCase):
         self.assertEqual(guarded_decision(path(),stale,100,450)["direction"], "WAIT")
         self.assertEqual(guarded_decision(path(),reference(),101,450)["status"], "unavailable")
         self.assertEqual(guarded_decision({**path(),"quality":"LIMITED"},reference(),100,450)["status"], "unavailable")
+
+    def test_guarded_decision_requires_same_fresh_brtI_snapshot(self):
+        expected = guarded_decision(path(), reference(), 100, 450)
+        self.assertEqual(expected["status"], "available")
+        self.assertEqual(expected["version"], "guarded-path-primary-v2")
+
+        cases = [
+            ({**reference(), "age_seconds": 24}, path()),
+            (reference(), {**path(), "age_seconds": 18}),
+            (reference(), {**path(), "seconds_to_settlement": 410}),
+            ({**reference(), "price": 100.5}, path()),
+            (reference(), {**path(), "quantity": "spot_at_expiry"}),
+            (reference(), {**path(), "source": "Coinbase Exchange BTC-USD"}),
+            (reference(), {k: v for k, v in path().items()
+                           if k != "seconds_to_settlement"}),
+        ]
+        for ref, forecast in cases:
+            with self.subTest(ref=ref, path=forecast):
+                result = guarded_decision(forecast, ref, 100, 450)
+                self.assertEqual(result["status"], "unavailable")
+                self.assertEqual(result["direction"], "WAIT")
+                self.assertNotIn("forecast_final_mean_usd", result)
 
     def test_material_target_discrepancy_suppresses_guarded_and_manual_entry(self):
         major = validate_official_target(100, {
@@ -72,9 +97,9 @@ class GuardedDecisionTests(unittest.TestCase):
                                           target_validation=incomplete)["status"], "available")
 
     def test_ai_adjustment_bounded_and_optional(self):
-        base=guarded_decision(path(),reference(),100,180)
-        distant=guarded_decision(path(),reference(),100,180,ai_forecast=200)
-        close=guarded_decision(path(),reference(),100,180,ai_forecast=102)
+        base=guarded_decision(path(180),reference(),100,180)
+        distant=guarded_decision(path(180),reference(),100,180,ai_forecast=200)
+        close=guarded_decision(path(180),reference(),100,180,ai_forecast=102)
         self.assertEqual(base["forecast_final_mean_usd"],distant["forecast_final_mean_usd"])
         self.assertLessEqual(abs(close["forecast_final_mean_usd"]-base["forecast_final_mean_usd"]),.05)
         self.assertFalse(close["calibrated_probability"])
@@ -82,11 +107,11 @@ class GuardedDecisionTests(unittest.TestCase):
     def test_reversal_direction_adjustment_bounded(self):
         signal={"status":"observed","reversal":True,"short_usd_per_min":-10,
                 "long_usd_per_min":2}
-        result=guarded_decision(path(),reference(),100,180,reversal=signal)
+        result=guarded_decision(path(180),reference(),100,180,reversal=signal)
         self.assertEqual(result["reversal_adjustment_usd"],-.1)
 
     def test_entry_review_is_cost_aware_and_manual(self):
-        candidate=guarded_decision(path(),reference(),100,180)
+        candidate=guarded_decision(path(180),reference(),100,180)
         quote={"status":"available","market":"m","up_entry":.88,"down_entry":.12}
         expensive=manual_entry_review(candidate,quote,"m")
         self.assertEqual(expensive["action"],"AVOID_HIGH_PRICE")
@@ -131,6 +156,25 @@ class ForwardEvaluationTests(unittest.TestCase):
         self.assertEqual(g["by_quality"]["MIXED"]["settled"],1)
         self.assertEqual(g["by_quality"]["MIXED"]["wins"],1)
         self.assertEqual(g["by_quality"]["MIXED"]["accuracy_pct"],100)
+
+    def test_new_decision_version_does_not_mix_with_v1_accuracy(self):
+        def row(market, version):
+            calls = {"GUARDED_PRIMARY": {
+                "source": version, "status": "available",
+                "direction": "UP", "confidence": "MIXED",
+                "forecast_final_mean_usd": 101}}
+            return (market, "HALFWAY", "timestamp", "{}",
+                    json.dumps(calls), "UP", 101)
+        result = evaluate_guarded([
+            row("m1", "guarded-path-primary-v1"),
+            row("m2", "guarded-path-primary-v2"),
+        ])
+        self.assertEqual(len(result["results"]), 2)
+        counts = {g["version"]: g["settled"] for g in result["results"]}
+        self.assertEqual(counts, {
+            "guarded-path-primary-v1": 1,
+            "guarded-path-primary-v2": 1,
+        })
 
 
 if __name__ == "__main__":
