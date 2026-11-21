@@ -139,7 +139,9 @@ def forecast_settlement(reference, external, target, seconds_left, now=None):
             known += 1
         else:
             # A published gap is never counted as an observed BRTI tick.
-            if t <= last_t:
+            # Count every fully elapsed but unpublished final-minute second,
+            # including ticks newer than last_t that have not arrived.
+            if t + 1 <= now:
                 missing_past += 1
             actual_future.append(estimate_at(t))
             projected += 1
